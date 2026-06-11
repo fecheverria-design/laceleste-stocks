@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Env (los reales jamás se commitean; solo .env.example se versiona)
+.env
+.env.*
+!.env.example
+
+# Builds
+dist/
+build/
+backend/dist/
+frontend/dist/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Coverage / test output
+coverage/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Vite
+frontend/.vite/

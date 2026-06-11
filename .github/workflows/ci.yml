@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - dev
+      - 'feat/**'
+  pull_request:
+    branches:
+      - dev
+      - main
+
+jobs:
+  build:
+    name: lint · typecheck · test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: laceleste
+          POSTGRES_PASSWORD: laceleste_dev
+          POSTGRES_DB: laceleste_movimientos_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U laceleste -d laceleste_movimientos_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # El test de conexión lee esta variable. Apunta al service de arriba.
+      DATABASE_URL_TEST: postgresql://laceleste:laceleste_dev@localhost:5432/laceleste_movimientos_test
+      DATABASE_URL: postgresql://laceleste:laceleste_dev@localhost:5432/laceleste_movimientos_test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
