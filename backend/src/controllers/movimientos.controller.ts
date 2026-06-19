@@ -1,11 +1,13 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { AppError, badRequest } from '../domain/errors.js';
-import { AbastecimientoSchema, MovimientosQuerySchema } from '../domain/movimientos.schema.js';
+import { AbastecimientoSchema, EditarMovimientoSchema, MovimientosQuerySchema } from '../domain/movimientos.schema.js';
 import { resolverUsuarioIntegracion } from '../repositories/movimientos.repository.js';
 import {
   anularMovimiento,
+  editarMovimiento,
   listarMovimientos,
+  obtenerHistorial,
   obtenerMovimientoPorId,
   obtenerStock,
   registrarAbastecimiento,
@@ -78,6 +80,35 @@ export async function getMovimiento(req: Request, res: Response): Promise<void> 
   }
   const movimiento = await obtenerMovimientoPorId(parsed.data.id);
   res.status(200).json(movimiento);
+}
+
+// PUT /api/movimientos/:id — editar (reemplazo completo). Cualquier usuario logueado.
+// Recalcula stock y deja historial del cambio (regla #4 relajada + regla #7).
+export async function putEditarMovimiento(req: Request, res: Response): Promise<void> {
+  const idParsed = IdParamSchema.safeParse(req.params);
+  if (!idParsed.success) {
+    throw badRequest('VALIDACION', z.prettifyError(idParsed.error));
+  }
+  const bodyParsed = EditarMovimientoSchema.safeParse(req.body);
+  if (!bodyParsed.success) {
+    throw badRequest('VALIDACION', z.prettifyError(bodyParsed.error));
+  }
+  if (!req.user) {
+    throw new AppError('NO_AUTENTICADO', 'Falta autenticación', 401);
+  }
+
+  const movimiento = await editarMovimiento(idParsed.data.id, bodyParsed.data, { usuarioId: req.user.id });
+  res.status(200).json(movimiento);
+}
+
+// GET /api/movimientos/:id/historial — ediciones del movimiento (más reciente primero).
+export async function getHistorial(req: Request, res: Response): Promise<void> {
+  const parsed = IdParamSchema.safeParse(req.params);
+  if (!parsed.success) {
+    throw badRequest('VALIDACION', z.prettifyError(parsed.error));
+  }
+  const historial = await obtenerHistorial(parsed.data.id);
+  res.status(200).json(historial);
 }
 
 const StockQuerySchema = z.object({

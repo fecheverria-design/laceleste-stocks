@@ -138,3 +138,23 @@ export const movimientosDetalle = pgTable(
     check('chk_real_positiva', sql`${t.cantidadReal} >= 0`),
   ],
 );
+
+// Historial de ediciones (regla #4 relajada 2026-06-19: el confirmado es editable,
+// pero queda rastro). Una fila por edición; `cambios` lista qué campos cambiaron con
+// su valor antes/después, para poder conciliar correcciones con 3c (regla #7).
+export const movimientosAuditoria = pgTable(
+  'movimientos_auditoria',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    movimientoId: bigint('movimiento_id', { mode: 'number' })
+      .notNull()
+      .references(() => movimientos.id),
+    usuarioId: integer('usuario_id')
+      .notNull()
+      .references(() => usuarios.id),
+    accion: varchar('accion', { length: 16 }).notNull(), // 'EDICION' (futuro: otras)
+    cambios: jsonb('cambios').notNull(), // [{ campo, antes, despues }]
+    creadoEn: timestamp('creado_en', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('idx_audit_mov').on(t.movimientoId)],
+);

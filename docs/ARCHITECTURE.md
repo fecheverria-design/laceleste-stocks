@@ -302,7 +302,7 @@ El abastecimiento llega desde la app del compañero por **API REST**: un POST co
 
 ## 9. Endpoints REST
 
-Patrón `/api/...`, JWT en header `Authorization: Bearer`. **Protección (Fase 1):** lecturas de movimientos/stock requieren login (cualquier rol); `anular` requiere rol **ADMIN** (DEPOSITO no anula); `login` es público; `abastecimientos` es M2M (abierto por ahora). El middleware `requireAuth`/`requireRole` cuelga `req.user` desde el token.
+Patrón `/api/...`, JWT en header `Authorization: Bearer`. **Protección (Fase 1):** lecturas de movimientos/stock e **historial** requieren login (cualquier rol); **editar** (`PUT /movimientos/:id`) lo puede hacer cualquier rol logueado (queda en el historial); `anular` requiere rol **ADMIN** (DEPOSITO no anula); `login` es público; `abastecimientos` es M2M (abierto por ahora). El middleware `requireAuth`/`requireRole` cuelga `req.user` desde el token.
 
 | Método | Path | Descripción |
 |---|---|---|
@@ -312,6 +312,8 @@ Patrón `/api/...`, JWT en header `Authorization: Bearer`. **Protección (Fase 1
 | POST | `/api/movimientos` | Crear movimiento en BORRADOR |
 | GET | `/api/movimientos` | **Listar con filtros: `desde`, `hasta`, `tipo`, `ubicacion`, `estado` + paginado (`page`/`limit`). Devuelve `{items, page, limit, total}`. `ubicacion` matchea origen O destino. Implementado en Fase 1.** |
 | GET | `/api/movimientos/:id` | **Detalle (cabecera + renglones). 404 si no existe. Implementado en Fase 1.** |
+| PUT | `/api/movimientos/:id` | **Editar (reemplazo completo, cualquier rol logueado). Recalcula stock + deja historial. 409 si ANULADO. Implementado en Fase 1.** |
+| GET | `/api/movimientos/:id/historial` | **Ediciones del movimiento (auditoría). Requiere login. Implementado en Fase 1.** |
 | PUT | `/api/movimientos/:id/confirmar` | BORRADOR → CONFIRMADO. Asigna nro, descuenta stock. **Transaccional.** |
 | PUT | `/api/movimientos/:id/anular` | CONFIRMADO → ANULADO. **Flip de estado + sellos (anulado_por/anulado_en), transaccional. Implementado en Fase 1.** No genera contramovimiento. |
 | GET | `/api/movimientos/export` | Export Excel (mismos filtros que el listado) |

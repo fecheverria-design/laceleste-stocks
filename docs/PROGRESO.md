@@ -3,10 +3,10 @@
 > Estado para retomar fácil. Última actualización: 2026-06-19.
 
 ## ⏱️ AL VOLVER (mañana) — empezá por acá
-1. **Increments 1-4 + auth, commiteados y pusheados** en `feat/movimientos-fase1-backend` (37 tests verdes).
+1. **Increments 1-6 + auth + git estructural, commiteados y pusheados** en `feat/movimientos-fase1-backend` (44 tests verdes).
 2. **🔴 ACCIÓN MANUAL TUYA — cambiar default branch a `main` en GitHub**: ya creé y pusheé `main` (desde el scaffold de Fase 0) y `dev` (desde main), pero `gh`/token no están, así que la default del remoto sigue siendo `feat/movimientos-fase0-setup`. Settings → Branches (o General) → Default branch → `main`. Después podés borrar `feat/movimientos-fase0-setup`.
 3. **Abrir el PR de Fase 1 → `dev`**: base `dev` ← `feat/movimientos-fase1-backend`. Link: https://github.com/fecheverria-design/laceleste-stocks/compare/dev...feat/movimientos-fase1-backend
-4. **Próximo slice — a elegir**: **idempotencia del POST** (necesita acordar contrato con el compañero) · export Excel / kardex / sincronizar-3c · anular desde el front (ya hay rol ADMIN) · API key para `abastecimientos` (M2M).
+4. **Próximo slice — a elegir**: **editar desde el front** (UI: el backend ya está; necesita enriquecer `GET /:id` para round-trip + un form; tipo/origen/destino editables piden selects de catálogo → endpoints GET ubicaciones/productos/tipos) · **idempotencia del POST** (necesita acordar contrato con el compañero) · export Excel / kardex / sincronizar-3c · API key para `abastecimientos` (M2M).
 5. **Contrato del POST**: validar supuestos con el compañero (ver "Supuestos del contrato del POST"), sobre todo **idempotencia** (hoy un re-push duplica).
 6. Docker corre desde `D:\DockerData`; levantar Docker Desktop si está apagado y `docker compose up -d`. **Datos de demo**: `npm -w backend run db:seed:dev` carga 3 ubicaciones, 4 productos, 5 movimientos (2 recepciones + 2 RINT + 1 anulado) **+ usuarios de login** (`admin@laceleste.local` / `deposito@laceleste.local`, pass `laceleste123`) — idempotente. Para ver el front: backend `npm -w backend run dev` (3000) + frontend `npm -w frontend run dev` (5173) → http://localhost:5173.
 
@@ -74,6 +74,13 @@ Branch `feat/movimientos-fase1-backend`.
 - **Front**: `LoginPage`, `AuthProvider` + `useAuth`, guarda `RequireAuth`, Bearer automático en el cliente HTTP + manejo de 401 (cierra sesión), header con usuario/rol + botón Salir.
 - **Tests**: login OK/credenciales inválidas/usuario inactivo, firma+verificación de token, `requireAuth` (sin header / token malo / OK), `requireRole` (permite/deniega 403). Verificado end-to-end por HTTP: 401 sin token, 200 con token, 403 DEPOSITO→anular.
 - **Usuarios dev** en `db:seed:dev` (admin/deposito, pass `laceleste123`).
+
+### ✅ Increment 6 — Editar movimiento con historial (HECHO, 7 tests nuevos = 44 verdes)
+- **Regla #4 relajada (decisión de J 2026-06-19)**: auditabilidad sobre inmutabilidad. Los movimientos **se editan** (cualquier usuario logueado, sin restricción de rol), pero **toda edición deja historial**. Anular sigue siendo solo-ADMIN y de vez en cuando.
+- **`PUT /api/movimientos/:id`**: reemplazo completo (todo editable, incluido tipo/origen/destino). Transaccional (regla #6): valida refs → actualiza cabecera + renglones → registra diff en `movimientos_auditoria` → recalcula stock. 409 si el movimiento está ANULADO.
+- **`GET /api/movimientos/:id/historial`**: lista las ediciones (quién/cuándo/qué cambió, valor antes/después).
+- **Tabla nueva** `movimientos_auditoria` (migración `0002`): una fila por edición, `cambios` JSONB con el diff. Aplicada en dev; `globalSetup` la aplica en test.
+- **Tests**: editar cantidad recalcula stock + historial, cambio de producto mueve stock, edición descriptiva no toca stock, edición sin cambios no genera historial, 404 inexistente, 409 anulado, rollback transaccional. Verificado e2e por HTTP (1350→1380 + historial con diff).
 
 ### ✅ Estructura git (HECHO)
 - Creadas y pusheadas `main` (desde scaffold Fase 0 = baseline desplegable) y `dev` (desde main). Falta el paso manual: setear `main` como default branch en GitHub (no hay `gh`/token). Las fases mergean por PR a `dev`; `dev`→`main` al liberar.

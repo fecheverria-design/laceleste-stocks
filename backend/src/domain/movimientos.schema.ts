@@ -68,3 +68,22 @@ export const MovimientosQuerySchema = z
   });
 
 export type MovimientosQuery = z.infer<typeof MovimientosQuerySchema>;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Edición de un movimiento (regla #4 relajada 2026-06-19: editable con historial).
+// Reemplazo COMPLETO: el cliente manda el estado nuevo entero (cabecera + renglones).
+// Todo es editable, incluido tipo/origen/destino (decisión de J). El stock se
+// recalcula y el cambio queda auditado. `tipo` se valida como codigo del catálogo.
+// ─────────────────────────────────────────────────────────────────────────────
+export const EditarMovimientoSchema = z.object({
+  tipo: z.string().trim().min(1).max(16), // codigo de tipos_movimiento
+  origen_dep_id_3c: z.number().int().positive(),
+  destino_dep_id_3c: z.number().int().positive(),
+  fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Formato esperado YYYY-MM-DD'),
+  turno: z.enum(['MAÑANA', 'TARDE']).optional(),
+  proyeccion: z.enum(['MIN', 'MED', 'MAX', 'ESP']).optional(),
+  observaciones: z.string().trim().max(500).optional(),
+  detalle: z.array(RenglonAbastecimientoSchema).min(1, 'El movimiento necesita al menos un renglón'),
+});
+
+export type EditarMovimientoInput = z.infer<typeof EditarMovimientoSchema>;

@@ -1,25 +1,34 @@
 import { env } from '../config/env.js';
 import { db } from '../db/client.js';
 import { AppError, badRequest, conflict, notFound } from '../domain/errors.js';
-import type { AbastecimientoInput } from '../domain/movimientos.schema.js';
+import type { AbastecimientoInput, EditarMovimientoInput } from '../domain/movimientos.schema.js';
 import {
+  actualizarCabecera,
   bloquearMovimiento,
+  borrarDetalle,
   buscarUbicacionPorDep3c,
   consultarStock,
   contarMovimientos,
   generarNro,
+  insertarAuditoria,
   insertarCabecera,
   insertarDetalle,
+  leerSnapshotMovimiento,
   listarMovimientos as repoListarMovimientos,
   marcarAnulado,
+  obtenerAuditoria,
   obtenerMovimiento,
   productosExistentes,
   refrescarStock,
   tipoPorCodigo,
+  type CambioAuditoria,
+  type FilaAuditoria,
   type FilaStock,
   type ListaFiltros,
   type MovimientoConDetalle,
   type MovimientoResumen,
+  type RenglonSnapshot,
+  type SnapshotMovimiento,
 } from '../repositories/movimientos.repository.js';
 
 export interface RegistrarAbastecimientoOpts {
@@ -188,6 +197,148 @@ export async function obtenerMovimientoPorId(id: number): Promise<MovimientoConD
   const mov = await obtenerMovimiento(db, id);
   if (!mov) throw notFound('MOVIMIENTO_NO_ENCONTRADO', `No existe el movimiento id=${id}`);
   return mov;
+}
+
+export interface EditarMovimientoOpts {
+  usuarioId: number; // quién edita (queda en el historial)
+}
+
+// Normaliza renglones a una forma comparable (cantidades como número) para el diff.
+function renglonesComparables(detalle: RenglonSnapshot[]): unknown {
+  return detalle.map((r) => ({
+    producto_3c: r.producto_3c,
+    cantidad_real: Number(r.cantidad_real),
+    cantidad_sugerida: r.cantidad_sugerida === null ? null : Number(r.cantidad_sugerida),
+    stock_contado: r.stock_contado === null ? null : Number(r.stock_contado),
+    unidad: r.unidad,
+    observaciones: r.observaciones ?? null,
+  }));
+}
+
+function snapshotDesdeInput(input: EditarMovimientoInput): Omit<SnapshotMovimiento, 'estado'> {
+  return {
+    tipo: input.tipo,
+    origen_dep_id_3c: input.origen_dep_id_3c,
+    destino_dep_id_3c: input.destino_dep_id_3c,
+    fecha: input.fecha,
+    turno: input.turno ?? null,
+    proyeccion: input.proyeccion ?? null,
+    observaciones: input.observaciones ?? null,
+    detalle: input.detalle.map((r) => ({
+      producto_3c: r.producto_3c,
+      cantidad_real: String(r.cantidad_real),
+      cantidad_sugerida: r.cantidad_sugerida === undefined ? null : String(r.cantidad_sugerida),
+      stock_contado: r.stock_contado === undefined ? null : String(r.stock_contado),
+      unidad: r.unidad,
+      observaciones: r.observaciones ?? null,
+    })),
+  };
+}
+
+function diffSnapshots(antes: SnapshotMovimiento, despues: Omit<SnapshotMovimiento, 'estado'>): CambioAuditoria[] {
+  const cambios: CambioAuditoria[] = [];
+  const escalares = [
+    'tipo',
+    'origen_dep_id_3c',
+    'destino_dep_id_3c',
+    'fecha',
+    'turno',
+    'proyeccion',
+    'observaciones',
+  ] as const;
+  for (const campo of escalares) {
+    if (antes[campo] !== despues[campo]) {
+      cambios.push({ campo, antes: antes[campo], despues: despues[campo] });
+    }
+  }
+  const detAntes = renglonesComparables(antes.detalle);
+  const detDespues = renglonesComparables(despues.detalle);
+  if (JSON.stringify(detAntes) !== JSON.stringify(detDespues)) {
+    cambios.push({ campo: 'detalle', antes: detAntes, despues: detDespues });
+  }
+  return cambios;
+}
+
+// Edición de un movimiento (regla #4 relajada: editable con historial). Reemplazo
+// completo en una tx (regla #6): valida referencias, actualiza cabecera + renglones,
+// registra el diff en movimientos_auditoria (regla #7) y recalcula el stock.
+// Cualquier usuario logueado puede editar; un ANULADO no se edita.
+export async function editarMovimiento(
+  id: number,
+  input: EditarMovimientoInput,
+  opts: EditarMovimientoOpts,
+): Promise<MovimientoConDetalle> {
+  return db.transaction(async (tx) => {
+    const antes = await leerSnapshotMovimiento(tx, id);
+    if (!antes) {
+      throw notFound('MOVIMIENTO_NO_ENCONTRADO', `No existe el movimiento id=${id}`);
+    }
+    if (antes.estado === 'ANULADO') {
+      throw conflict('MOVIMIENTO_ANULADO', 'No se puede editar un movimiento anulado');
+    }
+
+    const origen = await buscarUbicacionPorDep3c(tx, input.origen_dep_id_3c);
+    if (!origen) {
+      throw notFound('UBICACION_NO_ENCONTRADA', `No existe ubicación con dep_id_3c=${input.origen_dep_id_3c} (origen)`);
+    }
+    const destino = await buscarUbicacionPorDep3c(tx, input.destino_dep_id_3c);
+    if (!destino) {
+      throw notFound(
+        'UBICACION_NO_ENCONTRADA',
+        `No existe ubicación con dep_id_3c=${input.destino_dep_id_3c} (destino)`,
+      );
+    }
+    const tipo = await tipoPorCodigo(tx, input.tipo);
+    if (!tipo) {
+      throw badRequest('TIPO_INVALIDO', `Tipo de movimiento desconocido: ${input.tipo}`);
+    }
+
+    const codigos = input.detalle.map((r) => r.producto_3c);
+    const existentes = await productosExistentes(tx, codigos);
+    const faltan = [...new Set(codigos)].filter((c) => !existentes.has(c));
+    if (faltan.length > 0) {
+      throw notFound('PRODUCTO_NO_ENCONTRADO', `Productos inexistentes en el maestro: ${faltan.join(', ')}`);
+    }
+
+    await actualizarCabecera(tx, id, {
+      tipoId: tipo.id,
+      origenId: origen.id,
+      destinoId: destino.id,
+      fecha: input.fecha,
+      turno: input.turno,
+      proyeccion: input.proyeccion,
+      observaciones: input.observaciones,
+    });
+    await borrarDetalle(tx, id);
+    await insertarDetalle(
+      tx,
+      id,
+      input.detalle.map((r) => ({
+        producto3c: r.producto_3c,
+        cantidadReal: r.cantidad_real.toString(),
+        cantidadSugerida: r.cantidad_sugerida?.toString(),
+        stockContado: r.stock_contado?.toString(),
+        unidad: r.unidad,
+        observaciones: r.observaciones,
+      })),
+    );
+
+    const cambios = diffSnapshots(antes, snapshotDesdeInput(input));
+    if (cambios.length > 0) {
+      await insertarAuditoria(tx, { movimientoId: id, usuarioId: opts.usuarioId, accion: 'EDICION', cambios });
+    }
+
+    // El stock puede cambiar (cantidad, tipo, origen/destino): recalcular en la misma tx.
+    await refrescarStock(tx);
+
+    const actualizado = await obtenerMovimiento(tx, id);
+    if (!actualizado) throw new AppError('INTERNAL', 'No se pudo releer el movimiento editado', 500);
+    return actualizado;
+  });
+}
+
+export async function obtenerHistorial(id: number): Promise<FilaAuditoria[]> {
+  return obtenerAuditoria(id);
 }
 
 export async function obtenerStock(filtros: {

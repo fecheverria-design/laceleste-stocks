@@ -3,6 +3,7 @@ import { alias } from 'drizzle-orm/pg-core';
 import { db, type Tx } from '../db/client.js';
 import {
   movimientos,
+  movimientosAuditoria,
   movimientosDetalle,
   productos,
   tiposMovimiento,
@@ -160,6 +161,150 @@ export async function marcarAnulado(tx: Tx, id: number, usuarioId: number): Prom
     .update(movimientos)
     .set({ estado: 'ANULADO', anuladoPor: usuarioId, anuladoEn: sql`now()` })
     .where(eq(movimientos.id, id));
+}
+
+// ── Edición (dentro de la tx) ────────────────────────────────────────────────
+
+export interface RenglonSnapshot {
+  producto_3c: string;
+  cantidad_real: string;
+  cantidad_sugerida: string | null;
+  stock_contado: string | null;
+  unidad: string;
+  observaciones: string | null;
+}
+
+export interface SnapshotMovimiento {
+  estado: string;
+  tipo: string; // codigo
+  origen_dep_id_3c: number;
+  destino_dep_id_3c: number;
+  fecha: string;
+  turno: string | null;
+  proyeccion: string | null;
+  observaciones: string | null;
+  detalle: RenglonSnapshot[];
+}
+
+// Lee el estado actual del movimiento (cabecera + renglones) para usarlo como
+// "antes" en el historial de edición. dep_id_3c y tipo codigo = el lenguaje del dominio.
+export async function leerSnapshotMovimiento(tx: Tx, id: number): Promise<SnapshotMovimiento | undefined> {
+  const origen = alias(ubicaciones, 'origen_snap');
+  const destino = alias(ubicaciones, 'destino_snap');
+  const [cab] = await tx
+    .select({
+      estado: movimientos.estado,
+      tipo: tiposMovimiento.codigo,
+      origen_dep_id_3c: origen.depId3c,
+      destino_dep_id_3c: destino.depId3c,
+      fecha: movimientos.fecha,
+      turno: movimientos.turno,
+      proyeccion: movimientos.proyeccion,
+      observaciones: movimientos.observaciones,
+    })
+    .from(movimientos)
+    .innerJoin(tiposMovimiento, eq(tiposMovimiento.id, movimientos.tipoId))
+    .innerJoin(origen, eq(origen.id, movimientos.origenId))
+    .innerJoin(destino, eq(destino.id, movimientos.destinoId))
+    .where(eq(movimientos.id, id))
+    .limit(1);
+  if (!cab) return undefined;
+
+  const detalle = await tx
+    .select({
+      producto_3c: movimientosDetalle.producto3c,
+      cantidad_real: movimientosDetalle.cantidadReal,
+      cantidad_sugerida: movimientosDetalle.cantidadSugerida,
+      stock_contado: movimientosDetalle.stockContado,
+      unidad: movimientosDetalle.unidad,
+      observaciones: movimientosDetalle.observaciones,
+    })
+    .from(movimientosDetalle)
+    .where(eq(movimientosDetalle.movimientoId, id))
+    .orderBy(movimientosDetalle.id);
+
+  return { ...cab, detalle };
+}
+
+export async function actualizarCabecera(
+  tx: Tx,
+  id: number,
+  data: {
+    tipoId: number;
+    origenId: number;
+    destinoId: number;
+    fecha: string;
+    turno?: string;
+    proyeccion?: string;
+    observaciones?: string;
+  },
+): Promise<void> {
+  // Reemplazo completo: lo no enviado vuelve a null (no es un PATCH parcial).
+  await tx
+    .update(movimientos)
+    .set({
+      tipoId: data.tipoId,
+      origenId: data.origenId,
+      destinoId: data.destinoId,
+      fecha: data.fecha,
+      turno: data.turno ?? null,
+      proyeccion: data.proyeccion ?? null,
+      observaciones: data.observaciones ?? null,
+    })
+    .where(eq(movimientos.id, id));
+}
+
+export async function borrarDetalle(tx: Tx, movimientoId: number): Promise<void> {
+  await tx.delete(movimientosDetalle).where(eq(movimientosDetalle.movimientoId, movimientoId));
+}
+
+export interface CambioAuditoria {
+  campo: string;
+  antes: unknown;
+  despues: unknown;
+}
+
+export async function insertarAuditoria(
+  tx: Tx,
+  data: { movimientoId: number; usuarioId: number; accion: string; cambios: CambioAuditoria[] },
+): Promise<void> {
+  await tx.insert(movimientosAuditoria).values({
+    movimientoId: data.movimientoId,
+    usuarioId: data.usuarioId,
+    accion: data.accion,
+    cambios: data.cambios,
+  });
+}
+
+export interface FilaAuditoria {
+  id: number;
+  usuario_id: number;
+  accion: string;
+  cambios: CambioAuditoria[];
+  creado_en: string;
+}
+
+// Historial de un movimiento, más reciente primero (para GET /:id/historial).
+export async function obtenerAuditoria(movimientoId: number): Promise<FilaAuditoria[]> {
+  const rows = await db
+    .select({
+      id: movimientosAuditoria.id,
+      usuario_id: movimientosAuditoria.usuarioId,
+      accion: movimientosAuditoria.accion,
+      cambios: movimientosAuditoria.cambios,
+      creado_en: movimientosAuditoria.creadoEn,
+    })
+    .from(movimientosAuditoria)
+    .where(eq(movimientosAuditoria.movimientoId, movimientoId))
+    .orderBy(desc(movimientosAuditoria.id));
+
+  return rows.map((r) => ({
+    id: r.id,
+    usuario_id: r.usuario_id,
+    accion: r.accion,
+    cambios: r.cambios as CambioAuditoria[],
+    creado_en: new Date(r.creado_en).toISOString(),
+  }));
 }
 
 // ── Lecturas (fuera de tx, sobre el pool normal) ─────────────────────────────

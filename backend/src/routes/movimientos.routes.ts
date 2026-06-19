@@ -1,10 +1,12 @@
 import { Router } from 'express';
 import {
+  getHistorial,
   getMovimiento,
   getMovimientos,
   getStock,
   postAbastecimiento,
   putAnularMovimiento,
+  putEditarMovimiento,
 } from '../controllers/movimientos.controller.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 
@@ -18,7 +20,12 @@ movimientosRouter.post('/abastecimientos', postAbastecimiento);
 // Lecturas: cualquier usuario logueado (ADMIN o DEPOSITO).
 movimientosRouter.get('/movimientos', requireAuth, getMovimientos);
 movimientosRouter.get('/movimientos/:id', requireAuth, getMovimiento);
+movimientosRouter.get('/movimientos/:id/historial', requireAuth, getHistorial);
 movimientosRouter.get('/stock', requireAuth, getStock);
+
+// Edición: cualquier usuario logueado (decisión de J). Reemplazo completo +
+// recalculo de stock + historial. No editable si está ANULADO.
+movimientosRouter.put('/movimientos/:id', requireAuth, putEditarMovimiento);
 
 // Anulación: solo ADMIN (CLAUDE.md: DEPOSITO no anula). CONFIRMADO → ANULADO.
 movimientosRouter.put('/movimientos/:id/anular', requireAuth, requireRole('ADMIN'), putAnularMovimiento);
