@@ -17,10 +17,21 @@ import {
 // - Idempotente: saltea movimientos cuyo NUMERO ya esté importado.
 // Uso: npm run import:movimientos -- <archivo.csv|tsv>
 
+// Normaliza para mapear el TIPO_DOC de 3c sin depender de mayúsculas ni tildes.
+function normalizarTipo(s: string): string {
+  return s
+    .trim()
+    .toUpperCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '');
+}
+
+// Textos de 3c -> codigo de tipos_movimiento. Se agregan aliases por las dudas.
 const TIPO_MAP: Record<string, string> = {
   RINT: 'RINT',
+  'RECEPCION DE MERCADERIA': 'RECEPCION',
   RECEPCION: 'RECEPCION',
-  'RECEPCIÓN': 'RECEPCION',
+  'AJUSTE DE INVENTARIO': 'AJUSTE',
   AJUSTE: 'AJUSTE',
 };
 
@@ -72,7 +83,7 @@ async function main(archivo: string): Promise<void> {
     const f = filas[i]!;
     const numero = c(f, 'NUMERO');
     const fecha = parseFecha(c(f, 'FECHA'));
-    const tipo = TIPO_MAP[c(f, 'TIPO_DOC').toUpperCase()];
+    const tipo = TIPO_MAP[normalizarTipo(c(f, 'TIPO_DOC'))];
     const origen = Number(c(f, 'ORIGEN'));
     const destino = Number(c(f, 'DESTINO'));
     const producto_3c = c(f, 'ARTICU_ID').slice(0, 32);
