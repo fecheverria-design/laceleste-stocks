@@ -30,7 +30,7 @@ export const ubicaciones = pgTable('ubicaciones', {
   id: serial('id').primaryKey(),
   nombre: varchar('nombre', { length: 100 }).notNull(),
   tipo: varchar('tipo', { length: 16 }).notNull(), // 'DEPOSITO' | 'AREA' | 'SUCURSAL'
-  depId3c: integer('dep_id_3c').notNull(), // EL PUENTE CON 3C
+  depId3c: integer('dep_id_3c').notNull().unique(), // EL PUENTE CON 3C (una ubicación por dep de 3c)
   activo: boolean('activo').notNull().default(true),
 });
 

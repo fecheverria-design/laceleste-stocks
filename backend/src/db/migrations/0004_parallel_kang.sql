@@ -1,0 +1,1 @@
+ALTER TABLE "ubicaciones" ADD CONSTRAINT "ubicaciones_dep_id_3c_unique" UNIQUE("dep_id_3c");

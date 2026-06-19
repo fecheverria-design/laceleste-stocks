@@ -17,7 +17,9 @@
     "db:seed": "tsx src/db/seed.ts",
     "db:seed:dev": "tsx src/db/seed-dev.ts",
     "import:productos": "tsx src/db/import-productos.ts",
-    "import:proveedores": "tsx src/db/import-proveedores.ts"
+    "import:proveedores": "tsx src/db/import-proveedores.ts",
+    "import:ubicaciones": "tsx src/db/import-ubicaciones.ts",
+    "import:movimientos": "tsx src/db/import-movimientos.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
