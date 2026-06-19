@@ -5,6 +5,7 @@ import {
   getMovimientos,
   getStock,
   postAbastecimiento,
+  postMovimiento,
   putAnularMovimiento,
   putEditarMovimiento,
 } from '../controllers/movimientos.controller.js';
@@ -16,6 +17,9 @@ export const movimientosRouter = Router();
 // M2M: lo invoca la app del compañero, no un humano. Auth de máquina pendiente
 // (API key) — por ahora abierto y auditado al usuario de integración.
 movimientosRouter.post('/abastecimientos', postAbastecimiento);
+
+// Crear movimiento (auto-confirmado): cualquier usuario logueado.
+movimientosRouter.post('/movimientos', requireAuth, postMovimiento);
 
 // Lecturas: cualquier usuario logueado (ADMIN o DEPOSITO).
 movimientosRouter.get('/movimientos', requireAuth, getMovimientos);

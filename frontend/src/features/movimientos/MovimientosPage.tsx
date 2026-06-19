@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { apiGet } from '../../shared/api/client';
 import type { EstadoMovimiento, ListaMovimientos } from '../../shared/api/types';
@@ -41,18 +41,26 @@ export function MovimientosPage() {
             {data ? `${data.total} movimiento${data.total === 1 ? '' : 's'}` : 'Cargando…'}
           </p>
         </div>
-        <div className="flex gap-1 rounded-lg bg-slate-100 p-1">
-          {FILTROS.map((f) => (
-            <button
-              key={f}
-              onClick={() => setEstado(f)}
-              className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
-                estado === f ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900'
-              }`}
-            >
-              {f === 'TODOS' ? 'Todos' : f.charAt(0) + f.slice(1).toLowerCase()}
-            </button>
-          ))}
+        <div className="flex items-center gap-3">
+          <div className="flex gap-1 rounded-lg bg-slate-100 p-1">
+            {FILTROS.map((f) => (
+              <button
+                key={f}
+                onClick={() => setEstado(f)}
+                className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                  estado === f ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900'
+                }`}
+              >
+                {f === 'TODOS' ? 'Todos' : f.charAt(0) + f.slice(1).toLowerCase()}
+              </button>
+            ))}
+          </div>
+          <Link
+            to="/movimientos/nuevo"
+            className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-sky-700"
+          >
+            + Nuevo
+          </Link>
         </div>
       </div>
 

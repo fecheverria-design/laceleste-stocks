@@ -1,10 +1,16 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { AppError, badRequest } from '../domain/errors.js';
-import { AbastecimientoSchema, EditarMovimientoSchema, MovimientosQuerySchema } from '../domain/movimientos.schema.js';
+import {
+  AbastecimientoSchema,
+  CrearMovimientoSchema,
+  EditarMovimientoSchema,
+  MovimientosQuerySchema,
+} from '../domain/movimientos.schema.js';
 import { resolverUsuarioIntegracion } from '../repositories/movimientos.repository.js';
 import {
   anularMovimiento,
+  crearMovimiento,
   editarMovimiento,
   listarMovimientos,
   obtenerHistorial,
@@ -109,6 +115,19 @@ export async function getHistorial(req: Request, res: Response): Promise<void> {
   }
   const historial = await obtenerHistorial(parsed.data.id);
   res.status(200).json(historial);
+}
+
+// POST /api/movimientos — crear un movimiento (auto-confirmado). Cualquier usuario logueado.
+export async function postMovimiento(req: Request, res: Response): Promise<void> {
+  const parsed = CrearMovimientoSchema.safeParse(req.body);
+  if (!parsed.success) {
+    throw badRequest('VALIDACION', z.prettifyError(parsed.error));
+  }
+  if (!req.user) {
+    throw new AppError('NO_AUTENTICADO', 'Falta autenticación', 401);
+  }
+  const movimiento = await crearMovimiento(parsed.data, { usuarioId: req.user.id });
+  res.status(201).json(movimiento);
 }
 
 const StockQuerySchema = z.object({

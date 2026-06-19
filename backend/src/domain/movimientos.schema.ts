@@ -87,3 +87,7 @@ export const EditarMovimientoSchema = z.object({
 });
 
 export type EditarMovimientoInput = z.infer<typeof EditarMovimientoSchema>;
+
+// Crear comparte el mismo shape que editar (cabecera + renglones).
+export const CrearMovimientoSchema = EditarMovimientoSchema;
+export type CrearMovimientoInput = EditarMovimientoInput;

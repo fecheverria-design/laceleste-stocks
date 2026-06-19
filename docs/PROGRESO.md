@@ -10,6 +10,12 @@
 5. **Contrato del POST**: validar supuestos con el compañero (ver "Supuestos del contrato del POST"), sobre todo **idempotencia** (hoy un re-push duplica).
 6. Docker corre desde `D:\DockerData`; levantar Docker Desktop si está apagado y `docker compose up -d`. **Datos de demo**: `npm -w backend run db:seed:dev` carga 3 ubicaciones, 4 productos, 5 movimientos (2 recepciones + 2 RINT + 1 anulado) **+ usuarios de login** (`admin@laceleste.local` / `deposito@laceleste.local`, pass `laceleste123`) — idempotente. Para ver el front: backend `npm -w backend run dev` (3000) + frontend `npm -w frontend run dev` (5173) → http://localhost:5173.
 
+## 🖥️ Front — crear movimiento (HECHO)
+- **`POST /api/movimientos`** (back): crea un movimiento de cualquier tipo, **auto-confirmado** y transaccional (correlativo según tipo + cabecera CONFIRMADO + detalle + refresh de stock). Cualquier usuario logueado. Hermano de `registrarAbastecimiento` (caso M2M de RINT). 4 tests nuevos (RINT descuenta, RECEPCION suma, tipo inválido, producto inexistente) = **48 verdes**.
+- **Front**: botón **+ Nuevo** en el listado → página `/movimientos/nuevo` con form vacío (defaults: RINT, depósito→área, hoy). Al crear, navega al detalle del nuevo movimiento.
+- **Refactor**: form extraído a `movimientoForm.ts` (estado/payload) + `MovimientoFormFields.tsx` (componente), compartido entre crear y editar (sin duplicar).
+- Verificado e2e: POST crea `REC-2026-00003`, stock 401 1380→1390; screenshot del form OK.
+
 ## 🖥️ Front — edición de movimientos (HECHO)
 Adelanto de Fase 3 (UI). En branch `feat/movimientos-fase1-backend`.
 - **Página de detalle/edición** (`/movimientos/:id`): form prefilleado, **todo editable** (tipo/origen/destino con selects de catálogo, fecha, turno, observaciones, renglones dinámicos con agregar/quitar), botón Guardar → `PUT`. Invalida queries (detalle, listado, stock, historial) al guardar. Si el movimiento está ANULADO, el form se deshabilita.

@@ -309,7 +309,7 @@ Patrón `/api/...`, JWT en header `Authorization: Bearer`. **Protección (Fase 1
 | POST | `/api/auth/login` | **Login: valida credenciales (bcrypt) y devuelve `{token, user}`. Público. Implementado en Fase 1.** |
 | GET | `/api/auth/me` | **Identidad del token. Requiere Bearer. Implementado en Fase 1.** |
 | POST | `/api/abastecimientos` | **Ingreso desde la app del compañero: crea RINT y lo AUTO-CONFIRMA (transaccional). Implementado en Fase 1. M2M: abierto (auth de máquina por API key, pendiente).** |
-| POST | `/api/movimientos` | Crear movimiento en BORRADOR |
+| POST | `/api/movimientos` | **Crear movimiento (cualquier tipo) AUTO-CONFIRMADO. Transaccional. Cualquier rol logueado. Implementado en Fase 1.** (No usa BORRADOR: la app crea confirmado y se corrige editando.) |
 | GET | `/api/movimientos` | **Listar con filtros: `desde`, `hasta`, `tipo`, `ubicacion`, `estado` + paginado (`page`/`limit`). Devuelve `{items, page, limit, total}`. `ubicacion` matchea origen O destino. Implementado en Fase 1.** |
 | GET | `/api/movimientos/:id` | **Detalle (cabecera + renglones). 404 si no existe. Implementado en Fase 1.** |
 | PUT | `/api/movimientos/:id` | **Editar (reemplazo completo, cualquier rol logueado). Recalcula stock + deja historial. 409 si ANULADO. Implementado en Fase 1.** |

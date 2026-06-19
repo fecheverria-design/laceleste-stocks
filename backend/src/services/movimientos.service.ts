@@ -1,7 +1,7 @@
 import { env } from '../config/env.js';
 import { db } from '../db/client.js';
 import { AppError, badRequest, conflict, notFound } from '../domain/errors.js';
-import type { AbastecimientoInput, EditarMovimientoInput } from '../domain/movimientos.schema.js';
+import type { AbastecimientoInput, CrearMovimientoInput, EditarMovimientoInput } from '../domain/movimientos.schema.js';
 import {
   actualizarCabecera,
   bloquearMovimiento,
@@ -339,6 +339,79 @@ export async function editarMovimiento(
 
 export async function obtenerHistorial(id: number): Promise<FilaAuditoria[]> {
   return obtenerAuditoria(id);
+}
+
+export interface CrearMovimientoOpts {
+  usuarioId: number;
+}
+
+// Crea un movimiento de cualquier tipo y lo AUTO-CONFIRMA en una tx (regla #6):
+// correlativo según el tipo + cabecera CONFIRMADO + detalle + refresh de stock.
+// Lo usa el front (humano logueado). Hermano de registrarAbastecimiento, que es el
+// caso M2M específico de RINT desde la app del compañero.
+export async function crearMovimiento(
+  input: CrearMovimientoInput,
+  opts: CrearMovimientoOpts,
+): Promise<MovimientoConDetalle> {
+  const hora = partesFechaHora().hora;
+  const anioNro = Number(input.fecha.slice(0, 4));
+
+  return db.transaction(async (tx) => {
+    const origen = await buscarUbicacionPorDep3c(tx, input.origen_dep_id_3c);
+    if (!origen) {
+      throw notFound('UBICACION_NO_ENCONTRADA', `No existe ubicación con dep_id_3c=${input.origen_dep_id_3c} (origen)`);
+    }
+    const destino = await buscarUbicacionPorDep3c(tx, input.destino_dep_id_3c);
+    if (!destino) {
+      throw notFound(
+        'UBICACION_NO_ENCONTRADA',
+        `No existe ubicación con dep_id_3c=${input.destino_dep_id_3c} (destino)`,
+      );
+    }
+    const tipo = await tipoPorCodigo(tx, input.tipo);
+    if (!tipo) {
+      throw badRequest('TIPO_INVALIDO', `Tipo de movimiento desconocido: ${input.tipo}`);
+    }
+
+    const codigos = input.detalle.map((r) => r.producto_3c);
+    const existentes = await productosExistentes(tx, codigos);
+    const faltan = [...new Set(codigos)].filter((c) => !existentes.has(c));
+    if (faltan.length > 0) {
+      throw notFound('PRODUCTO_NO_ENCONTRADO', `Productos inexistentes en el maestro: ${faltan.join(', ')}`);
+    }
+
+    const nro = await generarNro(tx, input.tipo, anioNro);
+    const movimientoId = await insertarCabecera(tx, {
+      nro,
+      tipoId: tipo.id,
+      fecha: input.fecha,
+      hora,
+      turno: input.turno,
+      proyeccion: input.proyeccion,
+      origenId: origen.id,
+      destinoId: destino.id,
+      usuarioId: opts.usuarioId,
+      observaciones: input.observaciones,
+    });
+    await insertarDetalle(
+      tx,
+      movimientoId,
+      input.detalle.map((r) => ({
+        producto3c: r.producto_3c,
+        cantidadReal: r.cantidad_real.toString(),
+        cantidadSugerida: r.cantidad_sugerida?.toString(),
+        stockContado: r.stock_contado?.toString(),
+        unidad: r.unidad,
+        observaciones: r.observaciones,
+      })),
+    );
+
+    await refrescarStock(tx);
+
+    const creado = await obtenerMovimiento(tx, movimientoId);
+    if (!creado) throw new AppError('INTERNAL', 'No se pudo releer el movimiento recién creado', 500);
+    return creado;
+  });
 }
 
 export async function obtenerStock(filtros: {
