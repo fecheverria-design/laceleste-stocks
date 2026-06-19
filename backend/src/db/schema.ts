@@ -60,9 +60,12 @@ export const usuarios = pgTable('usuarios', {
   activo: boolean('activo').notNull().default(true),
 });
 
-// Puerta abierta — vacías en v1 (estructura lista, lógica después).
+// Puerta abierta — lógica de proveedor sin implementar en v1, pero el maestro se
+// puede poblar (import desde 3c). numero_3c = ID del proveedor en 3c (regla #1),
+// clave para deduplicar al importar y mapear a futuro.
 export const proveedores = pgTable('proveedores', {
   id: serial('id').primaryKey(),
+  numero3c: integer('numero_3c').unique(),
   nombre: varchar('nombre', { length: 150 }).notNull(),
   cuit: varchar('cuit', { length: 20 }),
 });
