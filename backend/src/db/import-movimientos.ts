@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { sql } from 'drizzle-orm';
 import { db, pool } from './client.js';
 import { movimientos, productos, tiposMovimiento, ubicaciones } from './schema.js';
-import { indexarColumnas, parseDelimited } from './csv.js';
+import { parseDelimited } from './csv.js';
 import {
   generarNro,
   insertarDetalle,
@@ -69,11 +69,31 @@ async function main(archivo: string): Promise<void> {
   const filas = parseDelimited(readFileSync(archivo, 'utf8'));
   if (filas.length < 2) throw new Error('El archivo no tiene filas de datos.');
 
-  const col = indexarColumnas(filas[0]!, [
-    'FECHA', 'NUMERO', 'TIPO_DOC', 'ORIGEN', 'ORIGEN_DENOMINACION',
-    'DESTINO', 'DESTINO_DENOMINACION', 'ARTICU_ID', 'TEXTO', 'UNIMED', 'CANTIDAD',
-  ]);
-  const c = (f: string[], k: string) => (f[col[k]!] ?? '').trim();
+  // Resuelve cada columna probando varios nombres posibles (3c cambia entre exports:
+  // "ID ORIGEN" vs "ORIGEN", "ID ARTICULO" vs "ARTICU_ID", etc.).
+  const h = filas[0]!;
+  const norm = h.map((x) => x.trim().toUpperCase());
+  const idx = (aliases: string[]): number => {
+    for (const a of aliases) {
+      const i = norm.indexOf(a.toUpperCase());
+      if (i !== -1) return i;
+    }
+    throw new Error(`Falta la columna (${aliases.join(' / ')}). Encabezados: ${h.join(' | ')}`);
+  };
+  const col = {
+    FECHA: idx(['FECHA']),
+    NUMERO: idx(['NUMERO']),
+    TIPO_DOC: idx(['TIPO_DOC']),
+    ORIGEN: idx(['ID ORIGEN', 'ORIGEN']),
+    ORIGEN_DENOMINACION: idx(['ORIGEN_DENOMINACION']),
+    DESTINO: idx(['ID DESTINO', 'DESTINO']),
+    DESTINO_DENOMINACION: idx(['DESTINO_DENOMINACION']),
+    ARTICU_ID: idx(['ID ARTICULO', 'ARTICU_ID']),
+    TEXTO: idx(['TEXTO']),
+    UNIMED: idx(['UNIMED']),
+    CANTIDAD: idx(['CANTIDAD']),
+  };
+  const c = (f: string[], k: keyof typeof col) => (f[col[k]] ?? '').trim();
 
   // 1) Agrupar renglones por NUMERO, validando.
   const grupos = new Map<string, MovGrupo>();
