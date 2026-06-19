@@ -1,4 +1,4 @@
-import { eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, lte, or, sql, type SQL } from 'drizzle-orm';
 import { db, type Tx } from '../db/client.js';
 import {
   movimientos,
@@ -117,9 +117,20 @@ export async function insertarDetalle(tx: Tx, movimientoId: number, renglones: R
   );
 }
 
+// Clave del advisory lock que serializa el refresh de stock entre transacciones.
+// Arbitraria pero estable: todas las confirmaciones/anulaciones usan la misma.
+const STOCK_REFRESH_LOCK_KEY = 727274;
+
 // Refresca la vista materializada de stock. CONCURRENTLY exige el unique index
 // (idx_stock_prod_ubic) y corre dentro de la tx de confirmación (regla #6, verificado).
+//
+// El advisory lock a nivel transacción serializa el par refresh+commit: sin él, dos
+// transacciones simultáneas pueden refrescar con snapshots que no ven el commit de la
+// otra y la matview queda sin uno de los movimientos (regla #5/#6). Con el lock, la
+// segunda transacción espera al commit de la primera, así su refresh ve ambos. Se
+// libera solo al terminar la tx (xact-level).
 export async function refrescarStock(tx: Tx): Promise<void> {
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(${STOCK_REFRESH_LOCK_KEY})`);
   await tx.execute(sql`REFRESH MATERIALIZED VIEW CONCURRENTLY stock_actual`);
 }
 
@@ -205,6 +216,90 @@ export async function obtenerMovimiento(
     anulado_en: cab.anulado_en ? new Date(cab.anulado_en).toISOString() : null,
     detalle: renglones,
   };
+}
+
+// ── Listado de movimientos (paginado, fuera de tx) ───────────────────────────
+
+export interface ListaFiltros {
+  desde?: string; // YYYY-MM-DD (fecha >=)
+  hasta?: string; // YYYY-MM-DD (fecha <=)
+  tipo?: string; // codigo de tipos_movimiento
+  ubicacionId?: number; // matchea origen O destino
+  estado?: string;
+}
+
+export interface MovimientoResumen {
+  id: number;
+  nro: string;
+  tipo: string; // codigo
+  estado: string;
+  fecha: string;
+  hora: string;
+  origen_id: number;
+  destino_id: number;
+  usuario_id: number;
+  creado_en: string | null;
+  confirmado_en: string | null;
+  anulado_en: string | null;
+}
+
+// Condiciones compartidas entre el listado y el count (mismo filtro, mismo total).
+function condicionesLista(f: ListaFiltros): SQL[] {
+  const conds: SQL[] = [];
+  if (f.desde) conds.push(gte(movimientos.fecha, f.desde));
+  if (f.hasta) conds.push(lte(movimientos.fecha, f.hasta));
+  if (f.estado) conds.push(eq(movimientos.estado, f.estado));
+  if (f.tipo) conds.push(eq(tiposMovimiento.codigo, f.tipo));
+  if (f.ubicacionId !== undefined) {
+    conds.push(or(eq(movimientos.origenId, f.ubicacionId), eq(movimientos.destinoId, f.ubicacionId))!);
+  }
+  return conds;
+}
+
+export async function listarMovimientos(
+  f: ListaFiltros,
+  page: number,
+  limit: number,
+): Promise<MovimientoResumen[]> {
+  const conds = condicionesLista(f);
+  const rows = await db
+    .select({
+      id: movimientos.id,
+      nro: movimientos.nro,
+      tipo: tiposMovimiento.codigo,
+      estado: movimientos.estado,
+      fecha: movimientos.fecha,
+      hora: movimientos.hora,
+      origen_id: movimientos.origenId,
+      destino_id: movimientos.destinoId,
+      usuario_id: movimientos.usuarioId,
+      creado_en: movimientos.creadoEn,
+      confirmado_en: movimientos.confirmadoEn,
+      anulado_en: movimientos.anuladoEn,
+    })
+    .from(movimientos)
+    .innerJoin(tiposMovimiento, eq(tiposMovimiento.id, movimientos.tipoId))
+    .where(conds.length ? and(...conds) : undefined)
+    .orderBy(desc(movimientos.fecha), desc(movimientos.id)) // recientes primero; id desempata
+    .limit(limit)
+    .offset((page - 1) * limit);
+
+  return rows.map((r) => ({
+    ...r,
+    creado_en: r.creado_en ? new Date(r.creado_en).toISOString() : null,
+    confirmado_en: r.confirmado_en ? new Date(r.confirmado_en).toISOString() : null,
+    anulado_en: r.anulado_en ? new Date(r.anulado_en).toISOString() : null,
+  }));
+}
+
+export async function contarMovimientos(f: ListaFiltros): Promise<number> {
+  const conds = condicionesLista(f);
+  const [row] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(movimientos)
+    .innerJoin(tiposMovimiento, eq(tiposMovimiento.id, movimientos.tipoId))
+    .where(conds.length ? and(...conds) : undefined);
+  return row?.n ?? 0;
 }
 
 export async function resolverUsuarioIntegracion(): Promise<number | undefined> {

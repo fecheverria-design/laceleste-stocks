@@ -3,10 +3,11 @@
 > Estado para retomar fácil. Última actualización: 2026-06-19.
 
 ## ⏱️ AL VOLVER (mañana) — empezá por acá
-1. **Increments 1 y 2 commiteados y pusheados** en `feat/movimientos-fase1-backend` (19 tests verdes). Falta **abrir el PR** (link que GitHub ya ofreció al pushear).
-2. **Próximo slice — a elegir**: `GET /api/movimientos` (listado+filtros+paginado, slice limpio sin decisiones abiertas) · **Auth JWT** + middleware · **idempotencia del POST** (necesita acordar contrato con el compañero).
-3. **Contrato del POST**: validar supuestos con el compañero (ver "Supuestos del contrato del POST"), sobre todo **idempotencia** (hoy un re-push duplica).
-4. Docker corre desde `D:\DockerData`; levantar Docker Desktop si está apagado y `docker compose up -d`. La DB de dev tiene 1 abastecimiento de prueba (RINT-2026-00001) cargado en el smoke.
+1. **Increments 1, 2 y 3 commiteados y pusheados** en `feat/movimientos-fase1-backend` (26 tests verdes). Falta **abrir el PR**: el repo NO tiene `main`/`dev`, la rama default del remoto es `feat/movimientos-fase0-setup`, así que el PR es base `fase0-setup` ← `fase1-backend`. Link directo: https://github.com/fecheverria-design/laceleste-stocks/compare/feat/movimientos-fase0-setup...feat/movimientos-fase1-backend (`gh` no está instalado).
+2. **Pendiente estructural (no bloquea)**: crear `main` desde fase 0 y definir contra qué rama mergean las fases (el workflow asume main/dev/feat pero no existen).
+3. **Próximo slice — a elegir**: **Auth JWT** + middleware · **idempotencia del POST** (necesita acordar contrato con el compañero) · export Excel / kardex / sincronizar-3c.
+4. **Contrato del POST**: validar supuestos con el compañero (ver "Supuestos del contrato del POST"), sobre todo **idempotencia** (hoy un re-push duplica).
+5. Docker corre desde `D:\DockerData`; levantar Docker Desktop si está apagado y `docker compose up -d`. La DB de dev tiene 1 abastecimiento de prueba (RINT-2026-00001) cargado en el smoke.
 
 ---
 
@@ -52,8 +53,16 @@ Branch `feat/movimientos-fase1-backend`.
 - **Guards**: inexistente → 404 `MOVIMIENTO_NO_ENCONTRADO`; ya anulado → 409 `YA_ANULADO`; estado ≠ CONFIRMADO → 409 `ESTADO_INVALIDO`. Lock `FOR UPDATE` serializa anulaciones simultáneas.
 - **Tests**: revierte stock + sella auditoría, doble anulación, inexistente, reversión puntual (no toca otros movimientos), transaccionalidad (rollback deja CONFIRMADO), concurrencia (2 anular del mismo mov → una gana, otra YA_ANULADO, stock revierte 1 sola vez).
 
+### ✅ Increment 3 — Listado + detalle (HECHO, 7 tests nuevos = 26 verdes)
+- **`GET /api/movimientos`**: listado con filtros `desde`/`hasta` (rango de fecha inclusive), `tipo` (codigo del catálogo, string libre — extensible), `estado` (set fijo), `ubicacion` (matchea origen O destino) + paginado `page`/`limit` (default 1/50, máx 200). Devuelve `{items, page, limit, total}`; orden recientes primero (fecha desc, id desempata).
+- **`GET /api/movimientos/:id`**: detalle (cabecera + renglones); 404 `MOVIMIENTO_NO_ENCONTRADO` si no existe.
+- **Schema en `domain/movimientos.schema.ts`** (`MovimientosQuerySchema`, regla #8): el front reusa los filtros. Valida `desde <= hasta`.
+- **Tests**: orden y total, filtro por estado, por ubicación (origen/destino), por rango de fechas, por tipo, paginado (total = del filtro completo), detalle + inexistente.
+- **🐛 Fix de concurrencia (latente desde inc. 1)**: dos confirmaciones simultáneas podían dejar la matview sin uno de los movimientos (REFRESH con snapshots que no veían el commit ajeno). Solución: `pg_advisory_xact_lock` antes del `REFRESH` en `refrescarStock` (serializa refresh+commit). El test de concurrencia de abastecimientos dejó de ser flaky (3/3 estable). Blinda también la anulación.
+
 ### ⏳ Pendiente en Fase 1 (próximos increments)
-- **Auth JWT** + middleware (hoy ingreso y anulación se auditan al usuario de integración `integracion@laceleste.local`, creado por el seed).
+- **Auth JWT** + middleware (hoy ingreso, anulación y listado se auditan/operan sin auth; las escrituras se atribuyen al usuario de integración `integracion@laceleste.local`, creado por el seed).
+- **POST /api/movimientos** (crear BORRADOR) + **PUT /:id/confirmar**, export Excel, kardex, sincronizar-3c.
 - **GET /api/movimientos** (listado con filtros + paginado), **GET /api/movimientos/:id**, export Excel, kardex, sincronizar-3c.
 
 ### ❓ Supuestos del contrato del POST — VALIDAR con el compañero

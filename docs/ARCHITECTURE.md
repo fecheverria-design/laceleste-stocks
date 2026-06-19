@@ -265,7 +265,7 @@ WHERE m.estado = 'CONFIRMADO'
 GROUP BY d.producto_3c, ubicacion_id;
 CREATE UNIQUE INDEX idx_stock_prod_ubic ON stock_actual(producto_3c, ubicacion_id);
 ```
-Refresh: dentro de la transacción de confirmación, `REFRESH MATERIALIZED VIEW CONCURRENTLY stock_actual`. Si crece y se vuelve lento, reemplazar por tabla con triggers o snapshots mensuales.
+Refresh: dentro de la transacción de confirmación, `REFRESH MATERIALIZED VIEW CONCURRENTLY stock_actual`. Si crece y se vuelve lento, reemplazar por tabla con triggers o snapshots mensuales. **El refresh va precedido de `pg_advisory_xact_lock` (xact-level): serializa el par refresh+commit entre transacciones simultáneas; sin él, dos confirmaciones concurrentes pueden refrescar con snapshots que no ven el commit de la otra y la matview queda sin uno de los movimientos (regla #5/#6).**
 
 **Anulación = flip de estado (decisión 2026-06-19).** Como `stock_actual` filtra `WHERE estado = 'CONFIRMADO'`, marcar el original `ANULADO` (+ sellos `anulado_por`/`anulado_en`) y refrescar la matview ya **revierte el stock** en una sola tx. Un contramovimiento físico *además* del flip **duplicaría la reversión**, así que las dos mecánicas se excluyen y v1 usa SOLO el flip. La inmutabilidad de la regla #4 se preserva en su intención: nunca se editan cantidad/producto del confirmado, solo se voltea el estado y se sellan los campos de auditoría que el schema ya tiene para eso (regla #7). El lock `FOR UPDATE` sobre la fila serializa dos anulaciones simultáneas.
 
@@ -308,8 +308,8 @@ Patrón `/api/...`, JWT en header `Authorization: Bearer`.
 |---|---|---|
 | POST | `/api/abastecimientos` | **Ingreso desde la app del compañero: crea RINT y lo AUTO-CONFIRMA (transaccional). Implementado en Fase 1.** |
 | POST | `/api/movimientos` | Crear movimiento en BORRADOR |
-| GET | `/api/movimientos` | Listar con filtros: `desde`, `hasta`, `tipo`, `ubicacion`, `estado` (paginado) |
-| GET | `/api/movimientos/:id` | Detalle |
+| GET | `/api/movimientos` | **Listar con filtros: `desde`, `hasta`, `tipo`, `ubicacion`, `estado` + paginado (`page`/`limit`). Devuelve `{items, page, limit, total}`. `ubicacion` matchea origen O destino. Implementado en Fase 1.** |
+| GET | `/api/movimientos/:id` | **Detalle (cabecera + renglones). 404 si no existe. Implementado en Fase 1.** |
 | PUT | `/api/movimientos/:id/confirmar` | BORRADOR → CONFIRMADO. Asigna nro, descuenta stock. **Transaccional.** |
 | PUT | `/api/movimientos/:id/anular` | CONFIRMADO → ANULADO. **Flip de estado + sellos (anulado_por/anulado_en), transaccional. Implementado en Fase 1.** No genera contramovimiento. |
 | GET | `/api/movimientos/export` | Export Excel (mismos filtros que el listado) |

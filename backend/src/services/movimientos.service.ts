@@ -6,16 +6,20 @@ import {
   bloquearMovimiento,
   buscarUbicacionPorDep3c,
   consultarStock,
+  contarMovimientos,
   generarNro,
   insertarCabecera,
   insertarDetalle,
+  listarMovimientos as repoListarMovimientos,
   marcarAnulado,
   obtenerMovimiento,
   productosExistentes,
   refrescarStock,
   tipoPorCodigo,
   type FilaStock,
+  type ListaFiltros,
   type MovimientoConDetalle,
+  type MovimientoResumen,
 } from '../repositories/movimientos.repository.js';
 
 export interface RegistrarAbastecimientoOpts {
@@ -155,6 +159,35 @@ export async function anularMovimiento(
     if (!anulado) throw new AppError('INTERNAL', 'No se pudo releer el movimiento anulado', 500);
     return anulado;
   });
+}
+
+export interface ListarMovimientosParams extends ListaFiltros {
+  page: number;
+  limit: number;
+}
+
+export interface ListaMovimientosResult {
+  items: MovimientoResumen[];
+  page: number;
+  limit: number;
+  total: number;
+}
+
+// Listado paginado con filtros. items y total comparten el mismo filtro para que
+// la paginación sea coherente (total = cuántos matchean, no cuántos se devuelven).
+export async function listarMovimientos(params: ListarMovimientosParams): Promise<ListaMovimientosResult> {
+  const { page, limit, ...filtros } = params;
+  const [items, total] = await Promise.all([
+    repoListarMovimientos(filtros, page, limit),
+    contarMovimientos(filtros),
+  ]);
+  return { items, page, limit, total };
+}
+
+export async function obtenerMovimientoPorId(id: number): Promise<MovimientoConDetalle> {
+  const mov = await obtenerMovimiento(db, id);
+  if (!mov) throw notFound('MOVIMIENTO_NO_ENCONTRADO', `No existe el movimiento id=${id}`);
+  return mov;
 }
 
 export async function obtenerStock(filtros: {

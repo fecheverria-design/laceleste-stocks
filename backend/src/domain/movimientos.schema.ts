@@ -43,3 +43,28 @@ export const AbastecimientoSchema = z.object({
 
 export type AbastecimientoInput = z.infer<typeof AbastecimientoSchema>;
 export type RenglonAbastecimiento = z.infer<typeof RenglonAbastecimientoSchema>;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Filtros + paginado del listado GET /api/movimientos (regla #8: compartido front).
+// `tipo` se valida como string libre (no enum): tipos_movimiento es catálogo
+// extensible (regla del modelo). `estado` sí es un set fijo del ciclo de vida v1.
+// Las queries llegan como strings → z.coerce para page/limit/ubicacion.
+// ─────────────────────────────────────────────────────────────────────────────
+const fechaYmd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Formato esperado YYYY-MM-DD');
+
+export const MovimientosQuerySchema = z
+  .object({
+    desde: fechaYmd.optional(),
+    hasta: fechaYmd.optional(),
+    tipo: z.string().trim().min(1).max(16).optional(), // codigo de tipos_movimiento
+    estado: z.enum(['BORRADOR', 'CONFIRMADO', 'ANULADO']).optional(),
+    ubicacion: z.coerce.number().int().positive().optional(), // ubicacion_id (origen O destino)
+    page: z.coerce.number().int().positive().default(1),
+    limit: z.coerce.number().int().positive().max(200).default(50),
+  })
+  .refine((q) => !q.desde || !q.hasta || q.desde <= q.hasta, {
+    message: 'desde no puede ser posterior a hasta',
+    path: ['desde'],
+  });
+
+export type MovimientosQuery = z.infer<typeof MovimientosQuerySchema>;

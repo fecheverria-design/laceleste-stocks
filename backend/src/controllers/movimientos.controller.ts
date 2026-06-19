@@ -1,9 +1,15 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { AppError, badRequest } from '../domain/errors.js';
-import { AbastecimientoSchema } from '../domain/movimientos.schema.js';
+import { AbastecimientoSchema, MovimientosQuerySchema } from '../domain/movimientos.schema.js';
 import { resolverUsuarioIntegracion } from '../repositories/movimientos.repository.js';
-import { anularMovimiento, obtenerStock, registrarAbastecimiento } from '../services/movimientos.service.js';
+import {
+  anularMovimiento,
+  listarMovimientos,
+  obtenerMovimientoPorId,
+  obtenerStock,
+  registrarAbastecimiento,
+} from '../services/movimientos.service.js';
 
 // POST /api/abastecimientos — ingreso desde la app del compañero (RINT auto-confirmado).
 export async function postAbastecimiento(req: Request, res: Response): Promise<void> {
@@ -48,6 +54,35 @@ export async function putAnularMovimiento(req: Request, res: Response): Promise<
   }
 
   const movimiento = await anularMovimiento(parsed.data.id, { usuarioId });
+  res.status(200).json(movimiento);
+}
+
+// GET /api/movimientos — listado con filtros (desde/hasta/tipo/estado/ubicacion) + paginado.
+export async function getMovimientos(req: Request, res: Response): Promise<void> {
+  const parsed = MovimientosQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    throw badRequest('VALIDACION', z.prettifyError(parsed.error));
+  }
+  const { desde, hasta, tipo, estado, ubicacion, page, limit } = parsed.data;
+  const result = await listarMovimientos({
+    desde,
+    hasta,
+    tipo,
+    estado,
+    ubicacionId: ubicacion,
+    page,
+    limit,
+  });
+  res.status(200).json(result);
+}
+
+// GET /api/movimientos/:id — detalle (cabecera + renglones).
+export async function getMovimiento(req: Request, res: Response): Promise<void> {
+  const parsed = IdParamSchema.safeParse(req.params);
+  if (!parsed.success) {
+    throw badRequest('VALIDACION', z.prettifyError(parsed.error));
+  }
+  const movimiento = await obtenerMovimientoPorId(parsed.data.id);
   res.status(200).json(movimiento);
 }
 
