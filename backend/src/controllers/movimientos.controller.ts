@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { AppError, badRequest } from '../domain/errors.js';
 import { AbastecimientoSchema } from '../domain/movimientos.schema.js';
 import { resolverUsuarioIntegracion } from '../repositories/movimientos.repository.js';
-import { obtenerStock, registrarAbastecimiento } from '../services/movimientos.service.js';
+import { anularMovimiento, obtenerStock, registrarAbastecimiento } from '../services/movimientos.service.js';
 
 // POST /api/abastecimientos — ingreso desde la app del compañero (RINT auto-confirmado).
 export async function postAbastecimiento(req: Request, res: Response): Promise<void> {
@@ -24,6 +24,31 @@ export async function postAbastecimiento(req: Request, res: Response): Promise<v
 
   const movimiento = await registrarAbastecimiento(parsed.data, { usuarioId });
   res.status(201).json(movimiento);
+}
+
+const IdParamSchema = z.object({
+  id: z.coerce.number().int().positive(),
+});
+
+// PUT /api/movimientos/:id/anular — CONFIRMADO → ANULADO (flip de estado, transaccional).
+export async function putAnularMovimiento(req: Request, res: Response): Promise<void> {
+  const parsed = IdParamSchema.safeParse(req.params);
+  if (!parsed.success) {
+    throw badRequest('VALIDACION', z.prettifyError(parsed.error));
+  }
+
+  // Mientras no haya auth JWT, se atribuye al usuario de integración (regla #7). Cambia con JWT.
+  const usuarioId = await resolverUsuarioIntegracion();
+  if (usuarioId === undefined) {
+    throw new AppError(
+      'USUARIO_INTEGRACION_FALTA',
+      'No existe el usuario de integración (corré el seed: npm run db:seed)',
+      500,
+    );
+  }
+
+  const movimiento = await anularMovimiento(parsed.data.id, { usuarioId });
+  res.status(200).json(movimiento);
 }
 
 const StockQuerySchema = z.object({

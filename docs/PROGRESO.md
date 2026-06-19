@@ -1,10 +1,10 @@
 # PROGRESO — laceleste-movimientos
 
-> Estado para retomar fácil. Última actualización: 2026-06-11.
+> Estado para retomar fácil. Última actualización: 2026-06-19.
 
 ## ⏱️ AL VOLVER (mañana) — empezá por acá
-1. **Fase 1 increment 1 está HECHO y verde (13 tests)** pero **SIN COMMITEAR**, en branch `feat/movimientos-fase1-backend`. Decidir: ¿commit + push?
-2. **Decisión pendiente — anulación**: elegir mecánica (ver "Pendiente en Fase 1"). (1) marcar original como ANULADO [simple, lo que la matview ya habilita] vs (2) contramovimiento puro [regla #4 literal]. Sin esto no se codea el próximo slice.
+1. **Increments 1 y 2 commiteados y pusheados** en `feat/movimientos-fase1-backend` (19 tests verdes). Falta **abrir el PR** (link que GitHub ya ofreció al pushear).
+2. **Próximo slice — a elegir**: `GET /api/movimientos` (listado+filtros+paginado, slice limpio sin decisiones abiertas) · **Auth JWT** + middleware · **idempotencia del POST** (necesita acordar contrato con el compañero).
 3. **Contrato del POST**: validar supuestos con el compañero (ver "Supuestos del contrato del POST"), sobre todo **idempotencia** (hoy un re-push duplica).
 4. Docker corre desde `D:\DockerData`; levantar Docker Desktop si está apagado y `docker compose up -d`. La DB de dev tiene 1 abastecimiento de prueba (RINT-2026-00001) cargado en el smoke.
 
@@ -47,9 +47,13 @@ Branch `feat/movimientos-fase1-backend`.
 - **Verificado por HTTP** además de los tests: POST→201 (RINT-2026-00001), inválido→400, área inexistente→404, stock recalculado.
 - **Verificado técnico**: `REFRESH MATERIALIZED VIEW CONCURRENTLY` SÍ corre dentro de la tx en PG16 (regla #6 viable tal cual).
 
+### ✅ Increment 2 — Anulación (HECHO, 6 tests nuevos = 19 verdes)
+- **`PUT /api/movimientos/:id/anular`**: CONFIRMADO → ANULADO transaccional. **DECISIÓN 2026-06-19: flip de estado, NO contramovimiento** (J eligió). Como `stock_actual` filtra `estado='CONFIRMADO'`, voltear el original + `REFRESH` ya revierte el stock; un contramovimiento duplicaría la reversión. Sella `anulado_por`/`anulado_en` (regla #7). Doc actualizada: `CLAUDE.md` regla #4, `ARCHITECTURE.md` §8 (justificación) y §9 (endpoint).
+- **Guards**: inexistente → 404 `MOVIMIENTO_NO_ENCONTRADO`; ya anulado → 409 `YA_ANULADO`; estado ≠ CONFIRMADO → 409 `ESTADO_INVALIDO`. Lock `FOR UPDATE` serializa anulaciones simultáneas.
+- **Tests**: revierte stock + sella auditoría, doble anulación, inexistente, reversión puntual (no toca otros movimientos), transaccionalidad (rollback deja CONFIRMADO), concurrencia (2 anular del mismo mov → una gana, otra YA_ANULADO, stock revierte 1 sola vez).
+
 ### ⏳ Pendiente en Fase 1 (próximos increments)
-- **Anulación por contramovimiento** (regla #4) — **DECISIÓN ABIERTA**: la regla #4 dice "nunca se edita el original" pero §9 dice "CONFIRMADO → ANULADO". Con stock por matview (cuenta solo CONFIRMADO), poner el original en ANULADO ya revierte el stock; un contramovimiento físico ADEMÁS lo duplicaría. Hay que elegir UNA mecánica. Charlar con J antes de codear.
-- **Auth JWT** + middleware (hoy el ingreso se audita al usuario de integración `integracion@laceleste.local`, creado por el seed).
+- **Auth JWT** + middleware (hoy ingreso y anulación se auditan al usuario de integración `integracion@laceleste.local`, creado por el seed).
 - **GET /api/movimientos** (listado con filtros + paginado), **GET /api/movimientos/:id**, export Excel, kardex, sincronizar-3c.
 
 ### ❓ Supuestos del contrato del POST — VALIDAR con el compañero

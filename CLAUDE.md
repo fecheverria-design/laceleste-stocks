@@ -43,7 +43,7 @@ Estas reglas no se negocian. Si una tarea las contradice, frenar y avisar.
 1. **IDs de 3c = fuente de verdad.** Nunca inventar códigos de productos ni de depósitos. `productos.codigo_3c` y `ubicaciones.dep_id_3c` vienen del ERP 3c. Lo único con numeración propia es `movimientos.nro` (formato `RINT-2026-00452`), a propósito, con campo `nro_3c` nullable para mapear al sincronizar.
 2. **El stock se descuenta SIEMPRE por `cantidad_real`, nunca por `cantidad_sugerida`.** El egreso físico es la verdad; el sugerido es solo referencia. La diferencia se registra, no se juzga.
 3. **Las capas solo hablan hacia abajo.** routes → controllers → services → repositories. Nunca al revés. Un repository nunca llama a un service.
-4. **Los movimientos CONFIRMADOS son inmutables.** Si hay error, se anula con un contramovimiento; nunca se edita el original.
+4. **Los movimientos CONFIRMADOS son inmutables** en cantidad/producto: nunca se edita el detalle del original. La **anulación v1 es flip de estado** (CONFIRMADO→ANULADO + sellos `anulado_por`/`anulado_en`, transaccional), NO contramovimiento — porque `stock_actual` filtra por estado y un contramovimiento duplicaría la reversión (decisión 2026-06-19, ver `ARCHITECTURE.md` §8/§9).
 5. **La lógica de stock y las transiciones de estado SIEMPRE van con test.** Sin excepción. Incluye transaccionalidad y concurrencia, no solo happy path.
 6. **El endpoint `confirmar` es transaccional.** Cambio de estado + asignación de correlativo + refresh de stock, todo en una transacción de DB.
 7. **Todo movimiento registra auditoría:** `usuario_id`, `creado_en`, `confirmado_en`. Toda anulación registra `anulado_por` y `anulado_en`.

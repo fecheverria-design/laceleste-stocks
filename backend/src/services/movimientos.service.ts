@@ -1,13 +1,15 @@
 import { env } from '../config/env.js';
 import { db } from '../db/client.js';
-import { AppError, badRequest, notFound } from '../domain/errors.js';
+import { AppError, badRequest, conflict, notFound } from '../domain/errors.js';
 import type { AbastecimientoInput } from '../domain/movimientos.schema.js';
 import {
+  bloquearMovimiento,
   buscarUbicacionPorDep3c,
   consultarStock,
   generarNro,
   insertarCabecera,
   insertarDetalle,
+  marcarAnulado,
   obtenerMovimiento,
   productosExistentes,
   refrescarStock,
@@ -113,6 +115,45 @@ export async function registrarAbastecimiento(
     const creado = await obtenerMovimiento(tx, movimientoId);
     if (!creado) throw new AppError('INTERNAL', 'No se pudo releer el movimiento recién creado', 500);
     return creado;
+  });
+}
+
+export interface AnularMovimientoOpts {
+  usuarioId: number; // a quién se atribuye la anulación (regla #7)
+}
+
+// Anulación por flip de estado (decisión 2026-06-19): CONFIRMADO → ANULADO en una
+// sola tx (regla #6). El stock se revierte SOLO porque stock_actual filtra
+// estado='CONFIRMADO'; por eso NO se genera contramovimiento (duplicaría la
+// reversión). El original no se edita salvo el flip + sellos de auditoría (regla #7).
+// La inmutabilidad de cantidad/producto del movimiento se preserva.
+export async function anularMovimiento(
+  id: number,
+  opts: AnularMovimientoOpts,
+): Promise<MovimientoConDetalle> {
+  return db.transaction(async (tx) => {
+    // FOR UPDATE serializa dos anulaciones simultáneas del mismo movimiento (regla #5).
+    const mov = await bloquearMovimiento(tx, id);
+    if (!mov) {
+      throw notFound('MOVIMIENTO_NO_ENCONTRADO', `No existe el movimiento id=${id}`);
+    }
+    if (mov.estado === 'ANULADO') {
+      throw conflict('YA_ANULADO', `El movimiento id=${id} ya está anulado`);
+    }
+    if (mov.estado !== 'CONFIRMADO') {
+      throw conflict(
+        'ESTADO_INVALIDO',
+        `Solo se anula un movimiento CONFIRMADO (estado actual: ${mov.estado})`,
+      );
+    }
+
+    await marcarAnulado(tx, id, opts.usuarioId);
+    // La matview deja de contar el movimiento anulado → revierte el stock, sin contramovimiento.
+    await refrescarStock(tx);
+
+    const anulado = await obtenerMovimiento(tx, id);
+    if (!anulado) throw new AppError('INTERNAL', 'No se pudo releer el movimiento anulado', 500);
+    return anulado;
   });
 }
 

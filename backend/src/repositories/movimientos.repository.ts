@@ -123,6 +123,33 @@ export async function refrescarStock(tx: Tx): Promise<void> {
   await tx.execute(sql`REFRESH MATERIALIZED VIEW CONCURRENTLY stock_actual`);
 }
 
+// ── Anulación (flip de estado, dentro de la tx) ──────────────────────────────
+
+// Lee y BLOQUEA la fila (FOR UPDATE) para serializar dos anulaciones simultáneas
+// del mismo movimiento: la segunda espera y, al desbloquear, ve estado='ANULADO'
+// (READ COMMITTED re-lee la versión confirmada) → falla con YA_ANULADO (regla #5).
+export async function bloquearMovimiento(
+  tx: Tx,
+  id: number,
+): Promise<{ id: number; estado: string } | undefined> {
+  const [row] = await tx
+    .select({ id: movimientos.id, estado: movimientos.estado })
+    .from(movimientos)
+    .where(eq(movimientos.id, id))
+    .limit(1)
+    .for('update');
+  return row;
+}
+
+// Flip CONFIRMADO → ANULADO + sellos de auditoría (regla #7). NO toca el detalle
+// ni las cantidades del original: la inmutabilidad de la cantidad se preserva.
+export async function marcarAnulado(tx: Tx, id: number, usuarioId: number): Promise<void> {
+  await tx
+    .update(movimientos)
+    .set({ estado: 'ANULADO', anuladoPor: usuarioId, anuladoEn: sql`now()` })
+    .where(eq(movimientos.id, id));
+}
+
 // ── Lecturas (fuera de tx, sobre el pool normal) ─────────────────────────────
 
 export interface MovimientoConDetalle {
@@ -133,6 +160,7 @@ export interface MovimientoConDetalle {
   origen_id: number;
   destino_id: number;
   confirmado_en: string | null;
+  anulado_en: string | null;
   detalle: {
     producto_3c: string;
     cantidad_real: string;
@@ -154,6 +182,7 @@ export async function obtenerMovimiento(
       origen_id: movimientos.origenId,
       destino_id: movimientos.destinoId,
       confirmado_en: movimientos.confirmadoEn,
+      anulado_en: movimientos.anuladoEn,
     })
     .from(movimientos)
     .where(eq(movimientos.id, id))
@@ -173,6 +202,7 @@ export async function obtenerMovimiento(
   return {
     ...cab,
     confirmado_en: cab.confirmado_en ? new Date(cab.confirmado_en).toISOString() : null,
+    anulado_en: cab.anulado_en ? new Date(cab.anulado_en).toISOString() : null,
     detalle: renglones,
   };
 }

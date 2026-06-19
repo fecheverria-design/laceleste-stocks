@@ -128,7 +128,7 @@ NO se modela en v1: productos compuestos / recetas / BOM.
 | Login | Propio, usuarios y roles, JWT |
 | Conteos de área | NO en esta app |
 | Auditoría | Quién creó y quién confirmó, con timestamp |
-| Inmutabilidad | Confirmado = inmutable; error → contramovimiento |
+| Inmutabilidad | Confirmado = inmutable en cantidad/producto. Anulación v1 = **flip de estado** CONFIRMADO→ANULADO + sellos (no contramovimiento — ver §8/§9, decisión 2026-06-19) |
 
 Roles (modelo de 4 documentado; v1 usa los dos primeros):
 - **ADMIN** (J, sistemas): todo — usuarios, anular, configurar productos/ubicaciones, reportes.
@@ -267,6 +267,8 @@ CREATE UNIQUE INDEX idx_stock_prod_ubic ON stock_actual(producto_3c, ubicacion_i
 ```
 Refresh: dentro de la transacción de confirmación, `REFRESH MATERIALIZED VIEW CONCURRENTLY stock_actual`. Si crece y se vuelve lento, reemplazar por tabla con triggers o snapshots mensuales.
 
+**Anulación = flip de estado (decisión 2026-06-19).** Como `stock_actual` filtra `WHERE estado = 'CONFIRMADO'`, marcar el original `ANULADO` (+ sellos `anulado_por`/`anulado_en`) y refrescar la matview ya **revierte el stock** en una sola tx. Un contramovimiento físico *además* del flip **duplicaría la reversión**, así que las dos mecánicas se excluyen y v1 usa SOLO el flip. La inmutabilidad de la regla #4 se preserva en su intención: nunca se editan cantidad/producto del confirmado, solo se voltea el estado y se sellan los campos de auditoría que el schema ya tiene para eso (regla #7). El lock `FOR UPDATE` sobre la fila serializa dos anulaciones simultáneas.
+
 ### usuarios, lotes, proveedores
 ```sql
 CREATE TABLE usuarios (
@@ -309,7 +311,7 @@ Patrón `/api/...`, JWT en header `Authorization: Bearer`.
 | GET | `/api/movimientos` | Listar con filtros: `desde`, `hasta`, `tipo`, `ubicacion`, `estado` (paginado) |
 | GET | `/api/movimientos/:id` | Detalle |
 | PUT | `/api/movimientos/:id/confirmar` | BORRADOR → CONFIRMADO. Asigna nro, descuenta stock. **Transaccional.** |
-| PUT | `/api/movimientos/:id/anular` | CONFIRMADO → ANULADO. Genera contramovimiento. No edita el original. |
+| PUT | `/api/movimientos/:id/anular` | CONFIRMADO → ANULADO. **Flip de estado + sellos (anulado_por/anulado_en), transaccional. Implementado en Fase 1.** No genera contramovimiento. |
 | GET | `/api/movimientos/export` | Export Excel (mismos filtros que el listado) |
 | GET | `/api/stock` | Stock actual. Params: `ubicacion_id`, `producto_3c` |
 | GET | `/api/stock/:producto_3c/kardex` | Kardex: movimientos con saldo running |
