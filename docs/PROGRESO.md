@@ -2,13 +2,14 @@
 
 > Estado para retomar fácil. Última actualización: 2026-06-19.
 
-## ⏱️ AL VOLVER (mañana) — empezá por acá
-1. **Increments 1-6 + auth + git estructural, commiteados y pusheados** en `feat/movimientos-fase1-backend` (44 tests verdes).
-2. **🔴 ACCIÓN MANUAL TUYA — cambiar default branch a `main` en GitHub**: ya creé y pusheé `main` (desde el scaffold de Fase 0) y `dev` (desde main), pero `gh`/token no están, así que la default del remoto sigue siendo `feat/movimientos-fase0-setup`. Settings → Branches (o General) → Default branch → `main`. Después podés borrar `feat/movimientos-fase0-setup`.
-3. **Abrir el PR de Fase 1 → `dev`**: base `dev` ← `feat/movimientos-fase1-backend`. Link: https://github.com/fecheverria-design/laceleste-stocks/compare/dev...feat/movimientos-fase1-backend
-4. **Próximo slice — a elegir**: **idempotencia del POST** (necesita acordar contrato con el compañero) · export Excel / kardex / sincronizar-3c · API key para `abastecimientos` (M2M) · pulir el front (validación de form, crear movimiento desde el front).
-5. **Contrato del POST**: validar supuestos con el compañero (ver "Supuestos del contrato del POST"), sobre todo **idempotencia** (hoy un re-push duplica).
-6. Docker corre desde `D:\DockerData`; levantar Docker Desktop si está apagado y `docker compose up -d`. **Datos de demo**: `npm -w backend run db:seed:dev` carga 3 ubicaciones, 4 productos, 5 movimientos (2 recepciones + 2 RINT + 1 anulado) **+ usuarios de login** (`admin@laceleste.local` / `deposito@laceleste.local`, pass `laceleste123`) — idempotente. Para ver el front: backend `npm -w backend run dev` (3000) + frontend `npm -w frontend run dev` (5173) → http://localhost:5173.
+## ⏱️ AL VOLVER — empezá por acá
+**Estado**: Fase 1 (backend + auth + front editar/crear) + import completo de 3c + modelo de stock corregido. Todo commiteado y pusheado en `feat/movimientos-fase1-backend`. **50 tests verdes.**
+
+1. **🎯 PRÓXIMO PASO ÚNICO — INVENTARIO INICIAL**. El stock ya se calcula bien (modelo doble-entrada, solo FABRICA), pero quedó **393 productos en negativo** porque el historial de 3c **no arranca de stock cero**. Falta cargar la "foto" del inventario físico actual de FABRICA. **Pendiente de J**: pasar un Excel con `código de producto` + `cantidad contada hoy`. Con eso armo `import:inventario` que carga, por producto, un ajuste = (contado − sistema) para que el stock caiga en el número real. (Detalle en "FASE DE PRECISIÓN DE STOCK".)
+2. **Estado de la importación de 3c** (corrida en el dev de J): productos, proveedores, ubicaciones y **15.849 movimientos** importados. Tipos mapeados: Rint→RINT, ReMe/Fcpr→RECEPCION, RINV→AJUSTE. **NCC queda afuera** (módulo facturas futuro). Solo FABRICA lleva stock (`npm run db:stock-en -- 1`). ⚠️ El dev tiene los datos REALES de J (no la demo).
+3. **🔴 ACCIÓN MANUAL DE J — cambiar default branch a `main` en GitHub**: `main` y `dev` ya están pusheados, pero `gh`/token no están. Settings → Branches → Default → `main`. Después borrar `feat/movimientos-fase0-setup`. PR de Fase 1: base `dev` ← `feat/movimientos-fase1-backend`.
+4. **Otros slices pendientes** (cuando se cierre el stock): idempotencia del POST de abastecimientos (+ API key M2M), export Excel / kardex, validación de form en el front, módulo de facturas (NCC).
+5. **Setup**: Docker desde `D:\DockerData` (`docker compose up -d`). Backend `npm -w backend run dev` (3000) + front `npm -w frontend run dev` (5173) → http://localhost:5173. Login: `admin@laceleste.local` / `laceleste123`. Para volver a datos demo: `npm -w backend run db:reset` + `db:seed:dev`. Comandos de import: `import:productos|proveedores|ubicaciones|movimientos` y `db:stock-en`.
 
 ## 📥 Importación de Excel — productos (HECHO, falta proveedores y movimientos)
 Carga masiva por scripts CLI locales (decisión de J). Parser propio sin deps.
