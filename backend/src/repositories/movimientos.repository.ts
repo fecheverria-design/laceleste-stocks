@@ -1,4 +1,5 @@
 import { and, desc, eq, gte, inArray, lte, or, sql, type SQL } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { db, type Tx } from '../db/client.js';
 import {
   movimientos,
@@ -236,7 +237,9 @@ export interface MovimientoResumen {
   fecha: string;
   hora: string;
   origen_id: number;
+  origen_nombre: string;
   destino_id: number;
+  destino_nombre: string;
   usuario_id: number;
   creado_en: string | null;
   confirmado_en: string | null;
@@ -262,6 +265,8 @@ export async function listarMovimientos(
   limit: number,
 ): Promise<MovimientoResumen[]> {
   const conds = condicionesLista(f);
+  const origen = alias(ubicaciones, 'origen');
+  const destino = alias(ubicaciones, 'destino');
   const rows = await db
     .select({
       id: movimientos.id,
@@ -271,7 +276,9 @@ export async function listarMovimientos(
       fecha: movimientos.fecha,
       hora: movimientos.hora,
       origen_id: movimientos.origenId,
+      origen_nombre: origen.nombre,
       destino_id: movimientos.destinoId,
+      destino_nombre: destino.nombre,
       usuario_id: movimientos.usuarioId,
       creado_en: movimientos.creadoEn,
       confirmado_en: movimientos.confirmadoEn,
@@ -279,6 +286,8 @@ export async function listarMovimientos(
     })
     .from(movimientos)
     .innerJoin(tiposMovimiento, eq(tiposMovimiento.id, movimientos.tipoId))
+    .innerJoin(origen, eq(origen.id, movimientos.origenId))
+    .innerJoin(destino, eq(destino.id, movimientos.destinoId))
     .where(conds.length ? and(...conds) : undefined)
     .orderBy(desc(movimientos.fecha), desc(movimientos.id)) // recientes primero; id desempata
     .limit(limit)
@@ -314,7 +323,9 @@ export async function resolverUsuarioIntegracion(): Promise<number | undefined> 
 
 export interface FilaStock {
   producto_3c: string;
+  producto_nombre: string;
   ubicacion_id: number;
+  ubicacion_nombre: string;
   cantidad: number;
   actualizado_en: string | null;
 }
@@ -324,24 +335,32 @@ export async function consultarStock(filtros: {
   producto3c?: string;
 }): Promise<FilaStock[]> {
   const conds = [sql`TRUE`];
-  if (filtros.ubicacionId !== undefined) conds.push(sql`ubicacion_id = ${filtros.ubicacionId}`);
-  if (filtros.producto3c !== undefined) conds.push(sql`producto_3c = ${filtros.producto3c}`);
+  if (filtros.ubicacionId !== undefined) conds.push(sql`s.ubicacion_id = ${filtros.ubicacionId}`);
+  if (filtros.producto3c !== undefined) conds.push(sql`s.producto_3c = ${filtros.producto3c}`);
 
   const res = await db.execute<{
     producto_3c: string;
+    producto_nombre: string;
     ubicacion_id: number;
+    ubicacion_nombre: string;
     cantidad: string;
     actualizado_en: string | null;
   }>(
-    sql`SELECT producto_3c, ubicacion_id, cantidad, actualizado_en
-        FROM stock_actual
+    sql`SELECT s.producto_3c, p.nombre AS producto_nombre,
+               s.ubicacion_id, u.nombre AS ubicacion_nombre,
+               s.cantidad, s.actualizado_en
+        FROM stock_actual s
+        JOIN productos p ON p.codigo_3c = s.producto_3c
+        JOIN ubicaciones u ON u.id = s.ubicacion_id
         WHERE ${sql.join(conds, sql` AND `)}
-        ORDER BY producto_3c, ubicacion_id`,
+        ORDER BY u.nombre, p.nombre`,
   );
 
   return res.rows.map((r) => ({
     producto_3c: r.producto_3c,
+    producto_nombre: r.producto_nombre,
     ubicacion_id: r.ubicacion_id,
+    ubicacion_nombre: r.ubicacion_nombre,
     cantidad: Number(r.cantidad),
     actualizado_en: r.actualizado_en ? new Date(r.actualizado_en).toISOString() : null,
   }));

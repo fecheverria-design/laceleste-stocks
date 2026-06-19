@@ -7,7 +7,14 @@
 2. **Pendiente estructural (no bloquea)**: crear `main` desde fase 0 y definir contra qué rama mergean las fases (el workflow asume main/dev/feat pero no existen).
 3. **Próximo slice — a elegir**: **Auth JWT** + middleware · **idempotencia del POST** (necesita acordar contrato con el compañero) · export Excel / kardex / sincronizar-3c.
 4. **Contrato del POST**: validar supuestos con el compañero (ver "Supuestos del contrato del POST"), sobre todo **idempotencia** (hoy un re-push duplica).
-5. Docker corre desde `D:\DockerData`; levantar Docker Desktop si está apagado y `docker compose up -d`. La DB de dev tiene 1 abastecimiento de prueba (RINT-2026-00001) cargado en el smoke.
+5. Docker corre desde `D:\DockerData`; levantar Docker Desktop si está apagado y `docker compose up -d`. **Datos de demo**: `npm -w backend run db:seed:dev` carga 3 ubicaciones, 4 productos y 5 movimientos (2 recepciones + 2 RINT + 1 anulado) — idempotente. Para ver el front: backend `npm -w backend run dev` (3000) + frontend `npm -w frontend run dev` (5173) → http://localhost:5173.
+
+## 🖥️ Front — preview read-only (HECHO, fuera de fase)
+Adelanto para "ver algo" (el front formal es Fase 3). En branch `feat/movimientos-fase1-backend`.
+- **Layout con nav** (Movimientos / Stock / Estado) + **`MovimientosPage`** (tabla con filtro por estado, consume `GET /api/movimientos`) + **`StockPage`** (consume `GET /api/stock`). TanStack Query, Tailwind v4.
+- **API mejorada (additivo)**: el listado ahora devuelve `origen_nombre`/`destino_nombre` y el stock `producto_nombre`/`ubicacion_nombre` (joins en el back) para no hacer joins en el front. Tests siguen verdes (26).
+- **Verificado end-to-end**: ambos servers levantados, proxy `/api` ok, screenshots de las dos páginas con datos reales.
+- **Tipos en `shared/api/types.ts`**: réplica de los DTOs. Pendiente real de regla #8: paquete compartido de schemas Zod back/front (hoy duplicados).
 
 ---
 
