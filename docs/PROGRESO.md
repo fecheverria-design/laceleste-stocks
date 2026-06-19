@@ -10,6 +10,12 @@
 5. **Contrato del POST**: validar supuestos con el compañero (ver "Supuestos del contrato del POST"), sobre todo **idempotencia** (hoy un re-push duplica).
 6. Docker corre desde `D:\DockerData`; levantar Docker Desktop si está apagado y `docker compose up -d`. **Datos de demo**: `npm -w backend run db:seed:dev` carga 3 ubicaciones, 4 productos, 5 movimientos (2 recepciones + 2 RINT + 1 anulado) **+ usuarios de login** (`admin@laceleste.local` / `deposito@laceleste.local`, pass `laceleste123`) — idempotente. Para ver el front: backend `npm -w backend run dev` (3000) + frontend `npm -w frontend run dev` (5173) → http://localhost:5173.
 
+## 📥 Importación de Excel — productos (HECHO, falta proveedores y movimientos)
+Carga masiva por scripts CLI locales (decisión de J). Parser propio sin deps.
+- **`npm run import:productos -- <archivo.csv|tsv>`**: maestro de productos de 3c. Mapea `ID`→`codigo_3c` (PK, regla #1), `ARTICULO`→nombre, `UM`→`unidad_base`. Ignora FAMILIA/SUBFAMILIA (no modeladas). Idempotente (upsert por `codigo_3c`), dedup intra-archivo, saltea filas sin ID/nombre. Probado con muestra real de J.
+- **`csv.ts`**: parser de texto delimitado robusto (autodetecta tab/`;`/`,`, comillas, BOM) — lo reusan los próximos importers.
+- **Pendiente**: `import:proveedores` y `import:movimientos` (necesito el formato de esos Excel). Orden: catálogos → movimientos (referencian productos por codigo_3c y ubicaciones por dep_id_3c). Movimientos históricos entran CONFIRMADO con `nro_3c` para idempotencia. **Precios = fase futura** (requiere columna nueva en productos).
+
 ## 🖥️ Front — crear movimiento (HECHO)
 - **`POST /api/movimientos`** (back): crea un movimiento de cualquier tipo, **auto-confirmado** y transaccional (correlativo según tipo + cabecera CONFIRMADO + detalle + refresh de stock). Cualquier usuario logueado. Hermano de `registrarAbastecimiento` (caso M2M de RINT). 4 tests nuevos (RINT descuenta, RECEPCION suma, tipo inválido, producto inexistente) = **48 verdes**.
 - **Front**: botón **+ Nuevo** en el listado → página `/movimientos/nuevo` con form vacío (defaults: RINT, depósito→área, hoy). Al crear, navega al detalle del nuevo movimiento.
