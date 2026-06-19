@@ -49,3 +49,65 @@ export interface FilaStock {
   cantidad: number;
   actualizado_en: string | null;
 }
+
+// ── Catálogos (selects del front) ────────────────────────────────────────────
+export interface Ubicacion {
+  id: number;
+  nombre: string;
+  tipo: string;
+  dep_id_3c: number;
+}
+export interface Producto {
+  codigo_3c: string;
+  nombre: string;
+  unidad_base: string;
+}
+export interface TipoMovimiento {
+  codigo: string;
+  nombre: string;
+  signo_stock: number;
+}
+
+// ── Detalle completo (round-trip para editar) ────────────────────────────────
+export interface RenglonDetalle {
+  producto_3c: string;
+  producto_nombre: string;
+  cantidad_real: string;
+  cantidad_sugerida: string | null;
+  stock_contado: string | null;
+  unidad: string;
+  observaciones: string | null;
+}
+export interface MovimientoDetalle {
+  id: number;
+  nro: string;
+  tipo: string;
+  estado: EstadoMovimiento;
+  fecha: string;
+  turno: string | null;
+  proyeccion: string | null;
+  observaciones: string | null;
+  origen_id: number;
+  origen_dep_id_3c: number;
+  origen_nombre: string;
+  destino_id: number;
+  destino_dep_id_3c: number;
+  destino_nombre: string;
+  confirmado_en: string | null;
+  anulado_en: string | null;
+  detalle: RenglonDetalle[];
+}
+
+// ── Historial de ediciones ───────────────────────────────────────────────────
+export interface CambioAuditoria {
+  campo: string;
+  antes: unknown;
+  despues: unknown;
+}
+export interface FilaHistorial {
+  id: number;
+  usuario_id: number;
+  accion: string;
+  cambios: CambioAuditoria[];
+  creado_en: string;
+}

@@ -318,6 +318,7 @@ Patrón `/api/...`, JWT en header `Authorization: Bearer`. **Protección (Fase 1
 | PUT | `/api/movimientos/:id/anular` | CONFIRMADO → ANULADO. **Flip de estado + sellos (anulado_por/anulado_en), transaccional. Implementado en Fase 1.** No genera contramovimiento. |
 | GET | `/api/movimientos/export` | Export Excel (mismos filtros que el listado) |
 | GET | `/api/stock` | Stock actual. Params: `ubicacion_id`, `producto_3c` |
+| GET | `/api/ubicaciones` · `/api/productos` · `/api/tipos` | **Catálogos para selects del front. Requieren login. Implementado en Fase 1.** |
 | GET | `/api/stock/:producto_3c/kardex` | Kardex: movimientos con saldo running |
 | PUT | `/api/movimientos/:id/sincronizar-3c` | Marca `nro_3c` cuando se replicó en 3c |
 

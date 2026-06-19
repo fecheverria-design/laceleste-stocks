@@ -6,9 +6,17 @@
 1. **Increments 1-6 + auth + git estructural, commiteados y pusheados** en `feat/movimientos-fase1-backend` (44 tests verdes).
 2. **🔴 ACCIÓN MANUAL TUYA — cambiar default branch a `main` en GitHub**: ya creé y pusheé `main` (desde el scaffold de Fase 0) y `dev` (desde main), pero `gh`/token no están, así que la default del remoto sigue siendo `feat/movimientos-fase0-setup`. Settings → Branches (o General) → Default branch → `main`. Después podés borrar `feat/movimientos-fase0-setup`.
 3. **Abrir el PR de Fase 1 → `dev`**: base `dev` ← `feat/movimientos-fase1-backend`. Link: https://github.com/fecheverria-design/laceleste-stocks/compare/dev...feat/movimientos-fase1-backend
-4. **Próximo slice — a elegir**: **editar desde el front** (UI: el backend ya está; necesita enriquecer `GET /:id` para round-trip + un form; tipo/origen/destino editables piden selects de catálogo → endpoints GET ubicaciones/productos/tipos) · **idempotencia del POST** (necesita acordar contrato con el compañero) · export Excel / kardex / sincronizar-3c · API key para `abastecimientos` (M2M).
+4. **Próximo slice — a elegir**: **idempotencia del POST** (necesita acordar contrato con el compañero) · export Excel / kardex / sincronizar-3c · API key para `abastecimientos` (M2M) · pulir el front (validación de form, crear movimiento desde el front).
 5. **Contrato del POST**: validar supuestos con el compañero (ver "Supuestos del contrato del POST"), sobre todo **idempotencia** (hoy un re-push duplica).
 6. Docker corre desde `D:\DockerData`; levantar Docker Desktop si está apagado y `docker compose up -d`. **Datos de demo**: `npm -w backend run db:seed:dev` carga 3 ubicaciones, 4 productos, 5 movimientos (2 recepciones + 2 RINT + 1 anulado) **+ usuarios de login** (`admin@laceleste.local` / `deposito@laceleste.local`, pass `laceleste123`) — idempotente. Para ver el front: backend `npm -w backend run dev` (3000) + frontend `npm -w frontend run dev` (5173) → http://localhost:5173.
+
+## 🖥️ Front — edición de movimientos (HECHO)
+Adelanto de Fase 3 (UI). En branch `feat/movimientos-fase1-backend`.
+- **Página de detalle/edición** (`/movimientos/:id`): form prefilleado, **todo editable** (tipo/origen/destino con selects de catálogo, fecha, turno, observaciones, renglones dinámicos con agregar/quitar), botón Guardar → `PUT`. Invalida queries (detalle, listado, stock, historial) al guardar. Si el movimiento está ANULADO, el form se deshabilita.
+- **Historial de ediciones** visible abajo (quién/cuándo/qué cambió).
+- **Endpoints de catálogo** (back): `GET /api/ubicaciones`, `/api/productos`, `/api/tipos` (requireAuth) para poblar los selects. `GET /:id` enriquecido para round-trip (tipo, dep_id_3c, turno, etc.).
+- Las filas del listado son clickeables → llevan al detalle.
+- **Verificado e2e** (Edge headless por CDP, login real por formulario): la página renderiza con datos vivos, catálogos poblados, y **F5 mantiene la sesión** (sin bug de deslogueo). 44 tests back verdes, front typecheck/lint/build ok.
 
 ## 🖥️ Front — preview read-only (HECHO, fuera de fase)
 Adelanto para "ver algo" (el front formal es Fase 3). En branch `feat/movimientos-fase1-backend`.

@@ -312,36 +312,62 @@ export async function obtenerAuditoria(movimientoId: number): Promise<FilaAudito
 export interface MovimientoConDetalle {
   id: number;
   nro: string;
+  tipo: string; // codigo
   estado: string;
   fecha: string;
+  turno: string | null;
+  proyeccion: string | null;
+  observaciones: string | null;
   origen_id: number;
+  origen_dep_id_3c: number;
+  origen_nombre: string;
   destino_id: number;
+  destino_dep_id_3c: number;
+  destino_nombre: string;
   confirmado_en: string | null;
   anulado_en: string | null;
   detalle: {
     producto_3c: string;
+    producto_nombre: string;
     cantidad_real: string;
     cantidad_sugerida: string | null;
+    stock_contado: string | null;
     unidad: string;
+    observaciones: string | null;
   }[];
 }
 
+// Detalle completo (round-trip para editar en el front): trae tipo codigo,
+// dep_id_3c de origen/destino y todos los campos del renglón.
 export async function obtenerMovimiento(
   ejecutor: typeof db | Tx,
   id: number,
 ): Promise<MovimientoConDetalle | undefined> {
+  const origen = alias(ubicaciones, 'origen_det');
+  const destino = alias(ubicaciones, 'destino_det');
   const [cab] = await ejecutor
     .select({
       id: movimientos.id,
       nro: movimientos.nro,
+      tipo: tiposMovimiento.codigo,
       estado: movimientos.estado,
       fecha: movimientos.fecha,
+      turno: movimientos.turno,
+      proyeccion: movimientos.proyeccion,
+      observaciones: movimientos.observaciones,
       origen_id: movimientos.origenId,
+      origen_dep_id_3c: origen.depId3c,
+      origen_nombre: origen.nombre,
       destino_id: movimientos.destinoId,
+      destino_dep_id_3c: destino.depId3c,
+      destino_nombre: destino.nombre,
       confirmado_en: movimientos.confirmadoEn,
       anulado_en: movimientos.anuladoEn,
     })
     .from(movimientos)
+    .innerJoin(tiposMovimiento, eq(tiposMovimiento.id, movimientos.tipoId))
+    .innerJoin(origen, eq(origen.id, movimientos.origenId))
+    .innerJoin(destino, eq(destino.id, movimientos.destinoId))
     .where(eq(movimientos.id, id))
     .limit(1);
   if (!cab) return undefined;
@@ -349,12 +375,17 @@ export async function obtenerMovimiento(
   const renglones = await ejecutor
     .select({
       producto_3c: movimientosDetalle.producto3c,
+      producto_nombre: productos.nombre,
       cantidad_real: movimientosDetalle.cantidadReal,
       cantidad_sugerida: movimientosDetalle.cantidadSugerida,
+      stock_contado: movimientosDetalle.stockContado,
       unidad: movimientosDetalle.unidad,
+      observaciones: movimientosDetalle.observaciones,
     })
     .from(movimientosDetalle)
-    .where(eq(movimientosDetalle.movimientoId, id));
+    .innerJoin(productos, eq(productos.codigo3c, movimientosDetalle.producto3c))
+    .where(eq(movimientosDetalle.movimientoId, id))
+    .orderBy(movimientosDetalle.id);
 
   return {
     ...cab,

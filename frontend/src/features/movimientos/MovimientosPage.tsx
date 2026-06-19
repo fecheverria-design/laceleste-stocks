@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { apiGet } from '../../shared/api/client';
 import type { EstadoMovimiento, ListaMovimientos } from '../../shared/api/types';
@@ -19,6 +20,7 @@ const TIPO_LABEL: Record<string, string> = {
 };
 
 export function MovimientosPage() {
+  const navigate = useNavigate();
   const [estado, setEstado] = useState<FiltroEstado>('TODOS');
 
   const { data, isLoading, isError, error } = useQuery({
@@ -75,7 +77,11 @@ export function MovimientosPage() {
             </thead>
             <tbody>
               {data.items.map((m) => (
-                <tr key={m.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+                <tr
+                  key={m.id}
+                  onClick={() => navigate(`/movimientos/${m.id}`)}
+                  className="cursor-pointer border-b border-slate-100 last:border-0 hover:bg-slate-50"
+                >
                   <td className="px-4 py-3 font-mono text-xs text-slate-700">{m.nro}</td>
                   <td className="px-4 py-3 text-slate-700">{TIPO_LABEL[m.tipo] ?? m.tipo}</td>
                   <td className="px-4 py-3">
