@@ -19,7 +19,16 @@ Carga masiva por scripts CLI locales (decisión de J). Parser propio sin deps.
 - **`npm run import:movimientos -- <archivo>`**: una fila = un renglón, agrupa por `NUMERO` (→`nro_3c`). Mapea `TIPO_DOC`→tipo, `FECHA` dd/mm/yyyy→ISO, `ORIGEN`/`DESTINO`→dep_id_3c, `ARTICU_ID`→producto, `CANTIDAD` (coma decimal es-AR). **Auto-crea** ubicaciones (DEPOSITO si es origen, si no AREA) y productos (desde TEXTO/UNIMED) que falten. Entra CONFIRMADO con su fecha + nro propio (`generar_nro`, crea seq del año on-demand) + `nro_3c`. Idempotente (saltea NUMERO ya importado). REFRESH al final. Avisa TIPO_DOC no mapeados.
 - **Verificado e2e** con muestra real de J: 4 movimientos (RINT-2025-xxxxx + nro_3c), áreas 47/48/50 auto-creadas, 10 productos auto-creados, stock con decimales OK (-7.428), idempotencia OK.
 - **Pendiente / a definir**: la lista de ubicaciones de J no traía las áreas de producción (47/48/50) — se auto-crean como AREA; si querés tipos/nombres finos, pasá un export más completo. Otros `TIPO_DOC` además de "Rint" (Recepcion/Ajuste): confirmar los textos exactos. **Precios = fase futura** (columna nueva en productos).
-- ⚠️ **El dev DB se reseteó** (se borró la demo) y quedó con la muestra real de J. Para volver a la demo: `npm run db:seed:dev`. Para cargar todo lo real: correr los 4 imports con los archivos completos.
+- ⚠️ **El dev DB se reseteó** (se borró la demo) y quedó con la muestra real de J. Para volver a la demo: `npm run db:seed:dev`. Para cargar todo lo real: correr los 4 imports + `db:reset` si te equivocás.
+
+## 🎯 FASE DE PRECISIÓN DE STOCK (pendiente, próximo bloque)
+Modelo de 3c confirmado por J (claves para que el stock dé bien):
+- **Baldes virtuales**: `dep_id_3c = 101` = **AJUSTES**, `dep_id_3c = 102` = **PROVEEDORES**. Su stock propio no importa; el efecto cae siempre en el otro lado (depósito real).
+- **Recepción** (`ReMe`/`Fcpr`): `102 → FABRICA`, suma al destino. ✅ ya funciona (RECEPCION).
+- **Rint**: `FABRICA → área`, resta del origen. ✅ ya funciona.
+- **Ajuste** (`RINV`, hoy entra como registro sin mover stock): regla por dirección → si **destino = 101** ⇒ resta del origen; si **origen = 101** ⇒ suma al destino. **Falta implementarlo en el cálculo de stock** (matview): agregar el caso de AJUSTE con 101. No requiere re-importar (los RINV ya quedan guardados con origen/destino; se prende con un refresh).
+- **Inventario inicial**: el historial de 3c puede no arrancar desde stock cero ⇒ el neto queda corrido a negativo. Cargar el inventario actual como punto de partida (una recepción/ajuste por producto).
+- **Causa del stock negativo actual**: en la 1ª importación, `ReMe`/`Fcpr` estaban sin mapear ⇒ entraron solo los Rint (salidas), 0 recepciones. **Fix: re-importar** (ya mapeados) + las 2 cosas de arriba.
 
 ## 🖥️ Front — crear movimiento (HECHO)
 - **`POST /api/movimientos`** (back): crea un movimiento de cualquier tipo, **auto-confirmado** y transaccional (correlativo según tipo + cabecera CONFIRMADO + detalle + refresh de stock). Cualquier usuario logueado. Hermano de `registrarAbastecimiento` (caso M2M de RINT). 4 tests nuevos (RINT descuenta, RECEPCION suma, tipo inválido, producto inexistente) = **48 verdes**.
