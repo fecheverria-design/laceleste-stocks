@@ -32,11 +32,12 @@ const TIPO_MAP: Record<string, string> = {
   'RECEPCION DE MERCADERIA': 'RECEPCION',
   RECEPCION: 'RECEPCION',
   REME: 'RECEPCION', // codigo corto de 3c para Recepción de Mercadería
+  FCPR: 'RECEPCION', // factura de compra: ingresa mercadería → suma al destino
   'AJUSTE DE INVENTARIO': 'AJUSTE',
   AJUSTE: 'AJUSTE',
   RINV: 'AJUSTE', // ajuste de inventario (entra como registro; el efecto en stock por
-  //                 dirección fabrica<->ajustes se implementa en la fase de stock)
-  // Pendientes a propósito: NCC (módulo facturas futuro), Fcpr (a confirmar con J).
+  //                 dirección fabrica<->ajustes (id 101) se implementa en la fase de stock)
+  // Pendiente a propósito: NCC (módulo de facturas futuro).
 };
 
 function parseFecha(s: string): string | null {
