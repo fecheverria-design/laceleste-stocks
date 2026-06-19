@@ -37,23 +37,17 @@ const IdParamSchema = z.object({
 });
 
 // PUT /api/movimientos/:id/anular — CONFIRMADO → ANULADO (flip de estado, transaccional).
+// Protegido (requireAuth + requireRole ADMIN): se audita al usuario del token (regla #7).
 export async function putAnularMovimiento(req: Request, res: Response): Promise<void> {
   const parsed = IdParamSchema.safeParse(req.params);
   if (!parsed.success) {
     throw badRequest('VALIDACION', z.prettifyError(parsed.error));
   }
-
-  // Mientras no haya auth JWT, se atribuye al usuario de integración (regla #7). Cambia con JWT.
-  const usuarioId = await resolverUsuarioIntegracion();
-  if (usuarioId === undefined) {
-    throw new AppError(
-      'USUARIO_INTEGRACION_FALTA',
-      'No existe el usuario de integración (corré el seed: npm run db:seed)',
-      500,
-    );
+  if (!req.user) {
+    throw new AppError('NO_AUTENTICADO', 'Falta autenticación', 401);
   }
 
-  const movimiento = await anularMovimiento(parsed.data.id, { usuarioId });
+  const movimiento = await anularMovimiento(parsed.data.id, { usuarioId: req.user.id });
   res.status(200).json(movimiento);
 }
 

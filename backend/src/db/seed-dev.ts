@@ -1,3 +1,4 @@
+import bcrypt from 'bcryptjs';
 import { sql } from 'drizzle-orm';
 import { db, pool } from './client.js';
 import { productos as productosT, tiposMovimiento, ubicaciones as ubicacionesT, usuarios } from './schema.js';
@@ -77,6 +78,17 @@ async function main(): Promise<void> {
   await db
     .insert(usuarios)
     .values({ nombre: 'Integración (API)', email: EMAIL_USUARIO_INTEGRACION, passHash: 'x-sin-login', rol: 'SISTEMA' })
+    .onConflictDoNothing({ target: usuarios.email });
+
+  // Usuarios de login para DEV. Contraseña: "laceleste123" (solo demo, NO producción).
+  console.log('▶ Seed dev: usuarios de login (admin / deposito, pass: laceleste123)…');
+  const hash = await bcrypt.hash('laceleste123', 10);
+  await db
+    .insert(usuarios)
+    .values([
+      { nombre: 'Admin Dev', email: 'admin@laceleste.local', passHash: hash, rol: 'ADMIN' },
+      { nombre: 'Depósito Dev', email: 'deposito@laceleste.local', passHash: hash, rol: 'DEPOSITO' },
+    ])
     .onConflictDoNothing({ target: usuarios.email });
 
   if ((await contar('ubicaciones')) === 0) {

@@ -17,6 +17,9 @@ const EnvSchema = z.object({
   // Depósito que despacha por defecto cuando el POST no manda origen_dep_id_3c.
   // dep_id de 3c (regla #1). v1 trabaja con un solo depósito principal.
   DEPOSITO_PRINCIPAL_DEP_ID_3C: z.coerce.number().int().positive().optional(),
+  // Auth JWT propio (CLAUDE.md: Bearer + localStorage). El secreto firma los tokens.
+  JWT_SECRET: z.string().min(16, 'JWT_SECRET debe tener al menos 16 caracteres'),
+  JWT_EXPIRES_IN_SECONDS: z.coerce.number().int().positive().default(28800), // 8h
 });
 
 const parsed = EnvSchema.safeParse(process.env);

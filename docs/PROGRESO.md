@@ -3,11 +3,12 @@
 > Estado para retomar fácil. Última actualización: 2026-06-19.
 
 ## ⏱️ AL VOLVER (mañana) — empezá por acá
-1. **Increments 1, 2 y 3 commiteados y pusheados** en `feat/movimientos-fase1-backend` (26 tests verdes). Falta **abrir el PR**: el repo NO tiene `main`/`dev`, la rama default del remoto es `feat/movimientos-fase0-setup`, así que el PR es base `fase0-setup` ← `fase1-backend`. Link directo: https://github.com/fecheverria-design/laceleste-stocks/compare/feat/movimientos-fase0-setup...feat/movimientos-fase1-backend (`gh` no está instalado).
-2. **Pendiente estructural (no bloquea)**: crear `main` desde fase 0 y definir contra qué rama mergean las fases (el workflow asume main/dev/feat pero no existen).
-3. **Próximo slice — a elegir**: **Auth JWT** + middleware · **idempotencia del POST** (necesita acordar contrato con el compañero) · export Excel / kardex / sincronizar-3c.
-4. **Contrato del POST**: validar supuestos con el compañero (ver "Supuestos del contrato del POST"), sobre todo **idempotencia** (hoy un re-push duplica).
-5. Docker corre desde `D:\DockerData`; levantar Docker Desktop si está apagado y `docker compose up -d`. **Datos de demo**: `npm -w backend run db:seed:dev` carga 3 ubicaciones, 4 productos y 5 movimientos (2 recepciones + 2 RINT + 1 anulado) — idempotente. Para ver el front: backend `npm -w backend run dev` (3000) + frontend `npm -w frontend run dev` (5173) → http://localhost:5173.
+1. **Increments 1-4 + auth, commiteados y pusheados** en `feat/movimientos-fase1-backend` (37 tests verdes).
+2. **🔴 ACCIÓN MANUAL TUYA — cambiar default branch a `main` en GitHub**: ya creé y pusheé `main` (desde el scaffold de Fase 0) y `dev` (desde main), pero `gh`/token no están, así que la default del remoto sigue siendo `feat/movimientos-fase0-setup`. Settings → Branches (o General) → Default branch → `main`. Después podés borrar `feat/movimientos-fase0-setup`.
+3. **Abrir el PR de Fase 1 → `dev`**: base `dev` ← `feat/movimientos-fase1-backend`. Link: https://github.com/fecheverria-design/laceleste-stocks/compare/dev...feat/movimientos-fase1-backend
+4. **Próximo slice — a elegir**: **idempotencia del POST** (necesita acordar contrato con el compañero) · export Excel / kardex / sincronizar-3c · anular desde el front (ya hay rol ADMIN) · API key para `abastecimientos` (M2M).
+5. **Contrato del POST**: validar supuestos con el compañero (ver "Supuestos del contrato del POST"), sobre todo **idempotencia** (hoy un re-push duplica).
+6. Docker corre desde `D:\DockerData`; levantar Docker Desktop si está apagado y `docker compose up -d`. **Datos de demo**: `npm -w backend run db:seed:dev` carga 3 ubicaciones, 4 productos, 5 movimientos (2 recepciones + 2 RINT + 1 anulado) **+ usuarios de login** (`admin@laceleste.local` / `deposito@laceleste.local`, pass `laceleste123`) — idempotente. Para ver el front: backend `npm -w backend run dev` (3000) + frontend `npm -w frontend run dev` (5173) → http://localhost:5173.
 
 ## 🖥️ Front — preview read-only (HECHO, fuera de fase)
 Adelanto para "ver algo" (el front formal es Fase 3). En branch `feat/movimientos-fase1-backend`.
@@ -67,9 +68,19 @@ Branch `feat/movimientos-fase1-backend`.
 - **Tests**: orden y total, filtro por estado, por ubicación (origen/destino), por rango de fechas, por tipo, paginado (total = del filtro completo), detalle + inexistente.
 - **🐛 Fix de concurrencia (latente desde inc. 1)**: dos confirmaciones simultáneas podían dejar la matview sin uno de los movimientos (REFRESH con snapshots que no veían el commit ajeno). Solución: `pg_advisory_xact_lock` antes del `REFRESH` en `refrescarStock` (serializa refresh+commit). El test de concurrencia de abastecimientos dejó de ser flaky (3/3 estable). Blinda también la anulación.
 
+### ✅ Increment 5 — Auth JWT (HECHO, 11 tests nuevos = 37 verdes)
+- **JWT propio** (Bearer + localStorage). `POST /api/auth/login` (bcrypt + token firmado, expira en 8h) y `GET /api/auth/me`. Secreto en `JWT_SECRET` (.env + CI). Roles v1: ADMIN, DEPOSITO (+ SISTEMA = integración M2M).
+- **Middleware** `requireAuth` (cuelga `req.user`) + `requireRole`. Protección: lecturas movimientos/stock = cualquier login; **anular = solo ADMIN** (audita al usuario del token, no al de integración); login público; `abastecimientos` M2M abierto (API key pendiente).
+- **Front**: `LoginPage`, `AuthProvider` + `useAuth`, guarda `RequireAuth`, Bearer automático en el cliente HTTP + manejo de 401 (cierra sesión), header con usuario/rol + botón Salir.
+- **Tests**: login OK/credenciales inválidas/usuario inactivo, firma+verificación de token, `requireAuth` (sin header / token malo / OK), `requireRole` (permite/deniega 403). Verificado end-to-end por HTTP: 401 sin token, 200 con token, 403 DEPOSITO→anular.
+- **Usuarios dev** en `db:seed:dev` (admin/deposito, pass `laceleste123`).
+
+### ✅ Estructura git (HECHO)
+- Creadas y pusheadas `main` (desde scaffold Fase 0 = baseline desplegable) y `dev` (desde main). Falta el paso manual: setear `main` como default branch en GitHub (no hay `gh`/token). Las fases mergean por PR a `dev`; `dev`→`main` al liberar.
+
 ### ⏳ Pendiente en Fase 1 (próximos increments)
-- **Auth JWT** + middleware (hoy ingreso, anulación y listado se auditan/operan sin auth; las escrituras se atribuyen al usuario de integración `integracion@laceleste.local`, creado por el seed).
 - **POST /api/movimientos** (crear BORRADOR) + **PUT /:id/confirmar**, export Excel, kardex, sincronizar-3c.
+- **Idempotencia** del POST de abastecimientos + **API key** para asegurar ese endpoint M2M.
 - **GET /api/movimientos** (listado con filtros + paginado), **GET /api/movimientos/:id**, export Excel, kardex, sincronizar-3c.
 
 ### ❓ Supuestos del contrato del POST — VALIDAR con el compañero

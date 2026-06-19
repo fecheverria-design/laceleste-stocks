@@ -1,6 +1,20 @@
 // Tipos de respuesta de la API. Espejo de los DTOs del backend (regla #8: el ideal
 // es compartir el schema Zod; mientras no haya paquete compartido, se replican acá).
 
+export type Rol = 'ADMIN' | 'DEPOSITO' | 'SISTEMA';
+
+export interface AuthUser {
+  id: number;
+  email: string;
+  nombre: string;
+  rol: Rol;
+}
+
+export interface SesionResult {
+  token: string;
+  user: AuthUser;
+}
+
 export type EstadoMovimiento = 'BORRADOR' | 'CONFIRMADO' | 'ANULADO';
 
 export interface MovimientoResumen {

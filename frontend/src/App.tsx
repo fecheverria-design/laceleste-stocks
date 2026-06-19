@@ -1,5 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { Layout } from './shared/components/Layout';
+import { RequireAuth } from './shared/auth/RequireAuth';
+import { LoginPage } from './features/auth/LoginPage';
 import { MovimientosPage } from './features/movimientos/MovimientosPage';
 import { StockPage } from './features/stock/StockPage';
 import { HealthPage } from './features/health/HealthPage';
@@ -7,13 +9,16 @@ import { HealthPage } from './features/health/HealthPage';
 export function App() {
   return (
     <Routes>
-      <Route element={<Layout />}>
-        <Route path="/" element={<Navigate to="/movimientos" replace />} />
-        <Route path="/movimientos" element={<MovimientosPage />} />
-        <Route path="/stock" element={<StockPage />} />
-        <Route path="/health" element={<HealthPage />} />
-        <Route path="*" element={<Navigate to="/movimientos" replace />} />
+      <Route path="/login" element={<LoginPage />} />
+      <Route element={<RequireAuth />}>
+        <Route element={<Layout />}>
+          <Route path="/" element={<Navigate to="/movimientos" replace />} />
+          <Route path="/movimientos" element={<MovimientosPage />} />
+          <Route path="/stock" element={<StockPage />} />
+          <Route path="/health" element={<HealthPage />} />
+        </Route>
       </Route>
+      <Route path="*" element={<Navigate to="/movimientos" replace />} />
     </Routes>
   );
 }

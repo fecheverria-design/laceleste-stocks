@@ -302,11 +302,13 @@ El abastecimiento llega desde la app del compañero por **API REST**: un POST co
 
 ## 9. Endpoints REST
 
-Patrón `/api/...`, JWT en header `Authorization: Bearer`.
+Patrón `/api/...`, JWT en header `Authorization: Bearer`. **Protección (Fase 1):** lecturas de movimientos/stock requieren login (cualquier rol); `anular` requiere rol **ADMIN** (DEPOSITO no anula); `login` es público; `abastecimientos` es M2M (abierto por ahora). El middleware `requireAuth`/`requireRole` cuelga `req.user` desde el token.
 
 | Método | Path | Descripción |
 |---|---|---|
-| POST | `/api/abastecimientos` | **Ingreso desde la app del compañero: crea RINT y lo AUTO-CONFIRMA (transaccional). Implementado en Fase 1.** |
+| POST | `/api/auth/login` | **Login: valida credenciales (bcrypt) y devuelve `{token, user}`. Público. Implementado en Fase 1.** |
+| GET | `/api/auth/me` | **Identidad del token. Requiere Bearer. Implementado en Fase 1.** |
+| POST | `/api/abastecimientos` | **Ingreso desde la app del compañero: crea RINT y lo AUTO-CONFIRMA (transaccional). Implementado en Fase 1. M2M: abierto (auth de máquina por API key, pendiente).** |
 | POST | `/api/movimientos` | Crear movimiento en BORRADOR |
 | GET | `/api/movimientos` | **Listar con filtros: `desde`, `hasta`, `tipo`, `ubicacion`, `estado` + paginado (`page`/`limit`). Devuelve `{items, page, limit, total}`. `ubicacion` matchea origen O destino. Implementado en Fase 1.** |
 | GET | `/api/movimientos/:id` | **Detalle (cabecera + renglones). 404 si no existe. Implementado en Fase 1.** |
