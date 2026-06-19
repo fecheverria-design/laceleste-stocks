@@ -30,11 +30,14 @@ const TIPOS = [
 const DEPOSITO_DEP3C = 1;
 const PANADERIA_DEP3C = 47;
 const COCINA_DEP3C = 48;
+const PROVEEDORES_DEP3C = 102; // balde virtual de proveedores (sin stock)
 
 const UBICACIONES = [
-  { nombre: 'Depósito Central', tipo: 'DEPOSITO', depId3c: DEPOSITO_DEP3C },
+  // El depósito lleva stock; áreas y proveedores no (modelo: stock solo en depósitos reales).
+  { nombre: 'Depósito Central', tipo: 'DEPOSITO', depId3c: DEPOSITO_DEP3C, llevaStock: true },
   { nombre: 'Panadería', tipo: 'AREA', depId3c: PANADERIA_DEP3C },
   { nombre: 'Cocina', tipo: 'AREA', depId3c: COCINA_DEP3C },
+  { nombre: 'Proveedores', tipo: 'AREA', depId3c: PROVEEDORES_DEP3C },
 ];
 
 const PRODUCTOS = [
@@ -49,21 +52,21 @@ async function contar(tabla: string): Promise<number> {
   return res.rows[0]?.n ?? 0;
 }
 
-// RECEPCIÓN al depósito (mercadería que entra). No hay endpoint de recepción todavía,
-// así que se materializa directo acá para tener stock positivo en el board de demo.
-// origen = destino (depósito): la matview ignora el origen para RECEPCION, solo cuenta destino.
+// RECEPCIÓN al depósito (mercadería que entra desde proveedores). El stock se suma
+// al destino (depósito, que lleva stock); el origen (proveedores) no acumula.
 async function recepcionAlDeposito(usuarioId: number, fecha: string, renglones: RenglonInput[]): Promise<void> {
   await db.transaction(async (tx) => {
     const dep = await buscarUbicacionPorDep3c(tx, DEPOSITO_DEP3C);
+    const prov = await buscarUbicacionPorDep3c(tx, PROVEEDORES_DEP3C);
     const tipo = await tipoPorCodigo(tx, 'RECEPCION');
-    if (!dep || !tipo) throw new Error('Falta depósito o tipo RECEPCION (corré db:migrate + db:seed)');
+    if (!dep || !prov || !tipo) throw new Error('Falta depósito/proveedores o tipo RECEPCION (corré db:migrate + db:seed)');
     const nro = await generarNro(tx, 'RECEPCION', 2026);
     const movId = await insertarCabecera(tx, {
       nro,
       tipoId: tipo.id,
       fecha,
       hora: '08:00:00',
-      origenId: dep.id,
+      origenId: prov.id,
       destinoId: dep.id,
       usuarioId,
     });

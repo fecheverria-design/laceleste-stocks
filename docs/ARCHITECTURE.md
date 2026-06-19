@@ -251,18 +251,22 @@ CREATE INDEX idx_det_producto ON movimientos_detalle(producto_3c);
 ```
 
 ### stock_actual (vista materializada — refresh on confirm)
+**Modelo (revisado 2026-06-19, migración `0005`): DOBLE ENTRADA restringida a depósitos con stock.** El stock vive solo en `ubicaciones.lleva_stock = true` (definir con `npm run db:stock-en -- <dep_id…>`; hoy: solo FABRICA). Cada renglón **suma al destino y resta del origen**, pero solo cuenta el lado que lleva stock. Así la **dirección** define el signo (no el tipo): un mismo `Rint` es egreso (FABRICA→área) o ingreso (101→FABRICA) según a dónde va, y los baldes virtuales (ajustes 101, proveedores 102, devolución…) no acumulan. `signo_stock` quedó sin uso para el cálculo.
 ```sql
 CREATE MATERIALIZED VIEW stock_actual AS
-SELECT
-  d.producto_3c,
-  CASE WHEN tm.codigo = 'RINT' THEN m.origen_id ELSE m.destino_id END AS ubicacion_id,
-  SUM(d.cantidad_real * tm.signo_stock) AS cantidad,
-  MAX(m.confirmado_en) AS actualizado_en
-FROM movimientos m
-JOIN tipos_movimiento tm ON tm.id = m.tipo_id
-JOIN movimientos_detalle d ON d.movimiento_id = m.id
-WHERE m.estado = 'CONFIRMADO'
-GROUP BY d.producto_3c, ubicacion_id;
+SELECT producto_3c, ubicacion_id, SUM(delta) AS cantidad, MAX(actualizado_en) AS actualizado_en
+FROM (
+  SELECT d.producto_3c, m.destino_id AS ubicacion_id, d.cantidad_real AS delta, m.confirmado_en AS actualizado_en
+  FROM movimientos m JOIN movimientos_detalle d ON d.movimiento_id = m.id
+  JOIN ubicaciones u ON u.id = m.destino_id
+  WHERE m.estado = 'CONFIRMADO' AND u.lleva_stock          -- ingreso (+) al destino
+  UNION ALL
+  SELECT d.producto_3c, m.origen_id, -d.cantidad_real, m.confirmado_en
+  FROM movimientos m JOIN movimientos_detalle d ON d.movimiento_id = m.id
+  JOIN ubicaciones u ON u.id = m.origen_id
+  WHERE m.estado = 'CONFIRMADO' AND u.lleva_stock          -- egreso (−) del origen
+) t
+GROUP BY producto_3c, ubicacion_id;
 CREATE UNIQUE INDEX idx_stock_prod_ubic ON stock_actual(producto_3c, ubicacion_id);
 ```
 Refresh: dentro de la transacción de confirmación, `REFRESH MATERIALIZED VIEW CONCURRENTLY stock_actual`. Si crece y se vuelve lento, reemplazar por tabla con triggers o snapshots mensuales. **El refresh va precedido de `pg_advisory_xact_lock` (xact-level): serializa el par refresh+commit entre transacciones simultáneas; sin él, dos confirmaciones concurrentes pueden refrescar con snapshots que no ven el commit de la otra y la matview queda sin uno de los movimientos (regla #5/#6).**

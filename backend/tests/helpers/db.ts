@@ -36,14 +36,15 @@ export async function sembrarEscenario(opts: {
     .values({ nombre: 'Tester', email: 'tester@laceleste.local', passHash: 'x', rol: 'ADMIN' })
     .returning({ id: usuarios.id });
 
+  // El depósito lleva stock; el área no (modelo: stock solo en depósitos reales).
   const [deposito] = await db
     .insert(ubicaciones)
-    .values({ nombre: 'Depósito Central', tipo: 'DEPOSITO', depId3c: depositoDep3c })
+    .values({ nombre: 'Depósito Central', tipo: 'DEPOSITO', depId3c: depositoDep3c, llevaStock: true })
     .returning({ id: ubicaciones.id });
 
   const [area] = await db
     .insert(ubicaciones)
-    .values({ nombre: 'Panadería', tipo: 'AREA', depId3c: areaDep3c })
+    .values({ nombre: 'Panadería', tipo: 'AREA', depId3c: areaDep3c, llevaStock: false })
     .returning({ id: ubicaciones.id });
 
   if (!usuario || !deposito || !area) throw new Error('No se pudo sembrar el escenario de test');

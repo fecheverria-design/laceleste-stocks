@@ -17,6 +17,7 @@
     "db:seed": "tsx src/db/seed.ts",
     "db:seed:dev": "tsx src/db/seed-dev.ts",
     "db:reset": "tsx src/db/reset.ts",
+    "db:stock-en": "tsx src/db/stock-en.ts",
     "import:productos": "tsx src/db/import-productos.ts",
     "import:proveedores": "tsx src/db/import-proveedores.ts",
     "import:ubicaciones": "tsx src/db/import-ubicaciones.ts",

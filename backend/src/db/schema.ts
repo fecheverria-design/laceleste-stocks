@@ -31,6 +31,11 @@ export const ubicaciones = pgTable('ubicaciones', {
   nombre: varchar('nombre', { length: 100 }).notNull(),
   tipo: varchar('tipo', { length: 16 }).notNull(), // 'DEPOSITO' | 'AREA' | 'SUCURSAL'
   depId3c: integer('dep_id_3c').notNull().unique(), // EL PUENTE CON 3C (una ubicación por dep de 3c)
+  // Solo las ubicaciones con lleva_stock=true acumulan stock. El resto (áreas de
+  // producción, proveedores, ajustes, devolución) son tránsito/virtuales. El stock
+  // se calcula por doble entrada: +cantidad al destino y −cantidad al origen, pero
+  // solo si ese lado lleva_stock. Define quién lleva stock con `npm run db:stock-en`.
+  llevaStock: boolean('lleva_stock').notNull().default(false),
   activo: boolean('activo').notNull().default(true),
 });
 
