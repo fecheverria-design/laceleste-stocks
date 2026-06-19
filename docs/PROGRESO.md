@@ -2,6 +2,14 @@
 
 > Estado para retomar fácil. Última actualización: 2026-06-11.
 
+## ⏱️ AL VOLVER (mañana) — empezá por acá
+1. **Fase 1 increment 1 está HECHO y verde (13 tests)** pero **SIN COMMITEAR**, en branch `feat/movimientos-fase1-backend`. Decidir: ¿commit + push?
+2. **Decisión pendiente — anulación**: elegir mecánica (ver "Pendiente en Fase 1"). (1) marcar original como ANULADO [simple, lo que la matview ya habilita] vs (2) contramovimiento puro [regla #4 literal]. Sin esto no se codea el próximo slice.
+3. **Contrato del POST**: validar supuestos con el compañero (ver "Supuestos del contrato del POST"), sobre todo **idempotencia** (hoy un re-push duplica).
+4. Docker corre desde `D:\DockerData`; levantar Docker Desktop si está apagado y `docker compose up -d`. La DB de dev tiene 1 abastecimiento de prueba (RINT-2026-00001) cargado en el smoke.
+
+---
+
 ## ✅ Fase 0 — CERRADA (2026-06-11)
 
 Setup del monorepo + schema acordado. Los 4 comandos contra Postgres en Docker corrieron **en verde**:
@@ -25,15 +33,30 @@ npm test               # backend: test de conexión a DB de test ✅ (1 passed)
 ### Cambio de diseño aplicado en el cierre (11/06)
 - **Se descartó el flujo n8n y la tabla `sugeridos_dia`** (migración `0002` eliminada). Motivo: la app del compañero ya muestra el sugerido y depósito carga el real ahí; ese número final entra a nuestra app **por API REST** y se materializa como **RINT auto-confirmado**. Ver `ARCHITECTURE.md` §8/§15. Schema reverificado: `db:generate` → "No schema changes".
 
-## 🔜 Fase 1 — Backend de movimientos (PRÓXIMA)
+## 🚧 Fase 1 — Backend de movimientos (EN CURSO)
 
-Branch nueva (`feat/movimientos-fase1-...`). Lo central:
+Branch `feat/movimientos-fase1-backend`.
 
-1. **Endpoint de ingreso de abastecimiento** (`POST`): recibe de la app del compañero cabecera (área destino, fecha) + renglones (`producto_3c`, `cantidad_real`, `cantidad_sugerida`, unidad).
-2. **Crear RINT + auto-confirmar transaccional**: estado CONFIRMADO + correlativo `RINT-2026-xxxxx` (`generar_nro`) + descuento de stock por `cantidad_real` + `REFRESH ... CONCURRENTLY` de `stock_actual`, todo en una transacción (reglas inviolables #2, #6, #7).
-3. **Anulación por contramovimiento** (los confirmados son inmutables, regla #4).
-4. **Tests primero** en lógica de stock y transiciones, incluyendo transaccionalidad y concurrencia (regla #5).
-5. Validación con Zod, un schema compartido back/front (regla #8).
+### ✅ Increment 1 — Ingreso de abastecimiento (HECHO, 13 tests verdes)
+- **`POST /api/abastecimientos`**: recibe el abastecimiento de la app del compañero → crea **RINT** → **auto-confirma transaccional** (regla #6): correlativo `RINT-2026-xxxxx` (`generar_nro`) + cabecera CONFIRMADO + detalle + `REFRESH CONCURRENTLY stock_actual`, todo en una tx. Si algo falla → rollback total.
+- **Descuento por `cantidad_real`** del depósito origen (regla #2); `cantidad_sugerida`/`stock_contado` quedan como referencia.
+- **`GET /api/stock`**: stock actual (matview), filtrable por `ubicacion_id`/`producto_3c`.
+- **Validación Zod** (`domain/movimientos.schema.ts`, regla #8) — pensado para compartir con el front.
+- **Capas respetadas**: routes → controller → service (dueño de la tx) → repository.
+- **Tests (regla #5)**: stock correcto, real-no-sugerida, rollback de validación, transaccionalidad (rollback tras insertar cabecera), **concurrencia** (2 ingresos simultáneos → nros distintos, stock = suma). Infra: `tests/globalSetup.ts` migra la DB de test; `tests/helpers/db.ts` limpia+siembra.
+- **Verificado por HTTP** además de los tests: POST→201 (RINT-2026-00001), inválido→400, área inexistente→404, stock recalculado.
+- **Verificado técnico**: `REFRESH MATERIALIZED VIEW CONCURRENTLY` SÍ corre dentro de la tx en PG16 (regla #6 viable tal cual).
+
+### ⏳ Pendiente en Fase 1 (próximos increments)
+- **Anulación por contramovimiento** (regla #4) — **DECISIÓN ABIERTA**: la regla #4 dice "nunca se edita el original" pero §9 dice "CONFIRMADO → ANULADO". Con stock por matview (cuenta solo CONFIRMADO), poner el original en ANULADO ya revierte el stock; un contramovimiento físico ADEMÁS lo duplicaría. Hay que elegir UNA mecánica. Charlar con J antes de codear.
+- **Auth JWT** + middleware (hoy el ingreso se audita al usuario de integración `integracion@laceleste.local`, creado por el seed).
+- **GET /api/movimientos** (listado con filtros + paginado), **GET /api/movimientos/:id**, export Excel, kardex, sincronizar-3c.
+
+### ❓ Supuestos del contrato del POST — VALIDAR con el compañero
+1. **Área destino** identificada por su `dep_id_3c` de 3c (campo `destino_dep_id_3c`).
+2. **Depósito origen**: `origen_dep_id_3c` opcional; si falta usa `DEPOSITO_PRINCIPAL_DEP_ID_3C` (.env). v1 = un solo depósito.
+3. **Renglón**: `producto_3c`, `cantidad_real` (oblig.), `cantidad_sugerida`/`stock_contado` (opc.), `unidad`.
+4. **Idempotencia**: NO implementada. Si la app del compañero re-empuja el mismo abastecimiento, se duplica. Falta acordar un id externo único para deduplicar (recomendado: que su app mande su propio id y lo guardemos para rechazar duplicados).
 
 ## 🧷 Recordatorios sueltos (cancha de J)
 - **C: del equipo de J está al límite (~99% usado).** Conviene una limpieza a fondo del disco del sistema (Docker Desktop, descargas) cuando haya un rato; el cierre de Fase 0 necesitó liberar npm-cache+Temp para tener aire.

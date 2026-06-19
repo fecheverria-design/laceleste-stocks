@@ -10,3 +10,8 @@ export class AppError extends Error {
     this.name = 'AppError';
   }
 }
+
+// Helpers para los casos más comunes. Mantienen códigos estables para el cliente.
+export const notFound = (code: string, message: string): AppError => new AppError(code, message, 404);
+export const badRequest = (code: string, message: string): AppError => new AppError(code, message, 400);
+export const conflict = (code: string, message: string): AppError => new AppError(code, message, 409);

@@ -14,6 +14,9 @@ const EnvSchema = z.object({
   DATABASE_URL: z.string().min(1, 'DATABASE_URL es obligatoria'),
   // Solo necesaria al correr tests; opcional en runtime normal.
   DATABASE_URL_TEST: z.string().min(1).optional(),
+  // Depósito que despacha por defecto cuando el POST no manda origen_dep_id_3c.
+  // dep_id de 3c (regla #1). v1 trabaja con un solo depósito principal.
+  DEPOSITO_PRINCIPAL_DEP_ID_3C: z.coerce.number().int().positive().optional(),
 });
 
 const parsed = EnvSchema.safeParse(process.env);

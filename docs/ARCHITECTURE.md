@@ -304,6 +304,7 @@ Patrón `/api/...`, JWT en header `Authorization: Bearer`.
 
 | Método | Path | Descripción |
 |---|---|---|
+| POST | `/api/abastecimientos` | **Ingreso desde la app del compañero: crea RINT y lo AUTO-CONFIRMA (transaccional). Implementado en Fase 1.** |
 | POST | `/api/movimientos` | Crear movimiento en BORRADOR |
 | GET | `/api/movimientos` | Listar con filtros: `desde`, `hasta`, `tipo`, `ubicacion`, `estado` (paginado) |
 | GET | `/api/movimientos/:id` | Detalle |
