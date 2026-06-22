@@ -2,10 +2,13 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { apiGet } from '../../shared/api/client';
-import type { EstadoMovimiento, ListaMovimientos } from '../../shared/api/types';
+import type { EstadoMovimiento, ListaMovimientos, TipoMovimiento, Ubicacion } from '../../shared/api/types';
 
 type FiltroEstado = EstadoMovimiento | 'TODOS';
 const FILTROS: FiltroEstado[] = ['TODOS', 'CONFIRMADO', 'ANULADO', 'BORRADOR'];
+
+const inputCls =
+  'rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500';
 
 const BADGE: Record<EstadoMovimiento, string> = {
   CONFIRMADO: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
@@ -22,12 +25,32 @@ const TIPO_LABEL: Record<string, string> = {
 export function MovimientosPage() {
   const navigate = useNavigate();
   const [estado, setEstado] = useState<FiltroEstado>('TODOS');
+  const [tipo, setTipo] = useState('');
+  const [ubicacion, setUbicacion] = useState('');
+  const [desde, setDesde] = useState('');
+  const [hasta, setHasta] = useState('');
+
+  const tipos = useQuery({ queryKey: ['tipos'], queryFn: () => apiGet<TipoMovimiento[]>('/api/tipos') });
+  const ubicaciones = useQuery({ queryKey: ['ubicaciones'], queryFn: () => apiGet<Ubicacion[]>('/api/ubicaciones') });
+
+  const hayFiltros = tipo !== '' || ubicacion !== '' || desde !== '' || hasta !== '' || estado !== 'TODOS';
+  const limpiar = () => {
+    setEstado('TODOS');
+    setTipo('');
+    setUbicacion('');
+    setDesde('');
+    setHasta('');
+  };
 
   const { data, isLoading, isError, error } = useQuery({
-    queryKey: ['movimientos', estado],
+    queryKey: ['movimientos', estado, tipo, ubicacion, desde, hasta],
     queryFn: () => {
       const qs = new URLSearchParams({ limit: '50' });
       if (estado !== 'TODOS') qs.set('estado', estado);
+      if (tipo) qs.set('tipo', tipo);
+      if (ubicacion) qs.set('ubicacion', ubicacion);
+      if (desde) qs.set('desde', desde);
+      if (hasta) qs.set('hasta', hasta);
       return apiGet<ListaMovimientos>(`/api/movimientos?${qs.toString()}`);
     },
   });
@@ -62,6 +85,38 @@ export function MovimientosPage() {
             + Nuevo
           </Link>
         </div>
+      </div>
+
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <select className={inputCls} value={tipo} onChange={(e) => setTipo(e.target.value)}>
+          <option value="">Todos los tipos</option>
+          {(tipos.data ?? []).map((t) => (
+            <option key={t.codigo} value={t.codigo}>
+              {TIPO_LABEL[t.codigo] ?? t.nombre}
+            </option>
+          ))}
+        </select>
+        <select className={inputCls} value={ubicacion} onChange={(e) => setUbicacion(e.target.value)}>
+          <option value="">Todas las ubicaciones</option>
+          {(ubicaciones.data ?? []).map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.dep_id_3c} — {u.nombre}
+            </option>
+          ))}
+        </select>
+        <label className="flex items-center gap-1 text-sm text-slate-500">
+          Desde
+          <input type="date" className={inputCls} value={desde} onChange={(e) => setDesde(e.target.value)} />
+        </label>
+        <label className="flex items-center gap-1 text-sm text-slate-500">
+          Hasta
+          <input type="date" className={inputCls} value={hasta} onChange={(e) => setHasta(e.target.value)} />
+        </label>
+        {hayFiltros && (
+          <button onClick={limpiar} className="text-sm font-medium text-sky-600 hover:underline">
+            Limpiar filtros
+          </button>
+        )}
       </div>
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -101,7 +156,8 @@ export function MovimientosPage() {
                   </td>
                   <td className="px-4 py-3 text-slate-600">{m.fecha}</td>
                   <td className="px-4 py-3 text-slate-600">
-                    {m.origen_nombre} <span className="text-slate-400">→</span> {m.destino_nombre}
+                    <span className="text-slate-400">{m.origen_dep_id_3c} —</span> {m.origen_nombre}{' '}
+                    <span className="text-slate-400">→ {m.destino_dep_id_3c} —</span> {m.destino_nombre}
                   </td>
                 </tr>
               ))}

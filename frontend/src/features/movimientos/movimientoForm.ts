@@ -57,11 +57,22 @@ export function aFormState(m: MovimientoDetalle): FormState {
   };
 }
 
-// Form vacío con defaults razonables (crear): RINT, origen = primer depósito,
-// destino = primer área, fecha de hoy, un renglón.
+// Baldes virtuales de 3c: no son áreas de producción reales, no sirven de destino default.
+const BALDES_VIRTUALES = new Set([101, 102]);
+
+// Form vacío con defaults razonables (crear): RINT, origen = FABRICA (dep 1),
+// destino = primer área de producción (excluye baldes), fecha de hoy, un renglón.
 export function formVacio(ubicaciones: Ubicacion[], tipoDefault: string): FormState {
-  const dep = ubicaciones.find((u) => u.tipo === 'DEPOSITO') ?? ubicaciones[0];
-  const area = ubicaciones.find((u) => u.tipo === 'AREA') ?? ubicaciones[0];
+  const fabrica =
+    ubicaciones.find((u) => u.dep_id_3c === 1) ??
+    ubicaciones.find((u) => u.nombre.toUpperCase() === 'FABRICA') ??
+    ubicaciones.find((u) => u.tipo === 'DEPOSITO') ??
+    ubicaciones[0];
+  const area =
+    ubicaciones.find((u) => u.tipo === 'AREA' && !BALDES_VIRTUALES.has(u.dep_id_3c)) ??
+    ubicaciones.find((u) => u.tipo === 'AREA') ??
+    ubicaciones[0];
+  const dep = fabrica;
   return {
     tipo: tipoDefault,
     origen_dep_id_3c: dep?.dep_id_3c ?? 0,

@@ -55,7 +55,7 @@ export function MovimientoFormFields({
           >
             {ubicaciones.map((u) => (
               <option key={u.id} value={u.dep_id_3c}>
-                {u.nombre}
+                {u.dep_id_3c} — {u.nombre}
               </option>
             ))}
           </select>
@@ -68,7 +68,7 @@ export function MovimientoFormFields({
           >
             {ubicaciones.map((u) => (
               <option key={u.id} value={u.dep_id_3c}>
-                {u.nombre}
+                {u.dep_id_3c} — {u.nombre}
               </option>
             ))}
           </select>
@@ -118,7 +118,7 @@ export function MovimientoFormFields({
                     <option value="">Elegir…</option>
                     {productos.map((p) => (
                       <option key={p.codigo_3c} value={p.codigo_3c}>
-                        {p.nombre} ({p.codigo_3c})
+                        {p.codigo_3c} — {p.nombre}
                       </option>
                     ))}
                   </select>
