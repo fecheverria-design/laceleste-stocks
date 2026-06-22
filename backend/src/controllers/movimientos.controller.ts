@@ -15,6 +15,7 @@ import {
   listarMovimientos,
   obtenerHistorial,
   obtenerMovimientoPorId,
+  obtenerMovimientosDeProducto,
   obtenerStock,
   registrarAbastecimiento,
 } from '../services/movimientos.service.js';
@@ -146,4 +147,19 @@ export async function getStock(req: Request, res: Response): Promise<void> {
     producto3c: parsed.data.producto_3c,
   });
   res.status(200).json(stock);
+}
+
+const MovimientosProductoQuerySchema = z.object({
+  producto_3c: z.string().trim().min(1),
+  ubicacion_id: z.coerce.number().int().positive().optional(),
+});
+
+// GET /api/stock/movimientos — movimientos de un producto (desplegable de stock).
+export async function getMovimientosDeProducto(req: Request, res: Response): Promise<void> {
+  const parsed = MovimientosProductoQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    throw badRequest('VALIDACION', z.prettifyError(parsed.error));
+  }
+  const movimientos = await obtenerMovimientosDeProducto(parsed.data.producto_3c, parsed.data.ubicacion_id);
+  res.status(200).json(movimientos);
 }

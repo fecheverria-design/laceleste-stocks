@@ -3,6 +3,7 @@ import {
   getHistorial,
   getMovimiento,
   getMovimientos,
+  getMovimientosDeProducto,
   getStock,
   postAbastecimiento,
   postMovimiento,
@@ -26,6 +27,7 @@ movimientosRouter.get('/movimientos', requireAuth, getMovimientos);
 movimientosRouter.get('/movimientos/:id', requireAuth, getMovimiento);
 movimientosRouter.get('/movimientos/:id/historial', requireAuth, getHistorial);
 movimientosRouter.get('/stock', requireAuth, getStock);
+movimientosRouter.get('/stock/movimientos', requireAuth, getMovimientosDeProducto);
 
 // Edición: cualquier usuario logueado (decisión de J). Reemplazo completo +
 // recalculo de stock + historial. No editable si está ANULADO.

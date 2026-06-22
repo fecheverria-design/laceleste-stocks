@@ -25,8 +25,10 @@ export interface MovimientoResumen {
   fecha: string; // YYYY-MM-DD
   hora: string; // HH:MM:SS
   origen_id: number;
+  origen_dep_id_3c: number;
   origen_nombre: string;
   destino_id: number;
+  destino_dep_id_3c: number;
   destino_nombre: string;
   usuario_id: number;
   creado_en: string | null;
@@ -45,9 +47,27 @@ export interface FilaStock {
   producto_3c: string;
   producto_nombre: string;
   ubicacion_id: number;
+  ubicacion_dep_id_3c: number;
   ubicacion_nombre: string;
   cantidad: number;
   actualizado_en: string | null;
+}
+
+// Movimiento que toca un producto (desplegable de stock).
+export interface MovimientoDeProducto {
+  id: number;
+  nro: string;
+  tipo: string;
+  estado: EstadoMovimiento;
+  fecha: string;
+  origen_id: number;
+  origen_dep_id_3c: number;
+  origen_nombre: string;
+  destino_id: number;
+  destino_dep_id_3c: number;
+  destino_nombre: string;
+  cantidad_real: string;
+  unidad: string;
 }
 
 // ── Catálogos (selects del front) ────────────────────────────────────────────

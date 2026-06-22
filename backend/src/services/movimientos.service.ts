@@ -16,6 +16,7 @@ import {
   leerSnapshotMovimiento,
   listarMovimientos as repoListarMovimientos,
   marcarAnulado,
+  movimientosDeProducto,
   obtenerAuditoria,
   obtenerMovimiento,
   productosExistentes,
@@ -26,6 +27,7 @@ import {
   type FilaStock,
   type ListaFiltros,
   type MovimientoConDetalle,
+  type MovimientoDeProducto,
   type MovimientoResumen,
   type RenglonSnapshot,
   type SnapshotMovimiento,
@@ -419,4 +421,12 @@ export async function obtenerStock(filtros: {
   producto3c?: string;
 }): Promise<FilaStock[]> {
   return consultarStock(filtros);
+}
+
+// Movimientos de un producto (para el desplegable de stock al tocar una fila).
+export async function obtenerMovimientosDeProducto(
+  producto3c: string,
+  ubicacionId?: number,
+): Promise<MovimientoDeProducto[]> {
+  return movimientosDeProducto(producto3c, ubicacionId);
 }

@@ -413,8 +413,10 @@ export interface MovimientoResumen {
   fecha: string;
   hora: string;
   origen_id: number;
+  origen_dep_id_3c: number;
   origen_nombre: string;
   destino_id: number;
+  destino_dep_id_3c: number;
   destino_nombre: string;
   usuario_id: number;
   creado_en: string | null;
@@ -452,8 +454,10 @@ export async function listarMovimientos(
       fecha: movimientos.fecha,
       hora: movimientos.hora,
       origen_id: movimientos.origenId,
+      origen_dep_id_3c: origen.depId3c,
       origen_nombre: origen.nombre,
       destino_id: movimientos.destinoId,
+      destino_dep_id_3c: destino.depId3c,
       destino_nombre: destino.nombre,
       usuario_id: movimientos.usuarioId,
       creado_en: movimientos.creadoEn,
@@ -501,9 +505,66 @@ export interface FilaStock {
   producto_3c: string;
   producto_nombre: string;
   ubicacion_id: number;
+  ubicacion_dep_id_3c: number;
   ubicacion_nombre: string;
   cantidad: number;
   actualizado_en: string | null;
+}
+
+export interface MovimientoDeProducto {
+  id: number;
+  nro: string;
+  tipo: string; // codigo
+  estado: string;
+  fecha: string;
+  origen_id: number;
+  origen_dep_id_3c: number;
+  origen_nombre: string;
+  destino_id: number;
+  destino_dep_id_3c: number;
+  destino_nombre: string;
+  cantidad_real: string;
+  unidad: string;
+}
+
+// Movimientos que tocan un producto (para el desplegable de stock). Si se pasa
+// ubicacionId, filtra a los que entran o salen de esa ubicación; el front deduce
+// el efecto (entrada si destino=ubicación, salida si origen=ubicación). Recientes
+// primero; trae todos los estados (el front marca los ANULADO).
+export async function movimientosDeProducto(
+  producto3c: string,
+  ubicacionId?: number,
+): Promise<MovimientoDeProducto[]> {
+  const origen = alias(ubicaciones, 'o_mp');
+  const destino = alias(ubicaciones, 'd_mp');
+  const conds: SQL[] = [eq(movimientosDetalle.producto3c, producto3c)];
+  if (ubicacionId !== undefined) {
+    conds.push(or(eq(movimientos.origenId, ubicacionId), eq(movimientos.destinoId, ubicacionId))!);
+  }
+  return db
+    .select({
+      id: movimientos.id,
+      nro: movimientos.nro,
+      tipo: tiposMovimiento.codigo,
+      estado: movimientos.estado,
+      fecha: movimientos.fecha,
+      origen_id: movimientos.origenId,
+      origen_dep_id_3c: origen.depId3c,
+      origen_nombre: origen.nombre,
+      destino_id: movimientos.destinoId,
+      destino_dep_id_3c: destino.depId3c,
+      destino_nombre: destino.nombre,
+      cantidad_real: movimientosDetalle.cantidadReal,
+      unidad: movimientosDetalle.unidad,
+    })
+    .from(movimientosDetalle)
+    .innerJoin(movimientos, eq(movimientos.id, movimientosDetalle.movimientoId))
+    .innerJoin(tiposMovimiento, eq(tiposMovimiento.id, movimientos.tipoId))
+    .innerJoin(origen, eq(origen.id, movimientos.origenId))
+    .innerJoin(destino, eq(destino.id, movimientos.destinoId))
+    .where(and(...conds))
+    .orderBy(desc(movimientos.fecha), desc(movimientos.id))
+    .limit(200);
 }
 
 export async function consultarStock(filtros: {
@@ -518,12 +579,13 @@ export async function consultarStock(filtros: {
     producto_3c: string;
     producto_nombre: string;
     ubicacion_id: number;
+    ubicacion_dep_id_3c: number;
     ubicacion_nombre: string;
     cantidad: string;
     actualizado_en: string | null;
   }>(
     sql`SELECT s.producto_3c, p.nombre AS producto_nombre,
-               s.ubicacion_id, u.nombre AS ubicacion_nombre,
+               s.ubicacion_id, u.dep_id_3c AS ubicacion_dep_id_3c, u.nombre AS ubicacion_nombre,
                s.cantidad, s.actualizado_en
         FROM stock_actual s
         JOIN productos p ON p.codigo_3c = s.producto_3c
@@ -536,6 +598,7 @@ export async function consultarStock(filtros: {
     producto_3c: r.producto_3c,
     producto_nombre: r.producto_nombre,
     ubicacion_id: r.ubicacion_id,
+    ubicacion_dep_id_3c: r.ubicacion_dep_id_3c,
     ubicacion_nombre: r.ubicacion_nombre,
     cantidad: Number(r.cantidad),
     actualizado_en: r.actualizado_en ? new Date(r.actualizado_en).toISOString() : null,
