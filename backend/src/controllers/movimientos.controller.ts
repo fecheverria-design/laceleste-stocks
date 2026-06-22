@@ -16,6 +16,7 @@ import {
   obtenerHistorial,
   obtenerMovimientoPorId,
   obtenerMovimientosDeProducto,
+  obtenerMovimientosExport,
   obtenerStock,
   registrarAbastecimiento,
 } from '../services/movimientos.service.js';
@@ -147,6 +148,48 @@ export async function getStock(req: Request, res: Response): Promise<void> {
     producto3c: parsed.data.producto_3c,
   });
   res.status(200).json(stock);
+}
+
+// CSV apto para Excel es-AR: separador ';', decimales con coma, comillas si hace falta.
+function celdaCsv(v: string): string {
+  return /[";\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+}
+function filaCsv(campos: string[]): string {
+  return campos.map(celdaCsv).join(';');
+}
+function aCsv(headers: string[], filas: string[][]): string {
+  const lineas = [filaCsv(headers), ...filas.map(filaCsv)];
+  return '﻿' + lineas.join('\r\n'); // BOM para que Excel lea UTF-8
+}
+const dec = (s: string): string => s.replace('.', ','); // 1380.000 -> 1380,000
+
+// GET /api/movimientos/export.csv — export del listado (mismos filtros) a CSV/Excel.
+export async function getMovimientosCsv(req: Request, res: Response): Promise<void> {
+  const parsed = MovimientosQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    throw badRequest('VALIDACION', z.prettifyError(parsed.error));
+  }
+  const { desde, hasta, tipo, estado, ubicacion } = parsed.data;
+  const filas = await obtenerMovimientosExport({ desde, hasta, tipo, estado, ubicacionId: ubicacion });
+  const csv = aCsv(
+    ['Nro', 'Fecha', 'Hora', 'Tipo', 'Estado', 'Origen', 'Destino', 'Codigo', 'Producto', 'Cantidad', 'Unidad'],
+    filas.map((r) => [
+      r.nro,
+      r.fecha,
+      r.hora,
+      r.tipo,
+      r.estado,
+      `${r.origen_dep_id_3c} - ${r.origen_nombre}`,
+      `${r.destino_dep_id_3c} - ${r.destino_nombre}`,
+      r.producto_3c,
+      r.producto_nombre,
+      dec(r.cantidad_real),
+      r.unidad,
+    ]),
+  );
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="movimientos.csv"');
+  res.status(200).send(csv);
 }
 
 const MovimientosProductoQuerySchema = z.object({

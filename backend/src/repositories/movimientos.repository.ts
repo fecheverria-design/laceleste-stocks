@@ -525,12 +525,17 @@ export interface MovimientoDeProducto {
   destino_nombre: string;
   cantidad_real: string;
   unidad: string;
+  saldo: number | null; // saldo en la ubicación DESPUÉS de este movimiento (kardex); null si no se filtró por ubicación
 }
 
-// Movimientos que tocan un producto (para el desplegable de stock). Si se pasa
-// ubicacionId, filtra a los que entran o salen de esa ubicación; el front deduce
-// el efecto (entrada si destino=ubicación, salida si origen=ubicación). Recientes
-// primero; trae todos los estados (el front marca los ANULADO).
+function redondear3(n: number): number {
+  return Math.round(n * 1000) / 1000;
+}
+
+// Movimientos que tocan un producto (desplegable de stock / kardex). Si se pasa
+// ubicacionId, filtra a los que entran o salen de esa ubicación, calcula el saldo
+// acumulado (kardex) y deduce el efecto (entrada si destino=ubicación, salida si
+// origen). Recientes primero; trae todos los estados (el front marca los ANULADO).
 export async function movimientosDeProducto(
   producto3c: string,
   ubicacionId?: number,
@@ -541,7 +546,7 @@ export async function movimientosDeProducto(
   if (ubicacionId !== undefined) {
     conds.push(or(eq(movimientos.origenId, ubicacionId), eq(movimientos.destinoId, ubicacionId))!);
   }
-  return db
+  const rows = await db
     .select({
       id: movimientos.id,
       nro: movimientos.nro,
@@ -564,7 +569,77 @@ export async function movimientosDeProducto(
     .innerJoin(destino, eq(destino.id, movimientos.destinoId))
     .where(and(...conds))
     .orderBy(desc(movimientos.fecha), desc(movimientos.id))
-    .limit(200);
+    .limit(500);
+
+  // Sin ubicación: no hay saldo (sería ambiguo entre varias ubicaciones).
+  if (ubicacionId === undefined) return rows.map((r) => ({ ...r, saldo: null }));
+
+  // Saldo acumulado anclado al stock actual: el más reciente queda en el saldo de
+  // hoy; bajando (hacia los viejos) restamos el delta del más nuevo. Solo CONFIRMADO
+  // mueve stock (ANULADO/BORRADOR no), así que su delta es 0 y arrastran el saldo.
+  const stRes = await db.execute<{ cantidad: string }>(
+    sql`SELECT cantidad FROM stock_actual WHERE producto_3c = ${producto3c} AND ubicacion_id = ${ubicacionId}`,
+  );
+  let saldo = stRes.rows[0] ? Number(stRes.rows[0].cantidad) : 0;
+  return rows.map((r) => {
+    const fila = { ...r, saldo };
+    const delta =
+      r.estado === 'CONFIRMADO'
+        ? r.destino_id === ubicacionId
+          ? Number(r.cantidad_real)
+          : -Number(r.cantidad_real)
+        : 0;
+    saldo = redondear3(saldo - delta);
+    return fila;
+  });
+}
+
+export interface RenglonExport {
+  nro: string;
+  fecha: string;
+  hora: string;
+  tipo: string; // codigo
+  estado: string;
+  origen_dep_id_3c: number;
+  origen_nombre: string;
+  destino_dep_id_3c: number;
+  destino_nombre: string;
+  producto_3c: string;
+  producto_nombre: string;
+  cantidad_real: string;
+  unidad: string;
+}
+
+// Renglones para exportar a Excel: una fila por renglón (cabecera repetida), con los
+// MISMOS filtros del listado (desde/hasta/tipo/estado/ubicación). Sin paginar.
+export async function movimientosParaExport(f: ListaFiltros): Promise<RenglonExport[]> {
+  const conds = condicionesLista(f);
+  const origen = alias(ubicaciones, 'o_exp');
+  const destino = alias(ubicaciones, 'd_exp');
+  return db
+    .select({
+      nro: movimientos.nro,
+      fecha: movimientos.fecha,
+      hora: movimientos.hora,
+      tipo: tiposMovimiento.codigo,
+      estado: movimientos.estado,
+      origen_dep_id_3c: origen.depId3c,
+      origen_nombre: origen.nombre,
+      destino_dep_id_3c: destino.depId3c,
+      destino_nombre: destino.nombre,
+      producto_3c: movimientosDetalle.producto3c,
+      producto_nombre: productos.nombre,
+      cantidad_real: movimientosDetalle.cantidadReal,
+      unidad: movimientosDetalle.unidad,
+    })
+    .from(movimientos)
+    .innerJoin(tiposMovimiento, eq(tiposMovimiento.id, movimientos.tipoId))
+    .innerJoin(movimientosDetalle, eq(movimientosDetalle.movimientoId, movimientos.id))
+    .innerJoin(productos, eq(productos.codigo3c, movimientosDetalle.producto3c))
+    .innerJoin(origen, eq(origen.id, movimientos.origenId))
+    .innerJoin(destino, eq(destino.id, movimientos.destinoId))
+    .where(conds.length ? and(...conds) : undefined)
+    .orderBy(desc(movimientos.fecha), desc(movimientos.id));
 }
 
 export async function consultarStock(filtros: {

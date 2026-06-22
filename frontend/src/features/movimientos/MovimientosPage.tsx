@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { apiGet } from '../../shared/api/client';
+import { apiGet, descargarArchivo } from '../../shared/api/client';
 import type { EstadoMovimiento, ListaMovimientos, TipoMovimiento, Ubicacion } from '../../shared/api/types';
 
 type FiltroEstado = EstadoMovimiento | 'TODOS';
@@ -42,18 +42,30 @@ export function MovimientosPage() {
     setHasta('');
   };
 
+  // Querystring de filtros, compartido por el listado y el export (sin limit).
+  const filtrosQs = (): URLSearchParams => {
+    const qs = new URLSearchParams();
+    if (estado !== 'TODOS') qs.set('estado', estado);
+    if (tipo) qs.set('tipo', tipo);
+    if (ubicacion) qs.set('ubicacion', ubicacion);
+    if (desde) qs.set('desde', desde);
+    if (hasta) qs.set('hasta', hasta);
+    return qs;
+  };
+
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['movimientos', estado, tipo, ubicacion, desde, hasta],
     queryFn: () => {
-      const qs = new URLSearchParams({ limit: '50' });
-      if (estado !== 'TODOS') qs.set('estado', estado);
-      if (tipo) qs.set('tipo', tipo);
-      if (ubicacion) qs.set('ubicacion', ubicacion);
-      if (desde) qs.set('desde', desde);
-      if (hasta) qs.set('hasta', hasta);
+      const qs = filtrosQs();
+      qs.set('limit', '50');
       return apiGet<ListaMovimientos>(`/api/movimientos?${qs.toString()}`);
     },
   });
+
+  const exportar = () => {
+    const qs = filtrosQs().toString();
+    void descargarArchivo(`/api/movimientos/export.csv${qs ? `?${qs}` : ''}`, 'movimientos.csv');
+  };
 
   return (
     <section>
@@ -78,6 +90,12 @@ export function MovimientosPage() {
               </button>
             ))}
           </div>
+          <button
+            onClick={exportar}
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            Exportar Excel
+          </button>
           <Link
             to="/movimientos/nuevo"
             className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-sky-700"

@@ -1,6 +1,7 @@
 import { Fragment, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiGet } from '../../shared/api/client';
+import { dec, descargarCsv } from '../../shared/lib/csv';
 import type { EstadoMovimiento, FilaStock, MovimientoDeProducto } from '../../shared/api/types';
 
 const nf = new Intl.NumberFormat('es-AR', { maximumFractionDigits: 3 });
@@ -17,8 +18,18 @@ const BADGE: Record<EstadoMovimiento, string> = {
   BORRADOR: 'bg-amber-50 text-amber-700 ring-amber-200',
 };
 
-// Sub-tabla con los movimientos del producto en esa ubicación (entradas/salidas).
-function MovimientosDeProducto({ producto3c, ubicacionId }: { producto3c: string; ubicacionId: number }) {
+// Kardex: movimientos del producto en esa ubicación (entradas/salidas + saldo acumulado).
+function MovimientosDeProducto({
+  producto3c,
+  ubicacionId,
+  productoNombre,
+  ubicacionNombre,
+}: {
+  producto3c: string;
+  ubicacionId: number;
+  productoNombre: string;
+  ubicacionNombre: string;
+}) {
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['stock-movimientos', producto3c, ubicacionId],
     queryFn: () =>
@@ -32,51 +43,81 @@ function MovimientosDeProducto({ producto3c, ubicacionId }: { producto3c: string
   if (!data || data.length === 0)
     return <p className="px-4 py-3 text-sm text-slate-500">Sin movimientos para este producto en esta ubicación.</p>;
 
+  const exportarKardex = () => {
+    const filas = data.map((m) => {
+      const entrada = m.destino_id === ubicacionId;
+      const contraparte = entrada
+        ? `${m.origen_dep_id_3c} - ${m.origen_nombre}`
+        : `${m.destino_dep_id_3c} - ${m.destino_nombre}`;
+      const cant = m.estado === 'ANULADO' ? '0' : `${entrada ? '' : '-'}${dec(m.cantidad_real)}`;
+      return [m.fecha, m.nro, TIPO_LABEL[m.tipo] ?? m.tipo, m.estado, contraparte, cant, m.unidad, m.saldo === null ? '' : dec(m.saldo)];
+    });
+    descargarCsv(
+      `kardex_${producto3c}_dep${ubicacionId}.csv`,
+      ['Fecha', 'Nro', 'Tipo', 'Estado', 'Contraparte', 'Movimiento', 'Unidad', 'Saldo'],
+      filas,
+    );
+  };
+
   return (
-    <table className="w-full text-sm">
-      <thead>
-        <tr className="text-left text-xs uppercase tracking-wide text-slate-400">
-          <th className="px-4 py-2 font-medium">Fecha</th>
-          <th className="px-4 py-2 font-medium">Nro</th>
-          <th className="px-4 py-2 font-medium">Tipo</th>
-          <th className="px-4 py-2 font-medium">Contraparte</th>
-          <th className="px-4 py-2 font-medium">Estado</th>
-          <th className="px-4 py-2 text-right font-medium">Cantidad</th>
-        </tr>
-      </thead>
-      <tbody>
-        {data.map((m) => {
-          const entrada = m.destino_id === ubicacionId;
-          const contraparte = entrada
-            ? `${m.origen_dep_id_3c} — ${m.origen_nombre}`
-            : `${m.destino_dep_id_3c} — ${m.destino_nombre}`;
-          const anulado = m.estado === 'ANULADO';
-          return (
-            <tr key={m.id} className="border-t border-slate-100">
-              <td className="px-4 py-2 text-slate-600">{m.fecha}</td>
-              <td className="px-4 py-2 font-mono text-xs text-slate-600">{m.nro}</td>
-              <td className="px-4 py-2 text-slate-600">{TIPO_LABEL[m.tipo] ?? m.tipo}</td>
-              <td className="px-4 py-2 text-slate-600">
-                <span className="text-slate-400">{entrada ? 'desde' : 'hacia'}</span> {contraparte}
-              </td>
-              <td className="px-4 py-2">
-                <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${BADGE[m.estado]}`}>
-                  {m.estado.charAt(0) + m.estado.slice(1).toLowerCase()}
-                </span>
-              </td>
-              <td
-                className={`px-4 py-2 text-right font-medium tabular-nums ${
-                  anulado ? 'text-slate-400 line-through' : entrada ? 'text-emerald-600' : 'text-rose-600'
-                }`}
-              >
-                {entrada ? '+' : '−'}
-                {nf.format(Number(m.cantidad_real))} {m.unidad}
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+    <div>
+      <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2">
+        <span className="text-xs text-slate-500">
+          Kardex · {producto3c} {productoNombre} · {ubicacionNombre}
+        </span>
+        <button onClick={exportarKardex} className="text-xs font-medium text-sky-600 hover:underline">
+          Exportar kardex
+        </button>
+      </div>
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-left text-xs uppercase tracking-wide text-slate-400">
+            <th className="px-4 py-2 font-medium">Fecha</th>
+            <th className="px-4 py-2 font-medium">Nro</th>
+            <th className="px-4 py-2 font-medium">Tipo</th>
+            <th className="px-4 py-2 font-medium">Contraparte</th>
+            <th className="px-4 py-2 font-medium">Estado</th>
+            <th className="px-4 py-2 text-right font-medium">Movimiento</th>
+            <th className="px-4 py-2 text-right font-medium">Saldo</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.map((m) => {
+            const entrada = m.destino_id === ubicacionId;
+            const contraparte = entrada
+              ? `${m.origen_dep_id_3c} — ${m.origen_nombre}`
+              : `${m.destino_dep_id_3c} — ${m.destino_nombre}`;
+            const anulado = m.estado === 'ANULADO';
+            return (
+              <tr key={m.id} className="border-t border-slate-100">
+                <td className="px-4 py-2 text-slate-600">{m.fecha}</td>
+                <td className="px-4 py-2 font-mono text-xs text-slate-600">{m.nro}</td>
+                <td className="px-4 py-2 text-slate-600">{TIPO_LABEL[m.tipo] ?? m.tipo}</td>
+                <td className="px-4 py-2 text-slate-600">
+                  <span className="text-slate-400">{entrada ? 'desde' : 'hacia'}</span> {contraparte}
+                </td>
+                <td className="px-4 py-2">
+                  <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${BADGE[m.estado]}`}>
+                    {m.estado.charAt(0) + m.estado.slice(1).toLowerCase()}
+                  </span>
+                </td>
+                <td
+                  className={`px-4 py-2 text-right font-medium tabular-nums ${
+                    anulado ? 'text-slate-400 line-through' : entrada ? 'text-emerald-600' : 'text-rose-600'
+                  }`}
+                >
+                  {entrada ? '+' : '−'}
+                  {nf.format(Number(m.cantidad_real))} {m.unidad}
+                </td>
+                <td className="px-4 py-2 text-right font-medium tabular-nums text-slate-700">
+                  {m.saldo === null ? '—' : nf.format(m.saldo)}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -107,6 +148,15 @@ export function StockPage() {
     return true;
   });
 
+  // Export client-side: lo que se ve filtrado (WYSIWYG).
+  const exportar = () => {
+    descargarCsv(
+      'stock.csv',
+      ['Deposito', 'Ubicacion', 'Codigo', 'Producto', 'Cantidad'],
+      filas.map((f) => [String(f.ubicacion_dep_id_3c), f.ubicacion_nombre, f.producto_3c, f.producto_nombre, dec(f.cantidad)]),
+    );
+  };
+
   return (
     <section>
       <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
@@ -134,6 +184,13 @@ export function StockPage() {
             value={texto}
             onChange={(e) => setTexto(e.target.value)}
           />
+          <button
+            onClick={exportar}
+            disabled={filas.length === 0}
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+          >
+            Exportar Excel
+          </button>
         </div>
       </div>
 
@@ -188,7 +245,12 @@ export function StockPage() {
                       <tr className="border-b border-slate-100 bg-slate-50/50">
                         <td colSpan={5} className="px-2 py-2">
                           <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-                            <MovimientosDeProducto producto3c={f.producto_3c} ubicacionId={f.ubicacion_id} />
+                            <MovimientosDeProducto
+                              producto3c={f.producto_3c}
+                              ubicacionId={f.ubicacion_id}
+                              productoNombre={f.producto_nombre}
+                              ubicacionNombre={f.ubicacion_nombre}
+                            />
                           </div>
                         </td>
                       </tr>

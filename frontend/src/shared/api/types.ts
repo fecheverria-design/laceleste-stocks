@@ -68,6 +68,7 @@ export interface MovimientoDeProducto {
   destino_nombre: string;
   cantidad_real: string;
   unidad: string;
+  saldo: number | null; // saldo en la ubicación después de este movimiento (kardex)
 }
 
 // ── Catálogos (selects del front) ────────────────────────────────────────────

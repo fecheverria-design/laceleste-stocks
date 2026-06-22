@@ -45,6 +45,27 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
 
 export const apiGet = <T>(path: string): Promise<T> => request<T>(path, { method: 'GET' });
 
+// Descarga autenticada (CSV/binario): trae el blob con el Bearer y dispara la bajada.
+export async function descargarArchivo(path: string, filename: string): Promise<void> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (res.status === 401) {
+    clearSession();
+    notifyUnauthorized();
+    throw new ApiError(401, 'Sesión expirada, ingresá de nuevo.');
+  }
+  if (!res.ok) throw new ApiError(res.status, `No se pudo descargar (HTTP ${res.status}).`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export const apiPost = <T>(path: string, body: unknown): Promise<T> =>
   request<T>(path, { method: 'POST', body: JSON.stringify(body) });
 

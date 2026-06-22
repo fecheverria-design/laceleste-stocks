@@ -3,6 +3,7 @@ import {
   getHistorial,
   getMovimiento,
   getMovimientos,
+  getMovimientosCsv,
   getMovimientosDeProducto,
   getStock,
   postAbastecimiento,
@@ -24,6 +25,8 @@ movimientosRouter.post('/movimientos', requireAuth, postMovimiento);
 
 // Lecturas: cualquier usuario logueado (ADMIN o DEPOSITO).
 movimientosRouter.get('/movimientos', requireAuth, getMovimientos);
+// export.csv ANTES de /:id para que no se matchee como id.
+movimientosRouter.get('/movimientos/export.csv', requireAuth, getMovimientosCsv);
 movimientosRouter.get('/movimientos/:id', requireAuth, getMovimiento);
 movimientosRouter.get('/movimientos/:id/historial', requireAuth, getHistorial);
 movimientosRouter.get('/stock', requireAuth, getStock);

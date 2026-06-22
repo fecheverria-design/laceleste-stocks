@@ -17,6 +17,7 @@ import {
   listarMovimientos as repoListarMovimientos,
   marcarAnulado,
   movimientosDeProducto,
+  movimientosParaExport,
   obtenerAuditoria,
   obtenerMovimiento,
   productosExistentes,
@@ -29,6 +30,7 @@ import {
   type MovimientoConDetalle,
   type MovimientoDeProducto,
   type MovimientoResumen,
+  type RenglonExport,
   type RenglonSnapshot,
   type SnapshotMovimiento,
 } from '../repositories/movimientos.repository.js';
@@ -429,4 +431,9 @@ export async function obtenerMovimientosDeProducto(
   ubicacionId?: number,
 ): Promise<MovimientoDeProducto[]> {
   return movimientosDeProducto(producto3c, ubicacionId);
+}
+
+// Renglones para exportar a Excel (mismos filtros del listado, sin paginar).
+export async function obtenerMovimientosExport(filtros: ListaFiltros): Promise<RenglonExport[]> {
+  return movimientosParaExport(filtros);
 }
