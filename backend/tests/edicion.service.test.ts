@@ -54,6 +54,18 @@ describe('editarMovimiento (editable con historial)', () => {
     expect(hist[0]!.cambios.some((c) => c.campo === 'detalle')).toBe(true);
   });
 
+  it('numera las ediciones dentro del movimiento (secuencia estable, vieja=1)', async () => {
+    const { fx, id, base } = await escenario();
+    await editarMovimiento(id, { ...base, observaciones: 'primera' }, { usuarioId: fx.usuarioId });
+    await editarMovimiento(id, { ...base, observaciones: 'segunda' }, { usuarioId: fx.usuarioId });
+    await editarMovimiento(id, { ...base, observaciones: 'tercera' }, { usuarioId: fx.usuarioId });
+
+    const hist = await obtenerHistorial(id); // reciente primero
+    expect(hist.map((h) => h.secuencia)).toEqual([3, 2, 1]);
+    // La más reciente (secuencia 3) es la que dejó "tercera".
+    expect(hist[0]!.cambios.find((c) => c.campo === 'observaciones')?.despues).toBe('tercera');
+  });
+
   it('cambiar el producto del renglón mueve el stock al nuevo producto', async () => {
     const { fx, id, base } = await escenario();
 

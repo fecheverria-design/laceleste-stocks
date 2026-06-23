@@ -127,6 +127,7 @@ export interface CambioAuditoria {
 }
 export interface FilaHistorial {
   id: number;
+  secuencia: number; // nro de edición dentro del movimiento (1 = la más vieja)
   usuario_id: number;
   accion: string;
   cambios: CambioAuditoria[];

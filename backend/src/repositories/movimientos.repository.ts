@@ -278,6 +278,7 @@ export async function insertarAuditoria(
 
 export interface FilaAuditoria {
   id: number;
+  secuencia: number; // nro de edición DENTRO del movimiento (1 = la más vieja), estable
   usuario_id: number;
   accion: string;
   cambios: CambioAuditoria[];
@@ -285,6 +286,8 @@ export interface FilaAuditoria {
 }
 
 // Historial de un movimiento, más reciente primero (para GET /:id/historial).
+// `secuencia` = rank por id ascendente dentro del movimiento (la más vieja es la 1);
+// es estable porque una edición nueva no renumera las anteriores.
 export async function obtenerAuditoria(movimientoId: number): Promise<FilaAuditoria[]> {
   const rows = await db
     .select({
@@ -298,8 +301,11 @@ export async function obtenerAuditoria(movimientoId: number): Promise<FilaAudito
     .where(eq(movimientosAuditoria.movimientoId, movimientoId))
     .orderBy(desc(movimientosAuditoria.id));
 
-  return rows.map((r) => ({
+  // rows viene DESC (reciente primero): la última de la lista es la edición 1.
+  const total = rows.length;
+  return rows.map((r, i) => ({
     id: r.id,
+    secuencia: total - i,
     usuario_id: r.usuario_id,
     accion: r.accion,
     cambios: r.cambios as CambioAuditoria[],

@@ -87,6 +87,69 @@ export function formVacio(ubicaciones: Ubicacion[], tipoDefault: string): FormSt
 
 export { renglonVacio };
 
+// ── Validación (front) ───────────────────────────────────────────────────────
+// Refleja las reglas del schema Zod del backend (regla #8, mientras no haya paquete
+// compartido) + chequeos de UX: cantidad_real obligatoria y > 0 (mueve stock, regla
+// #2), hasta 3 decimales, producto y unidad presentes, origen ≠ destino.
+
+export interface RenglonErrores {
+  producto_3c?: string;
+  cantidad_real?: string;
+  cantidad_sugerida?: string;
+  unidad?: string;
+}
+
+export interface FormErrores {
+  origen_dep_id_3c?: string;
+  destino_dep_id_3c?: string;
+  fecha?: string;
+  detalle?: string; // error a nivel lista (sin renglones)
+  renglones: RenglonErrores[];
+}
+
+// Valida una cantidad escrita en el form. `requerido` exige presencia y > 0.
+function errorCantidad(v: string, requerido: boolean): string | undefined {
+  const t = v.trim();
+  if (t === '') return requerido ? 'Requerido' : undefined;
+  const n = Number(t.replace(',', '.'));
+  if (!Number.isFinite(n)) return 'Número inválido';
+  if (n < 0) return 'No puede ser negativo';
+  if (requerido && n === 0) return 'Debe ser mayor a 0';
+  const decimales = t.includes('.') ? (t.split('.')[1]?.length ?? 0) : t.includes(',') ? (t.split(',')[1]?.length ?? 0) : 0;
+  if (decimales > 3) return 'Hasta 3 decimales';
+  return undefined;
+}
+
+export function validar(f: FormState): FormErrores {
+  const e: FormErrores = { renglones: [] };
+  if (!f.origen_dep_id_3c) e.origen_dep_id_3c = 'Elegí un origen';
+  if (!f.destino_dep_id_3c) e.destino_dep_id_3c = 'Elegí un destino';
+  if (f.origen_dep_id_3c && f.destino_dep_id_3c && f.origen_dep_id_3c === f.destino_dep_id_3c) {
+    e.destino_dep_id_3c = 'Origen y destino no pueden ser el mismo';
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(f.fecha)) e.fecha = 'Fecha inválida';
+  if (f.renglones.length === 0) e.detalle = 'Agregá al menos un renglón';
+
+  e.renglones = f.renglones.map((r) => {
+    const re: RenglonErrores = {};
+    if (!r.producto_3c) re.producto_3c = 'Elegí un producto';
+    const cr = errorCantidad(r.cantidad_real, true);
+    if (cr) re.cantidad_real = cr;
+    const cs = errorCantidad(r.cantidad_sugerida, false);
+    if (cs) re.cantidad_sugerida = cs;
+    if (!r.unidad.trim()) re.unidad = 'Requerido';
+    return re;
+  });
+  return e;
+}
+
+export function tieneErrores(e: FormErrores): boolean {
+  return (
+    Boolean(e.origen_dep_id_3c || e.destino_dep_id_3c || e.fecha || e.detalle) ||
+    e.renglones.some((r) => Object.values(r).some(Boolean))
+  );
+}
+
 // Convierte el form al payload de la API (POST/PUT comparten shape).
 export function aPayload(f: FormState) {
   const numOrUndef = (v: string) => (v.trim() === '' ? undefined : Number(v));

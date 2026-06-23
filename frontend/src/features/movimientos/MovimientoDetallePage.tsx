@@ -3,8 +3,9 @@ import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPut } from '../../shared/api/client';
 import type { FilaHistorial, MovimientoDetalle, Producto, TipoMovimiento, Ubicacion } from '../../shared/api/types';
-import { aFormState, aPayload, renglonVacio, type FormState, type RenglonForm } from './movimientoForm';
+import { aFormState, aPayload, renglonVacio, tieneErrores, validar, type FormState, type RenglonForm } from './movimientoForm';
 import { MovimientoFormFields } from './MovimientoFormFields';
+import { HistorialEdiciones } from './HistorialEdiciones';
 
 export function MovimientoDetallePage() {
   const { id } = useParams<{ id: string }>();
@@ -12,6 +13,7 @@ export function MovimientoDetallePage() {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<FormState | null>(null);
   const [okMsg, setOkMsg] = useState(false);
+  const [intentado, setIntentado] = useState(false);
 
   const detalle = useQuery({
     queryKey: ['movimiento', movId],
@@ -48,6 +50,12 @@ export function MovimientoDetallePage() {
 
   const mov = detalle.data;
   const anulado = mov.estado === 'ANULADO';
+  const errores = validar(form);
+  const hayErrores = tieneErrores(errores);
+  const guardarSiValido = () => {
+    setIntentado(true);
+    if (!hayErrores) guardar.mutate(form);
+  };
   const setField = <K extends keyof FormState>(k: K, v: FormState[K]) => {
     setForm((f) => (f ? { ...f, [k]: v } : f));
     setOkMsg(false);
@@ -85,7 +93,7 @@ export function MovimientoDetallePage() {
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (form) guardar.mutate(form);
+          guardarSiValido();
         }}
         className="space-y-6"
       >
@@ -95,6 +103,7 @@ export function MovimientoDetallePage() {
             ubicaciones={ubicaciones.data ?? []}
             productos={productos.data ?? []}
             tipos={tipos.data ?? []}
+            errores={intentado ? errores : undefined}
             onField={setField}
             onRenglon={setRenglon}
             onAddRenglon={addRenglon}
@@ -107,35 +116,22 @@ export function MovimientoDetallePage() {
             >
               {guardar.isPending ? 'Guardando…' : 'Guardar cambios'}
             </button>
+            {intentado && hayErrores && (
+              <span className="text-sm text-rose-700">Revisá los campos marcados.</span>
+            )}
             {okMsg && <span className="text-sm text-emerald-700">Guardado ✓</span>}
             {guardar.isError && <span className="text-sm text-rose-700">{(guardar.error as Error).message}</span>}
           </div>
         </fieldset>
       </form>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-5">
-        <h3 className="mb-3 text-sm font-semibold">Historial de ediciones</h3>
-        {historial.data && historial.data.length === 0 && (
-          <p className="text-sm text-slate-500">Sin ediciones registradas.</p>
-        )}
-        <ul className="space-y-3">
-          {(historial.data ?? []).map((h) => (
-            <li key={h.id} className="rounded-lg bg-slate-50 p-3 text-sm">
-              <p className="text-xs text-slate-500">
-                {new Date(h.creado_en).toLocaleString('es-AR')} · usuario #{h.usuario_id} · {h.accion}
-              </p>
-              <ul className="mt-1 space-y-0.5 text-slate-700">
-                {h.cambios.map((c, j) => (
-                  <li key={j}>
-                    <span className="font-medium">{c.campo}</span>: <code className="text-xs">{JSON.stringify(c.antes)}</code>{' '}
-                    → <code className="text-xs">{JSON.stringify(c.despues)}</code>
-                  </li>
-                ))}
-              </ul>
-            </li>
-          ))}
-        </ul>
-      </div>
+      <HistorialEdiciones
+        nro={mov.nro}
+        historial={historial.data ?? []}
+        ubicaciones={ubicaciones.data ?? []}
+        productos={productos.data ?? []}
+        tipos={tipos.data ?? []}
+      />
     </section>
   );
 }
