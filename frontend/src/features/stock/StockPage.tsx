@@ -133,16 +133,18 @@ export function StockPage() {
     queryFn: () => apiGet<FilaStock[]>('/api/stock'),
   });
 
+  // En acopios (todo lo que no es FABRICA, dep 1) un saldo 0 = "no hay acopio": se
+  // oculta. En FABRICA un 0 es un conteo real y se muestra.
+  const base = (data ?? []).filter((f) => !(f.ubicacion_dep_id_3c !== 1 && f.cantidad === 0));
+
   // Opciones de ubicación (distintas) para el filtro.
-  const ubicaciones = data
-    ? [...new Map(data.map((f) => [f.ubicacion_id, f])).values()].sort((a, b) =>
-        a.ubicacion_dep_id_3c - b.ubicacion_dep_id_3c,
-      )
-    : [];
+  const ubicaciones = [...new Map(base.map((f) => [f.ubicacion_id, f])).values()].sort(
+    (a, b) => a.ubicacion_dep_id_3c - b.ubicacion_dep_id_3c,
+  );
 
   // Filtro client-side: por ubicación y por texto (código o nombre del producto).
   const q = texto.trim().toLowerCase();
-  const filas = (data ?? []).filter((f) => {
+  const filas = base.filter((f) => {
     if (ubic && String(f.ubicacion_id) !== ubic) return false;
     if (q && !f.producto_nombre.toLowerCase().includes(q) && !f.producto_3c.toLowerCase().includes(q)) return false;
     return true;
@@ -164,7 +166,7 @@ export function StockPage() {
           <h2 className="text-xl font-semibold">Stock actual</h2>
           <p className="text-sm text-slate-500">
             {data
-              ? `${filas.length} de ${data.length} ítems · tocá una fila para ver sus movimientos`
+              ? `${filas.length} de ${base.length} ítems · tocá una fila para ver sus movimientos`
               : 'Cargando…'}
           </p>
         </div>
