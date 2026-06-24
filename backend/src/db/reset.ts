@@ -5,11 +5,11 @@ import { db, pool } from './client.js';
 // equivocaste de import). Conserva usuarios (login) y tipos_movimiento (catálogo).
 // Resetea los correlativos por año. Uso: npm run db:reset
 //
-// ⚠️ Borra TODO: productos, proveedores, ubicaciones, movimientos, detalle y auditoría.
+// ⚠️ Borra TODO: precios, productos, proveedores, ubicaciones, movimientos, detalle y auditoría.
 
 async function main(): Promise<void> {
   await db.execute(
-    sql`TRUNCATE movimientos_detalle, movimientos_auditoria, movimientos, productos, ubicaciones, proveedores, lotes RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE precios, movimientos_detalle, movimientos_auditoria, movimientos, productos, ubicaciones, proveedores, lotes RESTART IDENTITY CASCADE`,
   );
 
   // Reinicia las secuencias de correlativos (seq_rint_2025, seq_rec_2026, …) para
@@ -24,7 +24,7 @@ async function main(): Promise<void> {
   await db.execute(sql`REFRESH MATERIALIZED VIEW stock_actual`);
 
   console.log(
-    `✔ Reset OK. Vacías: productos, proveedores, ubicaciones, movimientos, detalle, auditoría. ` +
+    `✔ Reset OK. Vacías: precios, productos, proveedores, ubicaciones, movimientos, detalle, auditoría. ` +
       `Se conservan usuarios y tipos_movimiento. Correlativos reiniciados (${seqs.rows.length} secuencias).`,
   );
   await pool.end();
