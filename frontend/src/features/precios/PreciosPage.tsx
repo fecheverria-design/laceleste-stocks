@@ -28,6 +28,19 @@ const hoyYmd = () => new Date().toISOString().slice(0, 10);
 const inputCls =
   'rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500';
 
+// Badge de tipo de precio: COMPRA (lo que se paga, manda) vs ACTUALIZACION (lista, referencia).
+const TIPO_BADGE: Record<string, string> = {
+  COMPRA: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  ACTUALIZACION: 'bg-slate-100 text-slate-500 ring-slate-200',
+};
+function TipoBadge({ tipo }: { tipo: string }) {
+  return (
+    <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${TIPO_BADGE[tipo] ?? TIPO_BADGE.ACTUALIZACION}`}>
+      {tipo === 'COMPRA' ? 'Compra' : 'Actualización'}
+    </span>
+  );
+}
+
 // ── Gráfico + historial editable de un producto ─────────────────────────────
 function HistorialPrecios({ producto3c, unidad }: { producto3c: string; unidad: string }) {
   const queryClient = useQueryClient();
@@ -77,8 +90,9 @@ function HistorialPrecios({ producto3c, unidad }: { producto3c: string; unidad: 
     return <p className="px-4 py-3 text-sm text-rose-700">Error: {(historial.error as Error).message}</p>;
 
   const filas = historial.data ?? [];
-  // El gráfico necesita orden ascendente por fecha.
+  // El gráfico usa SOLO las COMPRA (la curva real de costo), en orden ascendente.
   const serie = [...filas]
+    .filter((f) => f.tipo === 'COMPRA')
     .sort((a, b) => a.vigente_desde.localeCompare(b.vigente_desde))
     .map((f) => ({ fecha: f.vigente_desde, precio: Number(f.precio) }));
 
@@ -92,7 +106,9 @@ function HistorialPrecios({ producto3c, unidad }: { producto3c: string; unidad: 
     <div className="space-y-4 p-4">
       {serie.length >= 2 && (
         <div className="rounded-lg border border-slate-200 bg-white p-3">
-          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">Evolución del precio</p>
+          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
+            Evolución del precio de compra
+          </p>
           <ResponsiveContainer width="100%" height={200}>
             <LineChart data={serie} margin={{ top: 5, right: 16, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
@@ -169,7 +185,8 @@ function HistorialPrecios({ producto3c, unidad }: { producto3c: string; unidad: 
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs uppercase tracking-wide text-slate-400">
-              <th className="py-2 font-medium">Vigente desde</th>
+              <th className="py-2 font-medium">Fecha</th>
+              <th className="py-2 font-medium">Tipo</th>
               <th className="py-2 font-medium">Proveedor</th>
               <th className="py-2 text-right font-medium">Precio</th>
               <th className="py-2 font-medium">Unidad</th>
@@ -188,6 +205,7 @@ function HistorialPrecios({ producto3c, unidad }: { producto3c: string; unidad: 
                       onChange={(e) => setEditFecha(e.target.value)}
                     />
                   </td>
+                  <td className="py-2"><TipoBadge tipo={f.tipo} /></td>
                   <td className="py-2 text-slate-500">{f.proveedor_nombre ?? '—'}</td>
                   <td className="py-2 text-right">
                     <input
@@ -216,6 +234,7 @@ function HistorialPrecios({ producto3c, unidad }: { producto3c: string; unidad: 
               ) : (
                 <tr key={f.id} className="border-t border-slate-100">
                   <td className="py-2 text-slate-600">{fechaCorta(f.vigente_desde)}</td>
+                  <td className="py-2"><TipoBadge tipo={f.tipo} /></td>
                   <td className="py-2 text-slate-500">
                     {f.proveedor_nombre ?? <span className="text-slate-400">—</span>}
                   </td>
@@ -314,6 +333,7 @@ export function PreciosPage() {
                 <th className="px-4 py-3 font-medium">Producto</th>
                 <th className="px-4 py-3 font-medium">Proveedor</th>
                 <th className="px-4 py-3 text-right font-medium">Precio vigente</th>
+                <th className="px-4 py-3 font-medium">Tipo</th>
                 <th className="px-4 py-3 font-medium">Vigente desde</th>
               </tr>
             </thead>
@@ -341,13 +361,14 @@ export function PreciosPage() {
                           <span className="text-slate-900">{money.format(Number(f.precio))}</span>
                         )}
                       </td>
+                      <td className="px-4 py-3">{f.tipo ? <TipoBadge tipo={f.tipo} /> : null}</td>
                       <td className="px-4 py-3 text-slate-600">
                         {f.vigente_desde ? fechaCorta(f.vigente_desde) : '—'}
                       </td>
                     </tr>
                     {open && (
                       <tr className="border-b border-slate-100 bg-slate-50/50">
-                        <td colSpan={5} className="px-2 py-2">
+                        <td colSpan={6} className="px-2 py-2">
                           <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
                             <HistorialPrecios producto3c={f.producto_3c} unidad={f.unidad_base} />
                           </div>

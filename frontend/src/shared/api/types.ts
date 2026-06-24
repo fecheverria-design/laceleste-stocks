@@ -121,12 +121,15 @@ export interface MovimientoDetalle {
 
 // ── Precios ──────────────────────────────────────────────────────────────────
 // Precio vigente por producto (incluye productos sin precio: precio = null).
+export type TipoPrecio = 'COMPRA' | 'ACTUALIZACION';
+
 export interface PrecioVigente {
   producto_3c: string;
   producto_nombre: string;
   unidad_base: string;
   precio: string | null; // numeric(14,4) serializado; null = sin precio cargado
   vigente_desde: string | null; // YYYY-MM-DD
+  tipo: TipoPrecio | null; // tipo del precio vigente (COMPRA manda; ACTUALIZACION = fallback)
   precio_id: number | null;
   proveedor_nombre: string | null;
   proveedor_numero_3c: number | null;
@@ -136,6 +139,7 @@ export interface PrecioVigente {
 export interface PrecioHistorial {
   id: number;
   precio: string;
+  tipo: TipoPrecio;
   vigente_desde: string; // YYYY-MM-DD
   proveedor_id: number | null;
   proveedor_nombre: string | null;

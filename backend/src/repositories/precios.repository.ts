@@ -14,14 +14,15 @@ export type FilaPrecioVigente = {
   unidad_base: string;
   precio: string | null; // null = producto sin precio cargado
   vigente_desde: string | null;
+  tipo: string | null; // 'COMPRA' | 'ACTUALIZACION' del precio vigente
   precio_id: number | null;
   proveedor_nombre: string | null;
   proveedor_numero_3c: number | null;
 };
 
 // Precio vigente por producto (incluye productos sin precio: precio = null).
-// El LATERAL toma, por producto, la fila de mayor vigente_desde <= hoy (cualquier
-// proveedor; empata por id desc). Se une proveedores para mostrar de quién es.
+// El LATERAL prioriza la última COMPRA (lo que se pagó); si nunca hubo compra, cae a
+// la última ACTUALIZACION como referencia. precio > 0 (un 0 = sin precio real).
 export async function listarPreciosVigentes(): Promise<FilaPrecioVigente[]> {
   const res = await db.execute<FilaPrecioVigente>(
     sql`SELECT
@@ -30,17 +31,17 @@ export async function listarPreciosVigentes(): Promise<FilaPrecioVigente[]> {
           p.unidad_base AS unidad_base,
           v.precio AS precio,
           v.vigente_desde::text AS vigente_desde,
+          v.tipo AS tipo,
           v.id AS precio_id,
           prov.nombre AS proveedor_nombre,
           prov.numero_3c AS proveedor_numero_3c
         FROM productos p
         LEFT JOIN LATERAL (
-          SELECT id, precio, vigente_desde, proveedor_id
+          SELECT id, precio, vigente_desde, tipo, proveedor_id
           FROM precios
-          -- precio > 0: un 0 es placeholder de "sin precio real" (decisión de J),
-          -- así que el vigente es el último precio REAL; si no hay, queda sin precio.
           WHERE producto_3c = p.codigo_3c AND vigente_desde <= current_date AND precio > 0
-          ORDER BY vigente_desde DESC, id DESC
+          -- COMPRA manda sobre ACTUALIZACION; dentro de cada grupo, la más reciente.
+          ORDER BY (tipo = 'COMPRA') DESC, vigente_desde DESC, id DESC
           LIMIT 1
         ) v ON TRUE
         LEFT JOIN proveedores prov ON prov.id = v.proveedor_id
@@ -53,6 +54,7 @@ export async function listarPreciosVigentes(): Promise<FilaPrecioVigente[]> {
 export interface FilaPrecioHistorial {
   id: number;
   precio: string;
+  tipo: string;
   vigente_desde: string;
   proveedor_id: number | null;
   proveedor_nombre: string | null;
@@ -67,6 +69,7 @@ export async function listarHistorialPrecios(producto3c: string): Promise<FilaPr
     .select({
       id: precios.id,
       precio: precios.precio,
+      tipo: precios.tipo,
       vigente_desde: precios.vigenteDesde,
       proveedor_id: precios.proveedorId,
       proveedor_nombre: proveedores.nombre,
@@ -94,6 +97,7 @@ export interface PrecioRow {
   producto_3c: string;
   proveedor_id: number | null;
   precio: string;
+  tipo: string;
   vigente_desde: string;
   usuario_id: number;
   creado_en: string;
@@ -104,6 +108,7 @@ const selectPrecio = {
   producto_3c: precios.producto3c,
   proveedor_id: precios.proveedorId,
   precio: precios.precio,
+  tipo: precios.tipo,
   vigente_desde: precios.vigenteDesde,
   usuario_id: precios.usuarioId,
   creado_en: sql<string>`${precios.creadoEn}::text`,
@@ -113,6 +118,7 @@ export async function insertarPrecio(datos: {
   producto3c: string;
   proveedorId?: number | null;
   precio: number;
+  tipo?: string;
   vigenteDesde: string;
   usuarioId: number;
 }): Promise<PrecioRow> {
@@ -122,6 +128,7 @@ export async function insertarPrecio(datos: {
       producto3c: datos.producto3c,
       proveedorId: datos.proveedorId ?? null,
       precio: String(datos.precio),
+      tipo: datos.tipo ?? 'COMPRA',
       vigenteDesde: datos.vigenteDesde,
       usuarioId: datos.usuarioId,
     })
@@ -151,18 +158,19 @@ export async function borrarPrecio(id: number): Promise<boolean> {
   return res.length > 0;
 }
 
-// Evita cargar dos precios con la MISMA (proveedor, fecha) para un producto. Varios
-// proveedores pueden tener precio el mismo día; lo que no se permite es duplicar la
-// misma terna. exceptoId ignora la fila que se está editando.
+// Evita duplicar la misma (proveedor, fecha, tipo) para un producto. Varios proveedores
+// —o compra y actualización el mismo día— conviven; lo que no se permite es repetir la
+// misma combinación. exceptoId ignora la fila que se está editando.
 export async function existePrecioEnFecha(
   producto3c: string,
   proveedorId: number | null,
   vigenteDesde: string,
+  tipo: string,
   exceptoId?: number,
 ): Promise<boolean> {
   const rows = await db
-    .select({ id: precios.id, proveedorId: precios.proveedorId })
+    .select({ id: precios.id, proveedorId: precios.proveedorId, tipo: precios.tipo })
     .from(precios)
     .where(and(eq(precios.producto3c, producto3c), eq(precios.vigenteDesde, vigenteDesde)));
-  return rows.some((r) => (r.proveedorId ?? null) === proveedorId && r.id !== exceptoId);
+  return rows.some((r) => (r.proveedorId ?? null) === proveedorId && r.tipo === tipo && r.id !== exceptoId);
 }

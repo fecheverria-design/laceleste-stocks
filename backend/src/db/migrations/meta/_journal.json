@@ -57,6 +57,13 @@
       "when": 1782310202094,
       "tag": "0007_flimsy_meggan",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1782328342819,
+      "tag": "0008_flaky_night_thrasher",
+      "breakpoints": true
     }
   ]
 }

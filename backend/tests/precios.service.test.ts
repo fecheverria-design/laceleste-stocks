@@ -141,6 +141,32 @@ describe('precios (historial con fecha de vigencia)', () => {
     expect(hist).toHaveLength(2);
   });
 
+  it('el vigente es la última COMPRA aunque haya una ACTUALIZACION más nueva', async () => {
+    const fx = await sembrarEscenario({ productos3c: ['789'] });
+    const [prov] = await db.insert(proveedores).values({ numero3c: 7488, nombre: 'CADRI NORTE' }).returning({ id: proveedores.id });
+
+    // Compra real (vieja) + actualización de lista (más nueva). Manda la compra.
+    await insertarPrecio({ producto3c: '789', proveedorId: prov!.id, precio: 252, tipo: 'COMPRA', vigenteDesde: ymd(-40), usuarioId: fx.usuarioId });
+    await insertarPrecio({ producto3c: '789', proveedorId: prov!.id, precio: 630, tipo: 'ACTUALIZACION', vigenteDesde: ymd(-7), usuarioId: fx.usuarioId });
+
+    const vig = await vigentePorProducto('789');
+    expect(vig?.precio).toBe('252.0000');
+    expect(vig?.tipo).toBe('COMPRA');
+    expect(vig?.vigente_desde).toBe(ymd(-40));
+  });
+
+  it('si nunca hubo COMPRA, cae a la última ACTUALIZACION (marcada como tal)', async () => {
+    const fx = await sembrarEscenario({ productos3c: ['789'] });
+    const [prov] = await db.insert(proveedores).values({ numero3c: 7154, nombre: 'GODOY' }).returning({ id: proveedores.id });
+
+    await insertarPrecio({ producto3c: '789', proveedorId: prov!.id, precio: 1000, tipo: 'ACTUALIZACION', vigenteDesde: ymd(-20), usuarioId: fx.usuarioId });
+    await insertarPrecio({ producto3c: '789', proveedorId: prov!.id, precio: 1200, tipo: 'ACTUALIZACION', vigenteDesde: ymd(-5), usuarioId: fx.usuarioId });
+
+    const vig = await vigentePorProducto('789');
+    expect(vig?.precio).toBe('1200.0000');
+    expect(vig?.tipo).toBe('ACTUALIZACION');
+  });
+
   it('pedir historial de un producto inexistente da 404', async () => {
     await sembrarEscenario({ productos3c: ['401'] });
     await expect(obtenerHistorialPrecios('NO_EXISTE')).rejects.toMatchObject({

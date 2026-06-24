@@ -41,13 +41,15 @@ export async function crearPrecio(input: CrearPrecioInput, ctx: { usuarioId: num
     throw notFound('PRODUCTO_NO_ENCONTRADO', `No existe el producto ${input.producto_3c}`);
   }
   const vigenteDesde = input.vigente_desde ?? hoyYmd();
-  // Carga manual desde la UI: sin proveedor (proveedor_id = null).
-  if (await existePrecioEnFecha(input.producto_3c, null, vigenteDesde)) {
+  // Carga manual desde la UI: sin proveedor (null) y como COMPRA (precio que se paga →
+  // pasa a ser el vigente).
+  if (await existePrecioEnFecha(input.producto_3c, null, vigenteDesde, 'COMPRA')) {
     throw conflict('PRECIO_DUPLICADO', `Ya hay un precio para ${input.producto_3c} con vigencia ${vigenteDesde}`);
   }
   return insertarPrecio({
     producto3c: input.producto_3c,
     precio: input.precio,
+    tipo: 'COMPRA',
     vigenteDesde,
     usuarioId: ctx.usuarioId,
   });
@@ -59,7 +61,10 @@ export async function editarPrecio(id: number, input: EditarPrecioInput): Promis
   if (!actual) throw notFound('PRECIO_NO_ENCONTRADO', `No existe el precio ${id}`);
 
   const nuevaFecha = input.vigente_desde ?? actual.vigente_desde;
-  if (input.vigente_desde && (await existePrecioEnFecha(actual.producto_3c, actual.proveedor_id, nuevaFecha, id))) {
+  if (
+    input.vigente_desde &&
+    (await existePrecioEnFecha(actual.producto_3c, actual.proveedor_id, nuevaFecha, actual.tipo, id))
+  ) {
     throw conflict('PRECIO_DUPLICADO', `Ya hay otro precio para ${actual.producto_3c} con vigencia ${nuevaFecha}`);
   }
 

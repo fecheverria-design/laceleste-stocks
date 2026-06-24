@@ -18,7 +18,8 @@ const CTE = sql`
     LEFT JOIN LATERAL (
       SELECT precio FROM precios
       WHERE producto_3c = p.codigo_3c AND vigente_desde <= current_date AND precio > 0
-      ORDER BY vigente_desde DESC, id DESC LIMIT 1
+      -- misma regla que el precio vigente: COMPRA manda, luego la más reciente.
+      ORDER BY (tipo = 'COMPRA') DESC, vigente_desde DESC, id DESC LIMIT 1
     ) v ON TRUE
   ),
   base AS (
