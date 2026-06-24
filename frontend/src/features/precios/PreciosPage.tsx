@@ -170,6 +170,7 @@ function HistorialPrecios({ producto3c, unidad }: { producto3c: string; unidad: 
           <thead>
             <tr className="text-left text-xs uppercase tracking-wide text-slate-400">
               <th className="py-2 font-medium">Vigente desde</th>
+              <th className="py-2 font-medium">Proveedor</th>
               <th className="py-2 text-right font-medium">Precio</th>
               <th className="py-2 font-medium">Unidad</th>
               <th className="py-2 text-right font-medium">Acciones</th>
@@ -187,6 +188,7 @@ function HistorialPrecios({ producto3c, unidad }: { producto3c: string; unidad: 
                       onChange={(e) => setEditFecha(e.target.value)}
                     />
                   </td>
+                  <td className="py-2 text-slate-500">{f.proveedor_nombre ?? '—'}</td>
                   <td className="py-2 text-right">
                     <input
                       type="number"
@@ -214,6 +216,9 @@ function HistorialPrecios({ producto3c, unidad }: { producto3c: string; unidad: 
               ) : (
                 <tr key={f.id} className="border-t border-slate-100">
                   <td className="py-2 text-slate-600">{fechaCorta(f.vigente_desde)}</td>
+                  <td className="py-2 text-slate-500">
+                    {f.proveedor_nombre ?? <span className="text-slate-400">—</span>}
+                  </td>
                   <td className="py-2 text-right font-medium tabular-nums text-slate-800">
                     {money.format(Number(f.precio))}
                   </td>
@@ -307,6 +312,7 @@ export function PreciosPage() {
               <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
                 <th className="px-4 py-3 font-medium">Código 3c</th>
                 <th className="px-4 py-3 font-medium">Producto</th>
+                <th className="px-4 py-3 font-medium">Proveedor</th>
                 <th className="px-4 py-3 text-right font-medium">Precio vigente</th>
                 <th className="px-4 py-3 font-medium">Vigente desde</th>
               </tr>
@@ -325,6 +331,9 @@ export function PreciosPage() {
                         <span className="mr-1.5 inline-block text-slate-400">{open ? '▾' : '▸'}</span>
                         {f.producto_nombre}
                       </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {f.proveedor_nombre ?? <span className="text-slate-400">—</span>}
+                      </td>
                       <td className="px-4 py-3 text-right font-medium tabular-nums">
                         {f.precio === null ? (
                           <span className="text-slate-400">— sin precio</span>
@@ -338,7 +347,7 @@ export function PreciosPage() {
                     </tr>
                     {open && (
                       <tr className="border-b border-slate-100 bg-slate-50/50">
-                        <td colSpan={4} className="px-2 py-2">
+                        <td colSpan={5} className="px-2 py-2">
                           <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
                             <HistorialPrecios producto3c={f.producto_3c} unidad={f.unidad_base} />
                           </div>

@@ -22,7 +22,8 @@
     "import:proveedores": "tsx src/db/import-proveedores.ts",
     "import:ubicaciones": "tsx src/db/import-ubicaciones.ts",
     "import:movimientos": "tsx src/db/import-movimientos.ts",
-    "import:inventario": "tsx src/db/import-inventario.ts"
+    "import:inventario": "tsx src/db/import-inventario.ts",
+    "import:precios": "tsx src/db/import-precios.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

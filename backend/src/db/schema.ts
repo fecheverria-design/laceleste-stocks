@@ -14,6 +14,7 @@ import {
   text,
   time,
   timestamp,
+  uniqueIndex,
   varchar,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
@@ -167,10 +168,12 @@ export const movimientosAuditoria = pgTable(
   (t) => [index('idx_audit_mov').on(t.movimientoId)],
 );
 
-// Historial de precios por producto. Una fila = un precio que entra en vigencia en
-// una fecha (vigente_desde). El "precio vigente" de un producto es el de mayor
-// vigente_desde <= hoy. Cargar un precio nuevo = insertar fila; corregir uno mal
-// cargado = editar/borrar esa fila. Audita quién lo cargó (regla #7).
+// Historial de precios por producto. Una fila = un precio de un proveedor que entra
+// en vigencia en una fecha (vigente_desde = última actualización en 3c). Un producto
+// puede tener varios proveedores; el "precio vigente" es el de vigente_desde más
+// reciente <= hoy entre todos sus proveedores (decisión de J: por ahora, el más nuevo
+// gana). proveedor_id es nullable (carga manual sin proveedor). Cargar un precio = fila
+// nueva; corregir = editar/borrar. Audita quién lo cargó (regla #7).
 export const precios = pgTable(
   'precios',
   {
@@ -178,6 +181,7 @@ export const precios = pgTable(
     producto3c: varchar('producto_3c', { length: 32 })
       .notNull()
       .references(() => productos.codigo3c),
+    proveedorId: integer('proveedor_id').references(() => proveedores.id), // nullable
     precio: numeric('precio', { precision: 14, scale: 4 }).notNull(), // ARS, hasta 4 decimales
     vigenteDesde: date('vigente_desde').notNull(), // fecha desde la que rige este precio
     usuarioId: integer('usuario_id')
@@ -187,6 +191,9 @@ export const precios = pgTable(
   },
   (t) => [
     index('idx_precios_producto_fecha').on(t.producto3c, t.vigenteDesde.desc()),
+    // Un precio por (producto, proveedor, fecha): permite varios proveedores el mismo
+    // día y hace idempotente la importación (upsert por esta clave).
+    uniqueIndex('uq_precio_prod_prov_fecha').on(t.producto3c, t.proveedorId, t.vigenteDesde),
     check('chk_precio_positivo', sql`${t.precio} >= 0`),
   ],
 );

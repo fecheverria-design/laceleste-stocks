@@ -1,4 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { db } from '../src/db/client.js';
+import { proveedores } from '../src/db/schema.js';
+import { insertarPrecio } from '../src/repositories/precios.repository.js';
 import {
   crearPrecio,
   editarPrecio,
@@ -102,6 +105,40 @@ describe('precios (historial con fecha de vigencia)', () => {
 
     const hist = await obtenerHistorialPrecios('401');
     expect(hist.map((h) => h.vigente_desde)).toEqual([ymd(-10), ymd(-20)]);
+  });
+
+  it('con varios proveedores, el precio vigente es el de fecha más reciente (y muestra su proveedor)', async () => {
+    const fx = await sembrarEscenario({ productos3c: ['401'] });
+    const [provViejo] = await db
+      .insert(proveedores)
+      .values({ numero3c: 1000001, nombre: 'PROVEEDOR GENERICO' })
+      .returning({ id: proveedores.id });
+    const [provNuevo] = await db
+      .insert(proveedores)
+      .values({ numero3c: 1247, nombre: 'SIMPLE DISTRIBUCIONES SRL' })
+      .returning({ id: proveedores.id });
+
+    // Genérico viejo y barato; proveedor real más reciente y caro.
+    await insertarPrecio({ producto3c: '401', proveedorId: provViejo!.id, precio: 1, vigenteDesde: ymd(-300), usuarioId: fx.usuarioId });
+    await insertarPrecio({ producto3c: '401', proveedorId: provNuevo!.id, precio: 2644.38, vigenteDesde: ymd(-7), usuarioId: fx.usuarioId });
+
+    const vig = (await obtenerPreciosVigentes()).find((f) => f.producto_3c === '401');
+    expect(vig?.precio).toBe('2644.3800');
+    expect(vig?.vigente_desde).toBe(ymd(-7));
+    expect(vig?.proveedor_nombre).toBe('SIMPLE DISTRIBUCIONES SRL');
+    expect(vig?.proveedor_numero_3c).toBe(1247);
+  });
+
+  it('dos proveedores pueden tener precio el MISMO día sin chocar (clave producto+proveedor+fecha)', async () => {
+    const fx = await sembrarEscenario({ productos3c: ['401'] });
+    const [pA] = await db.insert(proveedores).values({ numero3c: 10, nombre: 'A' }).returning({ id: proveedores.id });
+    const [pB] = await db.insert(proveedores).values({ numero3c: 20, nombre: 'B' }).returning({ id: proveedores.id });
+
+    await insertarPrecio({ producto3c: '401', proveedorId: pA!.id, precio: 100, vigenteDesde: ymd(-1), usuarioId: fx.usuarioId });
+    await insertarPrecio({ producto3c: '401', proveedorId: pB!.id, precio: 200, vigenteDesde: ymd(-1), usuarioId: fx.usuarioId });
+
+    const hist = await obtenerHistorialPrecios('401');
+    expect(hist).toHaveLength(2);
   });
 
   it('pedir historial de un producto inexistente da 404', async () => {

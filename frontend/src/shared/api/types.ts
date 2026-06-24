@@ -128,6 +128,8 @@ export interface PrecioVigente {
   precio: string | null; // numeric(14,4) serializado; null = sin precio cargado
   vigente_desde: string | null; // YYYY-MM-DD
   precio_id: number | null;
+  proveedor_nombre: string | null;
+  proveedor_numero_3c: number | null;
 }
 
 // Una fila del historial de precios de un producto (alimenta el gráfico).
@@ -135,6 +137,9 @@ export interface PrecioHistorial {
   id: number;
   precio: string;
   vigente_desde: string; // YYYY-MM-DD
+  proveedor_id: number | null;
+  proveedor_nombre: string | null;
+  proveedor_numero_3c: number | null;
   usuario_id: number;
   creado_en: string;
 }
