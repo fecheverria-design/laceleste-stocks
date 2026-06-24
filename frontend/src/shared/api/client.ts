@@ -71,3 +71,27 @@ export const apiPost = <T>(path: string, body: unknown): Promise<T> =>
 
 export const apiPut = <T>(path: string, body?: unknown): Promise<T> =>
   request<T>(path, { method: 'PUT', body: body === undefined ? undefined : JSON.stringify(body) });
+
+// DELETE: el backend responde 204 sin cuerpo, así que no parseamos JSON.
+export async function apiDelete(path: string): Promise<void> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'DELETE',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (res.status === 401) {
+    clearSession();
+    notifyUnauthorized();
+    throw new ApiError(401, 'Sesión expirada, ingresá de nuevo.');
+  }
+  if (!res.ok) {
+    let message = `HTTP ${res.status} en ${path}`;
+    try {
+      const body = (await res.json()) as { message?: string };
+      if (body?.message) message = body.message;
+    } catch {
+      // sin cuerpo JSON
+    }
+    throw new ApiError(res.status, message);
+  }
+}

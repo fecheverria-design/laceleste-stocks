@@ -166,3 +166,27 @@ export const movimientosAuditoria = pgTable(
   },
   (t) => [index('idx_audit_mov').on(t.movimientoId)],
 );
+
+// Historial de precios por producto. Una fila = un precio que entra en vigencia en
+// una fecha (vigente_desde). El "precio vigente" de un producto es el de mayor
+// vigente_desde <= hoy. Cargar un precio nuevo = insertar fila; corregir uno mal
+// cargado = editar/borrar esa fila. Audita quién lo cargó (regla #7).
+export const precios = pgTable(
+  'precios',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    producto3c: varchar('producto_3c', { length: 32 })
+      .notNull()
+      .references(() => productos.codigo3c),
+    precio: numeric('precio', { precision: 14, scale: 4 }).notNull(), // ARS, hasta 4 decimales
+    vigenteDesde: date('vigente_desde').notNull(), // fecha desde la que rige este precio
+    usuarioId: integer('usuario_id')
+      .notNull()
+      .references(() => usuarios.id),
+    creadoEn: timestamp('creado_en', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('idx_precios_producto_fecha').on(t.producto3c, t.vigenteDesde.desc()),
+    check('chk_precio_positivo', sql`${t.precio} >= 0`),
+  ],
+);

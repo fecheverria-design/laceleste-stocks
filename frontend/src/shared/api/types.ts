@@ -119,6 +119,26 @@ export interface MovimientoDetalle {
   detalle: RenglonDetalle[];
 }
 
+// ── Precios ──────────────────────────────────────────────────────────────────
+// Precio vigente por producto (incluye productos sin precio: precio = null).
+export interface PrecioVigente {
+  producto_3c: string;
+  producto_nombre: string;
+  unidad_base: string;
+  precio: string | null; // numeric(14,4) serializado; null = sin precio cargado
+  vigente_desde: string | null; // YYYY-MM-DD
+  precio_id: number | null;
+}
+
+// Una fila del historial de precios de un producto (alimenta el gráfico).
+export interface PrecioHistorial {
+  id: number;
+  precio: string;
+  vigente_desde: string; // YYYY-MM-DD
+  usuario_id: number;
+  creado_en: string;
+}
+
 // ── Historial de ediciones ───────────────────────────────────────────────────
 export interface CambioAuditoria {
   campo: string;

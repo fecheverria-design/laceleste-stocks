@@ -4,6 +4,7 @@ import { useAuth } from '../auth/AuthContext';
 const tabs = [
   { to: '/movimientos', label: 'Movimientos' },
   { to: '/stock', label: 'Stock' },
+  { to: '/precios', label: 'Precios' },
   { to: '/health', label: 'Estado' },
 ];
 
