@@ -6,14 +6,17 @@ import type { FilaHistorial, MovimientoDetalle, Producto, TipoMovimiento, Ubicac
 import { aFormState, aPayload, renglonVacio, tieneErrores, validar, type FormState, type RenglonForm } from './movimientoForm';
 import { MovimientoFormFields } from './MovimientoFormFields';
 import { HistorialEdiciones } from './HistorialEdiciones';
+import { useAuth } from '../../shared/auth/AuthContext';
 
 export function MovimientoDetallePage() {
   const { id } = useParams<{ id: string }>();
   const movId = Number(id);
   const queryClient = useQueryClient();
+  const { user } = useAuth();
   const [form, setForm] = useState<FormState | null>(null);
   const [okMsg, setOkMsg] = useState(false);
   const [intentado, setIntentado] = useState(false);
+  const [confirmarAnular, setConfirmarAnular] = useState(false);
 
   const detalle = useQuery({
     queryKey: ['movimiento', movId],
@@ -44,12 +47,25 @@ export function MovimientoDetallePage() {
     },
   });
 
+  const anular = useMutation({
+    mutationFn: () => apiPut<MovimientoDetalle>(`/api/movimientos/${movId}/anular`),
+    onSuccess: async () => {
+      setConfirmarAnular(false);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['movimiento', movId] }),
+        queryClient.invalidateQueries({ queryKey: ['movimientos'] }),
+        queryClient.invalidateQueries({ queryKey: ['stock'] }),
+      ]);
+    },
+  });
+
   if (detalle.isLoading) return <p className="text-slate-500">Cargando movimiento…</p>;
   if (detalle.isError) return <p className="text-rose-700">Error: {(detalle.error as Error).message}</p>;
   if (!detalle.data || !form) return null;
 
   const mov = detalle.data;
   const anulado = mov.estado === 'ANULADO';
+  const puedeAnular = user?.rol === 'ADMIN' && mov.estado === 'CONFIRMADO';
   const errores = validar(form);
   const hayErrores = tieneErrores(errores);
   const guardarSiValido = () => {
@@ -75,18 +91,56 @@ export function MovimientoDetallePage() {
           </Link>
           <h2 className="mt-1 font-mono text-xl font-semibold">{mov.nro}</h2>
         </div>
-        <span
-          className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${
-            anulado ? 'bg-rose-50 text-rose-700 ring-rose-200' : 'bg-emerald-50 text-emerald-700 ring-emerald-200'
-          }`}
-        >
-          {mov.estado.charAt(0) + mov.estado.slice(1).toLowerCase()}
-        </span>
+        <div className="flex items-center gap-3">
+          {puedeAnular &&
+            (confirmarAnular ? (
+              <span className="flex items-center gap-2 text-sm">
+                <span className="text-slate-600">¿Anular?</span>
+                <button
+                  type="button"
+                  onClick={() => anular.mutate()}
+                  disabled={anular.isPending}
+                  className="rounded-lg bg-rose-600 px-3 py-1.5 font-medium text-white transition hover:bg-rose-700 disabled:opacity-60"
+                >
+                  {anular.isPending ? 'Anulando…' : 'Sí, anular'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmarAnular(false)}
+                  disabled={anular.isPending}
+                  className="text-slate-500 hover:underline"
+                >
+                  Cancelar
+                </button>
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirmarAnular(true)}
+                className="rounded-lg border border-rose-300 px-3 py-1.5 text-sm font-medium text-rose-600 transition hover:bg-rose-50"
+              >
+                Anular
+              </button>
+            ))}
+          <span
+            className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${
+              anulado ? 'bg-rose-50 text-rose-700 ring-rose-200' : 'bg-emerald-50 text-emerald-700 ring-emerald-200'
+            }`}
+          >
+            {mov.estado.charAt(0) + mov.estado.slice(1).toLowerCase()}
+          </span>
+        </div>
       </div>
 
       {anulado && (
         <p className="rounded-lg bg-rose-50 px-4 py-3 text-sm text-rose-700">
           Este movimiento está anulado: no se puede editar.
+        </p>
+      )}
+
+      {anular.isError && (
+        <p className="rounded-lg bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          No se pudo anular: {(anular.error as Error).message}
         </p>
       )}
 
