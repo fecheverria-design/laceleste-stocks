@@ -2,6 +2,7 @@ import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 
 const tabs = [
+  { to: '/panel', label: 'Panel' },
   { to: '/movimientos', label: 'Movimientos' },
   { to: '/stock', label: 'Stock' },
   { to: '/precios', label: 'Precios' },

@@ -144,6 +144,28 @@ export interface PrecioHistorial {
   creado_en: string;
 }
 
+// ── Valorización del stock (panel) ───────────────────────────────────────────
+export interface ValorPorDeposito {
+  ubicacion_id: number;
+  ubicacion_dep_id_3c: number;
+  ubicacion_nombre: string;
+  valor: string;
+  valorizados: number;
+  sin_precio: number;
+}
+export interface TopProducto {
+  producto_3c: string;
+  producto_nombre: string;
+  cantidad: string;
+  precio: string;
+  valor: string;
+}
+export interface Valorizacion {
+  total: { valor_total: string; items_valorizados: number; items_sin_precio: number; depositos: number };
+  por_deposito: ValorPorDeposito[];
+  top_productos: TopProducto[];
+}
+
 // ── Historial de ediciones ───────────────────────────────────────────────────
 export interface CambioAuditoria {
   campo: string;

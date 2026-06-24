@@ -9,8 +9,9 @@ import { MovimientoDetallePage } from './features/movimientos/MovimientoDetalleP
 import { StockPage } from './features/stock/StockPage';
 import { HealthPage } from './features/health/HealthPage';
 
-// Lazy: arrastra Recharts, que solo se baja al entrar a Precios.
+// Lazy: arrastran Recharts, que solo se baja al entrar a estas páginas.
 const PreciosPage = lazy(() => import('./features/precios/PreciosPage').then((m) => ({ default: m.PreciosPage })));
+const PanelPage = lazy(() => import('./features/panel/PanelPage').then((m) => ({ default: m.PanelPage })));
 
 export function App() {
   return (
@@ -18,7 +19,15 @@ export function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route element={<RequireAuth />}>
         <Route element={<Layout />}>
-          <Route path="/" element={<Navigate to="/movimientos" replace />} />
+          <Route path="/" element={<Navigate to="/panel" replace />} />
+          <Route
+            path="/panel"
+            element={
+              <Suspense fallback={<p className="text-slate-500">Cargando panel…</p>}>
+                <PanelPage />
+              </Suspense>
+            }
+          />
           <Route path="/movimientos" element={<MovimientosPage />} />
           <Route path="/movimientos/nuevo" element={<NuevoMovimientoPage />} />
           <Route path="/movimientos/:id" element={<MovimientoDetallePage />} />
@@ -34,7 +43,7 @@ export function App() {
           <Route path="/health" element={<HealthPage />} />
         </Route>
       </Route>
-      <Route path="*" element={<Navigate to="/movimientos" replace />} />
+      <Route path="*" element={<Navigate to="/panel" replace />} />
     </Routes>
   );
 }

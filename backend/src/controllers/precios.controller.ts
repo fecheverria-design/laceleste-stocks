@@ -8,6 +8,7 @@ import {
   eliminarPrecio,
   obtenerHistorialPrecios,
   obtenerPreciosVigentes,
+  obtenerValorizacionStock,
 } from '../services/precios.service.js';
 
 const IdParamSchema = z.object({ id: z.coerce.number().int().positive() });
@@ -16,6 +17,12 @@ const ProductoParamSchema = z.object({ codigo: z.string().trim().min(1).max(32) 
 // GET /api/precios — precio vigente por producto (incluye los sin precio).
 export async function getPrecios(_req: Request, res: Response): Promise<void> {
   res.status(200).json(await obtenerPreciosVigentes());
+}
+
+// GET /api/valorizacion — valor del stock (cantidad × precio vigente): total,
+// por depósito y top productos.
+export async function getValorizacion(_req: Request, res: Response): Promise<void> {
+  res.status(200).json(await obtenerValorizacionStock());
 }
 
 // GET /api/productos/:codigo/precios — historial de precios de un producto.

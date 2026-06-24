@@ -37,7 +37,9 @@ export async function listarPreciosVigentes(): Promise<FilaPrecioVigente[]> {
         LEFT JOIN LATERAL (
           SELECT id, precio, vigente_desde, proveedor_id
           FROM precios
-          WHERE producto_3c = p.codigo_3c AND vigente_desde <= current_date
+          -- precio > 0: un 0 es placeholder de "sin precio real" (decisión de J),
+          -- así que el vigente es el último precio REAL; si no hay, queda sin precio.
+          WHERE producto_3c = p.codigo_3c AND vigente_desde <= current_date AND precio > 0
           ORDER BY vigente_desde DESC, id DESC
           LIMIT 1
         ) v ON TRUE

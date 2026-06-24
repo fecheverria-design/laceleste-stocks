@@ -1,4 +1,5 @@
 import { conflict, notFound } from '../domain/errors.js';
+import { obtenerValorizacion, type Valorizacion } from '../repositories/valorizacion.repository.js';
 import type { CrearPrecioInput, EditarPrecioInput } from '../domain/precios.schema.js';
 import {
   actualizarPrecio,
@@ -72,3 +73,6 @@ export async function eliminarPrecio(id: number): Promise<void> {
   const ok = await borrarPrecio(id);
   if (!ok) throw notFound('PRECIO_NO_ENCONTRADO', `No existe el precio ${id}`);
 }
+
+// GET — valorización del stock (cantidad × precio vigente). topN top productos.
+export const obtenerValorizacionStock = (topN = 15): Promise<Valorizacion> => obtenerValorizacion(topN);

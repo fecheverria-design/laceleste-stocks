@@ -6,7 +6,7 @@ import { productos, ubicaciones, usuarios } from '../../src/db/schema.js';
 // RESTART IDENTITY deja los serial en 1 para ids predecibles; CASCADE respeta las FKs.
 export async function limpiar(): Promise<void> {
   await db.execute(
-    sql`TRUNCATE precios, movimientos_detalle, movimientos, productos, ubicaciones, usuarios RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE precios, proveedores, movimientos_detalle, movimientos, productos, ubicaciones, usuarios RESTART IDENTITY CASCADE`,
   );
   await db.execute(sql`REFRESH MATERIALIZED VIEW stock_actual`);
 }
