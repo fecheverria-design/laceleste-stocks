@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { db, pool } from './client.js';
 import { movimientos, productos, tiposMovimiento, ubicaciones } from './schema.js';
 import { parseDelimited } from './csv.js';
@@ -100,29 +100,35 @@ async function main(archivo: string): Promise<void> {
   };
   const c = (f: string[], k: keyof typeof col) => (f[col[k]] ?? '').trim();
 
-  // 1) Agrupar renglones por NUMERO, validando.
+  // 1) Agrupar renglones por (TIPO_DOC + NUMERO), validando. OJO: en 3c el NUMERO es
+  //    único POR TIPO de documento, no global — un Rint y un ReMe pueden compartir
+  //    número y son movimientos DISTINTOS. Agrupar solo por NUMERO los fusionaba.
   const grupos = new Map<string, MovGrupo>();
   const tiposDesconocidos = new Set<string>();
   let descartados = 0;
   for (let i = 1; i < filas.length; i++) {
     const f = filas[i]!;
     const numero = c(f, 'NUMERO');
+    const tipoDoc = c(f, 'TIPO_DOC');
+    const tipoDocNorm = normalizarTipo(tipoDoc);
     const fecha = parseFecha(c(f, 'FECHA'));
-    const tipo = TIPO_MAP[normalizarTipo(c(f, 'TIPO_DOC'))];
+    const tipo = TIPO_MAP[tipoDocNorm];
     const origen = Number(c(f, 'ORIGEN'));
     const destino = Number(c(f, 'DESTINO'));
     const producto_3c = c(f, 'ARTICU_ID').slice(0, 32);
     const cantidad = parseCantidad(c(f, 'CANTIDAD'));
 
-    if (!tipo) tiposDesconocidos.add(c(f, 'TIPO_DOC'));
+    if (!tipo) tiposDesconocidos.add(tipoDoc);
     if (!numero || !fecha || !tipo || !Number.isInteger(origen) || !Number.isInteger(destino) || !producto_3c || !(cantidad >= 0)) {
       descartados++;
       continue;
     }
-    let g = grupos.get(numero);
+    // Clave compuesta: distingue el mismo número entre tipos de documento distintos.
+    const clave = `${tipoDocNorm}|${numero}`;
+    let g = grupos.get(clave);
     if (!g) {
       g = { numero, fecha, tipo, origen, origenDenom: c(f, 'ORIGEN_DENOMINACION'), destino, destinoDenom: c(f, 'DESTINO_DENOMINACION'), renglones: [] };
-      grupos.set(numero, g);
+      grupos.set(clave, g);
     }
     g.renglones.push({ producto_3c, cantidad, unidad: c(f, 'UNIMED').slice(0, 16) || 'UN', texto: c(f, 'TEXTO') });
   }
@@ -163,8 +169,15 @@ async function main(archivo: string): Promise<void> {
   const tipoId = new Map(tiposRows.map((t) => [t.codigo, t.id]));
   const ubicRows = await db.select({ id: ubicaciones.id, depId3c: ubicaciones.depId3c }).from(ubicaciones);
   const ubicId = new Map(ubicRows.map((u) => [u.depId3c, u.id]));
+  // Idempotencia por (codigo de tipo + nro_3c): el número solo es único por tipo.
   const yaImportados = new Set(
-    (await db.select({ nro3c: movimientos.nro3c }).from(movimientos).where(sql`${movimientos.nro3c} IS NOT NULL`)).map((r) => r.nro3c),
+    (
+      await db
+        .select({ nro3c: movimientos.nro3c, codigo: tiposMovimiento.codigo })
+        .from(movimientos)
+        .innerJoin(tiposMovimiento, eq(tiposMovimiento.id, movimientos.tipoId))
+        .where(sql`${movimientos.nro3c} IS NOT NULL`)
+    ).map((r) => `${r.codigo}|${r.nro3c}`),
   );
   const usuarioId = await resolverUsuarioIntegracion();
   if (usuarioId === undefined) throw new Error('Falta el usuario de integración (corré db:seed).');
@@ -173,7 +186,7 @@ async function main(archivo: string): Promise<void> {
   let creados = 0;
   let saltadosExistentes = 0;
   for (const g of grupos.values()) {
-    if (yaImportados.has(g.numero)) {
+    if (yaImportados.has(`${g.tipo}|${g.numero}`)) {
       saltadosExistentes++;
       continue;
     }
