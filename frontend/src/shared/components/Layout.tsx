@@ -5,6 +5,7 @@ const tabs = [
   { to: '/panel', label: 'Panel' },
   { to: '/movimientos', label: 'Movimientos' },
   { to: '/stock', label: 'Stock' },
+  { to: '/consumos', label: 'Consumos' },
   { to: '/precios', label: 'Precios' },
   { to: '/health', label: 'Estado' },
 ];

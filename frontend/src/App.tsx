@@ -12,6 +12,7 @@ import { HealthPage } from './features/health/HealthPage';
 // Lazy: arrastran Recharts, que solo se baja al entrar a estas páginas.
 const PreciosPage = lazy(() => import('./features/precios/PreciosPage').then((m) => ({ default: m.PreciosPage })));
 const PanelPage = lazy(() => import('./features/panel/PanelPage').then((m) => ({ default: m.PanelPage })));
+const ConsumosPage = lazy(() => import('./features/consumos/ConsumosPage').then((m) => ({ default: m.ConsumosPage })));
 
 export function App() {
   return (
@@ -32,6 +33,14 @@ export function App() {
           <Route path="/movimientos/nuevo" element={<NuevoMovimientoPage />} />
           <Route path="/movimientos/:id" element={<MovimientoDetallePage />} />
           <Route path="/stock" element={<StockPage />} />
+          <Route
+            path="/consumos"
+            element={
+              <Suspense fallback={<p className="text-slate-500">Cargando consumos…</p>}>
+                <ConsumosPage />
+              </Suspense>
+            }
+          />
           <Route
             path="/precios"
             element={

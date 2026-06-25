@@ -170,6 +170,25 @@ export interface Valorizacion {
   top_productos: TopProducto[];
 }
 
+// ── Consumos por área ────────────────────────────────────────────────────────
+export interface ConsumoArea {
+  producto_3c: string;
+  producto_nombre: string;
+  unidad_base: string;
+  area_id: number;
+  area_dep_id_3c: number;
+  area_nombre: string;
+  total: number;
+  promedio_semanal: number;
+  renglones: number;
+}
+export interface Consumos {
+  desde: string;
+  hasta: string;
+  semanas: number;
+  items: ConsumoArea[];
+}
+
 // ── Historial de ediciones ───────────────────────────────────────────────────
 export interface CambioAuditoria {
   campo: string;
