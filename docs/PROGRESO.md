@@ -1,9 +1,16 @@
 # PROGRESO — laceleste-movimientos
 
-> Estado para retomar fácil. Última actualización: 2026-06-22.
+> Estado para retomar fácil. Última actualización: 2026-06-24.
 
 ## ⏱️ AL VOLVER — empezá por acá
-**Estado**: Fase 1 (backend + auth + front editar/crear) + import completo de 3c + **inventario inicial cargado (stock saneado, 0 negativos)** + modelo de stock multi-depósito. Todo commiteado y pusheado en `feat/movimientos-fase1-backend`. **50 tests verdes.**
+**Estado**: Fase 1 + import 3c + inventario + **módulo de PRECIOS (histórico con tipo COMPRA/ACTUALIZACION)** + **PANEL con valorización y gráficos (Recharts)**. Todo commiteado en `feat/movimientos-fase1-backend`. **70 tests verdes.**
+
+### 🆕 Sesión 2026-06-24 — Precios + Panel + limpieza de datos
+- **Módulo de precios** (migraciones `0006`–`0008`): tabla `precios` con `proveedor_id` + `tipo` (COMPRA|ACTUALIZACION) + fecha. **Vigente = última COMPRA** (lo que se pagó); si no hubo compra, cae a la última ACTUALIZACION (referencia). Endpoints `GET /api/precios`, `GET /api/productos/:cod/precios`, `POST/PUT/DELETE /api/precios`. Front: tab **Precios** (tabla + historial editable + gráfico de COMPRAS, Recharts lazy).
+- **Importer** `npm run import:precios -- <archivo> [--dry]`: formato histórico (`ID, PRECIO_UNITARIO, PERSONAS_ID, PROVEEDORES, FECHA, TIPO`). Idempotente (upsert por producto+proveedor+fecha+tipo). **Cargado el histórico real: 13.160 precios** (9.506 compras), 653 prod / 701 prov.
+- **Panel** (tab inicial, landing): `GET /api/valorizacion` = stock × precio vigente. KPIs + barras top productos + tabla por depósito. `$0 = sin precio`. **Total actual ~$577M**, 35 ítems con stock sin precio.
+- **Limpieza de datos ficticios**: se borraron 27 ajustes de prueba (AJU) + se recargó la foto de inventario desde archivo corregido (`Hoja de cálculo sin título - STOCKS.csv`) + correcciones manuales de escala (CAFE/BONDIOLA/PURE/PAPEL ALFAJOR en FABRICA). Backups: `backup_pre_limpieza.dump`, `backup_fin_dia_20260624.dump` (gitignored).
+- **⏳ Pendiente p/ mañana**: (a) ver los 35 productos con stock sin precio; (b) 5 negativos de packaging en acopios (CAJA TORTA, BOLSA DELIVERY… — poner en 0 o conteo real); (c) precio mayonesa $2.452 vs $3.028 si hace falta; (d) ¿productos solo-ACTUALIZACION muestran esa como referencia? (hoy: sí).
 
 1. **✅ INVENTARIO INICIAL — HECHO (2026-06-22)**. Se cargó la "foto" del inventario físico vía `import:inventario`. Quedó **0 negativos** en todo el sistema. **Decisión de J: stock real = solo FABRICA, pero los acopios se llevan EN PARALELO** (cada depósito de proveedor lleva su propio stock; ej. al recibir mercadería poniendo origen 210 Morrovalle en vez del 102 genérico, se descuenta del acopio del 210). El import enciende `lleva_stock` en todos los depósitos del archivo (15 hoy: FABRICA + 14 acopios). Cinco productos quedaron negativos en acopios (historial de 3c sin conteo) → **J decidió ponerlos en 0** (acopio agotado, un negativo es físicamente imposible). Detalle del importer en "FASE DE PRECISIÓN DE STOCK".
 2. **Estado de la importación de 3c** (corrida en el dev de J): productos, proveedores, ubicaciones y **15.849 movimientos** importados. Tipos mapeados: Rint→RINT, ReMe/Fcpr→RECEPCION, RINV→AJUSTE. **NCC queda afuera** (módulo facturas futuro). Solo FABRICA lleva stock (`npm run db:stock-en -- 1`). ⚠️ El dev tiene los datos REALES de J (no la demo).
