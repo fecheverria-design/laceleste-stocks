@@ -29,6 +29,9 @@ export const RenglonAbastecimientoSchema = z.object({
 });
 
 export const AbastecimientoSchema = z.object({
+  // Id externo de la app del compañero para deduplicar (idempotencia M2M). Recomendado:
+  // si se reenvía el mismo abastecimiento con la misma key, NO se duplica.
+  idempotency_key: z.string().trim().min(1).max(100).optional(),
   destino_dep_id_3c: z.number().int().positive(), // área que recibe (dep_id de 3c)
   origen_dep_id_3c: z.number().int().positive().optional(), // depósito que despacha
   fecha: z

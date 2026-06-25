@@ -6,6 +6,7 @@ import {
   actualizarCabecera,
   bloquearMovimiento,
   borrarDetalle,
+  buscarPorIdempotencia,
   buscarUbicacionPorDep3c,
   consultarStock,
   contarMovimientos,
@@ -73,6 +74,16 @@ export async function registrarAbastecimiento(
   const anioNro = input.fecha ? Number(input.fecha.slice(0, 4)) : anio;
 
   return db.transaction(async (tx) => {
+    // Idempotencia M2M: si ya entró un abastecimiento con esta key, devolver ese mismo
+    // (no duplicar). El índice único uq_mov_idempotencia blinda también las concurrentes.
+    if (input.idempotency_key) {
+      const existenteId = await buscarPorIdempotencia(tx, input.idempotency_key);
+      if (existenteId !== undefined) {
+        const existente = await obtenerMovimiento(tx, existenteId);
+        if (existente) return existente;
+      }
+    }
+
     const origen = await buscarUbicacionPorDep3c(tx, origenDep);
     if (!origen) {
       throw notFound('UBICACION_NO_ENCONTRADA', `No existe ubicación con dep_id_3c=${origenDep} (origen)`);
@@ -111,6 +122,7 @@ export async function registrarAbastecimiento(
       destinoId: destino.id,
       usuarioId: opts.usuarioId,
       observaciones: input.observaciones,
+      idempotenciaKey: input.idempotency_key,
     });
 
     await insertarDetalle(

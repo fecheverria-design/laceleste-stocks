@@ -111,6 +111,10 @@ export const movimientos = pgTable(
       .notNull()
       .references(() => usuarios.id),
     nro3c: varchar('nro_3c', { length: 64 }), // nullable, sync con 3c
+    // Clave de idempotencia del POST M2M de abastecimientos: id externo que manda la app
+    // del compañero. Nullable (los movimientos propios no la usan); unique → reenvío del
+    // mismo abastecimiento no duplica.
+    idempotenciaKey: varchar('idempotencia_key', { length: 100 }),
     observaciones: text('observaciones'),
     creadoEn: timestamp('creado_en', { withTimezone: true }).notNull().defaultNow(),
     confirmadoEn: timestamp('confirmado_en', { withTimezone: true }),
@@ -121,6 +125,8 @@ export const movimientos = pgTable(
     index('idx_mov_fecha').on(t.fecha.desc()),
     index('idx_mov_estado').on(t.estado),
     index('idx_mov_destino_fecha').on(t.destinoId, t.fecha.desc()),
+    // Idempotencia M2M: una key se usa una sola vez (NULLs distintos → no afecta a los propios).
+    uniqueIndex('uq_mov_idempotencia').on(t.idempotenciaKey),
   ],
 );
 

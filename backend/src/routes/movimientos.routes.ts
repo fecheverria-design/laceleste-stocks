@@ -11,14 +11,14 @@ import {
   putAnularMovimiento,
   putEditarMovimiento,
 } from '../controllers/movimientos.controller.js';
-import { requireAuth, requireRole } from '../middleware/auth.js';
+import { requireApiKey, requireAuth, requireRole } from '../middleware/auth.js';
 
 export const movimientosRouter = Router();
 
 // Ingreso de abastecimiento (RINT auto-confirmado) desde la app del compañero.
-// M2M: lo invoca la app del compañero, no un humano. Auth de máquina pendiente
-// (API key) — por ahora abierto y auditado al usuario de integración.
-movimientosRouter.post('/abastecimientos', postAbastecimiento);
+// M2M: lo invoca la app del compañero, no un humano. Protegido con API key
+// (header x-api-key) e idempotente (idempotency_key). Audita al usuario de integración.
+movimientosRouter.post('/abastecimientos', requireApiKey, postAbastecimiento);
 
 // Crear movimiento (auto-confirmado): cualquier usuario logueado.
 movimientosRouter.post('/movimientos', requireAuth, postMovimiento);

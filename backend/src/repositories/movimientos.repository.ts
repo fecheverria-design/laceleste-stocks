@@ -25,6 +25,7 @@ export interface CabeceraInput {
   destinoId: number;
   usuarioId: number;
   observaciones?: string;
+  idempotenciaKey?: string;
 }
 
 export interface RenglonInput {
@@ -98,11 +99,23 @@ export async function insertarCabecera(tx: Tx, data: CabeceraInput): Promise<num
       proyeccion: data.proyeccion,
       usuarioId: data.usuarioId,
       observaciones: data.observaciones,
+      idempotenciaKey: data.idempotenciaKey,
       confirmadoEn: sql`now()`,
     })
     .returning({ id: movimientos.id });
   if (!row) throw new Error('insertarCabecera no devolvió id');
   return row.id;
+}
+
+// Busca el id de un movimiento por su clave de idempotencia (POST M2M). Devuelve
+// undefined si no existe. Permite devolver el existente en vez de duplicar.
+export async function buscarPorIdempotencia(tx: Tx, key: string): Promise<number | undefined> {
+  const [row] = await tx
+    .select({ id: movimientos.id })
+    .from(movimientos)
+    .where(eq(movimientos.idempotenciaKey, key))
+    .limit(1);
+  return row?.id;
 }
 
 export async function insertarDetalle(tx: Tx, movimientoId: number, renglones: RenglonInput[]): Promise<void> {
