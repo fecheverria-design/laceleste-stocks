@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { eq, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { db, pool } from './client.js';
 import { movimientos, productos, tiposMovimiento, ubicaciones } from './schema.js';
 import { parseDelimited } from './csv.js';
@@ -39,6 +40,10 @@ const TIPO_MAP: Record<string, string> = {
   //                 dirección fabrica<->ajustes (id 101) se implementa en la fase de stock)
   // Pendiente a propósito: NCC (módulo de facturas futuro).
 };
+
+// Balde de AJUSTES de 3c: cualquier movimiento que lo toque (origen o destino) es un
+// AJUSTE, aunque venga tipeado como 'Rint' (así los registra 3c). Decisión de J.
+const DEP_AJUSTES = 101;
 
 function parseFecha(s: string): string | null {
   const m = s.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
@@ -100,9 +105,13 @@ async function main(archivo: string): Promise<void> {
   };
   const c = (f: string[], k: keyof typeof col) => (f[col[k]] ?? '').trim();
 
-  // 1) Agrupar renglones por (TIPO_DOC + NUMERO), validando. OJO: en 3c el NUMERO es
-  //    único POR TIPO de documento, no global — un Rint y un ReMe pueden compartir
-  //    número y son movimientos DISTINTOS. Agrupar solo por NUMERO los fusionaba.
+  // 1) Agrupar renglones por (TIPO_DOC + NUMERO + dirección efectiva), validando.
+  //    - El NUMERO de 3c es único POR TIPO de documento, no global (un Rint y un ReMe
+  //      pueden compartir número → son distintos). Agrupar solo por NUMERO los fusionaba.
+  //    - Una CANTIDAD negativa = devolución: se invierte la dirección y se vuelve positiva.
+  //    - Un mismo NUMERO puede traer renglones en direcciones distintas (ej. ajustes que
+  //      suman unos productos y restan otros): se separan por dirección efectiva.
+  //    - Si la dirección toca el balde 101 (AJUSTES), el tipo es AJUSTE aunque sea Rint.
   const grupos = new Map<string, MovGrupo>();
   const tiposDesconocidos = new Set<string>();
   let descartados = 0;
@@ -112,22 +121,32 @@ async function main(archivo: string): Promise<void> {
     const tipoDoc = c(f, 'TIPO_DOC');
     const tipoDocNorm = normalizarTipo(tipoDoc);
     const fecha = parseFecha(c(f, 'FECHA'));
-    const tipo = TIPO_MAP[tipoDocNorm];
-    const origen = Number(c(f, 'ORIGEN'));
-    const destino = Number(c(f, 'DESTINO'));
+    const tipoMapeado = TIPO_MAP[tipoDocNorm];
+    let origen = Number(c(f, 'ORIGEN'));
+    let destino = Number(c(f, 'DESTINO'));
+    let origenDenom = c(f, 'ORIGEN_DENOMINACION');
+    let destinoDenom = c(f, 'DESTINO_DENOMINACION');
     const producto_3c = c(f, 'ARTICU_ID').slice(0, 32);
-    const cantidad = parseCantidad(c(f, 'CANTIDAD'));
+    let cantidad = parseCantidad(c(f, 'CANTIDAD'));
 
-    if (!tipo) tiposDesconocidos.add(tipoDoc);
-    if (!numero || !fecha || !tipo || !Number.isInteger(origen) || !Number.isInteger(destino) || !producto_3c || !(cantidad >= 0)) {
+    if (!tipoMapeado) tiposDesconocidos.add(tipoDoc);
+    if (!numero || !fecha || !tipoMapeado || !Number.isInteger(origen) || !Number.isInteger(destino) || !producto_3c || !Number.isFinite(cantidad)) {
       descartados++;
       continue;
     }
-    // Clave compuesta: distingue el mismo número entre tipos de documento distintos.
-    const clave = `${tipoDocNorm}|${numero}`;
+    // Devolución (cantidad < 0): invierto dirección y la dejo positiva.
+    if (cantidad < 0) {
+      [origen, destino] = [destino, origen];
+      [origenDenom, destinoDenom] = [destinoDenom, origenDenom];
+      cantidad = -cantidad;
+    }
+    // Ajuste: si toca el balde 101 (AJUSTES) es AJUSTE, aunque el documento sea Rint.
+    const tipo = origen === DEP_AJUSTES || destino === DEP_AJUSTES ? 'AJUSTE' : tipoMapeado;
+    // Clave: tipo de documento + número + dirección efectiva.
+    const clave = `${tipoDocNorm}|${numero}|${origen}->${destino}`;
     let g = grupos.get(clave);
     if (!g) {
-      g = { numero, fecha, tipo, origen, origenDenom: c(f, 'ORIGEN_DENOMINACION'), destino, destinoDenom: c(f, 'DESTINO_DENOMINACION'), renglones: [] };
+      g = { numero, fecha, tipo, origen, origenDenom, destino, destinoDenom, renglones: [] };
       grupos.set(clave, g);
     }
     g.renglones.push({ producto_3c, cantidad, unidad: c(f, 'UNIMED').slice(0, 16) || 'UN', texto: c(f, 'TEXTO') });
@@ -169,15 +188,25 @@ async function main(archivo: string): Promise<void> {
   const tipoId = new Map(tiposRows.map((t) => [t.codigo, t.id]));
   const ubicRows = await db.select({ id: ubicaciones.id, depId3c: ubicaciones.depId3c }).from(ubicaciones);
   const ubicId = new Map(ubicRows.map((u) => [u.depId3c, u.id]));
-  // Idempotencia por (codigo de tipo + nro_3c): el número solo es único por tipo.
+  // Idempotencia por (codigo + nro_3c + dirección): el número es único por tipo, y un
+  // mismo número puede tener movimientos en direcciones distintas (ajustes mixtos).
+  const origenU = alias(ubicaciones, 'origen_u');
+  const destinoU = alias(ubicaciones, 'destino_u');
   const yaImportados = new Set(
     (
       await db
-        .select({ nro3c: movimientos.nro3c, codigo: tiposMovimiento.codigo })
+        .select({
+          nro3c: movimientos.nro3c,
+          codigo: tiposMovimiento.codigo,
+          od: origenU.depId3c,
+          dd: destinoU.depId3c,
+        })
         .from(movimientos)
         .innerJoin(tiposMovimiento, eq(tiposMovimiento.id, movimientos.tipoId))
+        .innerJoin(origenU, eq(origenU.id, movimientos.origenId))
+        .innerJoin(destinoU, eq(destinoU.id, movimientos.destinoId))
         .where(sql`${movimientos.nro3c} IS NOT NULL`)
-    ).map((r) => `${r.codigo}|${r.nro3c}`),
+    ).map((r) => `${r.codigo}|${r.nro3c}|${r.od}->${r.dd}`),
   );
   const usuarioId = await resolverUsuarioIntegracion();
   if (usuarioId === undefined) throw new Error('Falta el usuario de integración (corré db:seed).');
@@ -186,7 +215,7 @@ async function main(archivo: string): Promise<void> {
   let creados = 0;
   let saltadosExistentes = 0;
   for (const g of grupos.values()) {
-    if (yaImportados.has(`${g.tipo}|${g.numero}`)) {
+    if (yaImportados.has(`${g.tipo}|${g.numero}|${g.origen}->${g.destino}`)) {
       saltadosExistentes++;
       continue;
     }
