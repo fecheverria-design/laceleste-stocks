@@ -22,37 +22,43 @@ export function ConsumosPage() {
   const [desde, setDesde] = useState(haceSemanas(12));
   const [hasta, setHasta] = useState(hoyYmd());
   const [texto, setTexto] = useState('');
+  const [area, setArea] = useState(''); // '' = todas
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['consumos', desde, hasta],
     queryFn: () => apiGet<Consumos>(`/api/consumos?desde=${desde}&hasta=${hasta}`),
   });
 
+  // Áreas presentes (para el filtro).
+  const areaOpts = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const i of data?.items ?? []) m.set(i.area_id, i.area_nombre);
+    return [...m.entries()].map(([id, nombre]) => ({ id, nombre })).sort((a, b) => a.nombre.localeCompare(b.nombre));
+  }, [data]);
+
   const q = texto.trim().toLowerCase();
   const items = useMemo(
     () =>
-      (data?.items ?? []).filter(
-        (i) => !q || i.producto_nombre.toLowerCase().includes(q) || i.producto_3c.toLowerCase().includes(q),
-      ),
-    [data, q],
+      (data?.items ?? []).filter((i) => {
+        if (area && String(i.area_id) !== area) return false;
+        if (q && !i.producto_nombre.toLowerCase().includes(q) && !i.producto_3c.toLowerCase().includes(q)) return false;
+        return true;
+      }),
+    [data, q, area],
   );
 
-  // Productos distintos en el filtro actual (para decidir el gráfico).
+  // El gráfico solo es representativo para UN producto (todas sus áreas en la misma
+  // unidad). Comparar entre productos no sirve: mezcla kg, unidades, litros.
   const productosFiltrados = useMemo(() => [...new Set(items.map((i) => i.producto_3c))], [items]);
   const unProducto = productosFiltrados.length === 1 ? items[0] : null;
-
-  // Gráfico: si hay un solo producto filtrado → consumo semanal por área de ese producto.
-  //          si no → top 12 combinaciones (producto · área) por consumo semanal.
+  // Para el producto en foco, muestro TODAS sus áreas (ignora el filtro de área, que
+  // afecta solo la tabla). Misma unidad → comparación válida.
   const chart = unProducto
-    ? items
-        .filter((i) => i.promedio_semanal > 0)
+    ? (data?.items ?? [])
+        .filter((i) => i.producto_3c === unProducto.producto_3c && i.promedio_semanal > 0)
         .map((i) => ({ label: i.area_nombre, valor: i.promedio_semanal }))
-    : [...items]
-        .filter((i) => i.promedio_semanal > 0)
-        .sort((a, b) => b.promedio_semanal - a.promedio_semanal)
-        .slice(0, 12)
-        .map((i) => ({ label: `${i.producto_nombre} · ${i.area_nombre}`, valor: i.promedio_semanal }))
-        .reverse();
+        .sort((a, b) => b.valor - a.valor)
+    : [];
 
   return (
     <section className="space-y-6">
@@ -73,6 +79,14 @@ export function ConsumosPage() {
             value={texto}
             onChange={(e) => setTexto(e.target.value)}
           />
+          <select className={inputCls} value={area} onChange={(e) => setArea(e.target.value)}>
+            <option value="">Todas las áreas</option>
+            {areaOpts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.nombre}
+              </option>
+            ))}
+          </select>
           <label className="flex items-center gap-1 text-sm text-slate-500">
             Desde
             <input type="date" className={inputCls} value={desde} onChange={(e) => setDesde(e.target.value)} />
@@ -95,10 +109,14 @@ export function ConsumosPage() {
             <h3 className="mb-3 text-sm font-semibold text-slate-700">
               {unProducto
                 ? `Consumo semanal por área · ${unProducto.producto_nombre} (${unProducto.unidad_base})`
-                : 'Top consumos semanales (producto · área)'}
+                : 'Consumo semanal por área'}
             </h3>
             {chart.length === 0 ? (
-              <p className="text-sm text-slate-500">Sin consumo en el período/filtro.</p>
+              <p className="text-sm text-slate-500">
+                {unProducto
+                  ? 'Sin consumo en el período.'
+                  : 'Buscá un producto para ver el gráfico por área. (No se comparan varios productos juntos: las unidades difieren — kg, unidades, litros.)'}
+              </p>
             ) : (
               <ResponsiveContainer width="100%" height={Math.max(200, chart.length * 30)}>
                 <BarChart data={chart} layout="vertical" margin={{ top: 0, right: 16, left: 8, bottom: 0 }}>

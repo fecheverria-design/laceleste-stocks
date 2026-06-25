@@ -5,6 +5,7 @@ import { CrearProveedorSchema, GastoQuerySchema } from '../domain/proveedores.sc
 import {
   crearProveedor,
   obtenerFamilias,
+  obtenerGastoMensual,
   obtenerGastoProveedores,
   obtenerProveedores,
 } from '../services/proveedores.service.js';
@@ -26,6 +27,15 @@ export async function getGastoProveedores(req: Request, res: Response): Promise<
     throw badRequest('VALIDACION', z.prettifyError(parsed.error));
   }
   res.status(200).json(await obtenerGastoProveedores(parsed.data));
+}
+
+// GET /api/proveedores/gasto-mensual — gasto neto por mes, filtrable.
+export async function getGastoMensual(req: Request, res: Response): Promise<void> {
+  const parsed = GastoQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    throw badRequest('VALIDACION', z.prettifyError(parsed.error));
+  }
+  res.status(200).json(await obtenerGastoMensual(parsed.data));
 }
 
 // POST /api/proveedores — alta (numero_3c obligatorio).

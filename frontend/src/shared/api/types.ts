@@ -206,6 +206,11 @@ export interface GastoProveedor {
   compras: number;
   gasto_neto: string;
 }
+export interface GastoMes {
+  mes: string; // YYYY-MM
+  gasto_neto: string;
+  compras: number;
+}
 
 // ── Historial de ediciones ───────────────────────────────────────────────────
 export interface CambioAuditoria {

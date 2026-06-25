@@ -67,6 +67,30 @@ export async function gastoPorProveedorFamilia(filtros: {
   return res.rows;
 }
 
+export type GastoMes = { mes: string; gasto_neto: string; compras: number };
+
+// Gasto neto por mes (YYYY-MM), filtrable por familia y rango. Para la vista mensual.
+export async function gastoMensual(filtros: {
+  familia?: string;
+  desde?: string;
+  hasta?: string;
+}): Promise<GastoMes[]> {
+  const conds = [sql`TRUE`];
+  if (filtros.familia) conds.push(sql`p.familia = ${filtros.familia}`);
+  if (filtros.desde) conds.push(sql`c.fecha >= ${filtros.desde}`);
+  if (filtros.hasta) conds.push(sql`c.fecha <= ${filtros.hasta}`);
+  const res = await db.execute<GastoMes>(
+    sql`SELECT to_char(c.fecha, 'YYYY-MM') AS mes,
+               sum(c.precio_total)::text AS gasto_neto,
+               count(*)::int AS compras
+        FROM compras c
+        LEFT JOIN productos p ON p.codigo_3c = c.producto_3c
+        WHERE ${sql.join(conds, sql` AND `)}
+        GROUP BY mes ORDER BY mes`,
+  );
+  return res.rows;
+}
+
 // Familias distintas (para el filtro del gráfico).
 export async function listarFamilias(): Promise<string[]> {
   const res = await db.execute<{ familia: string }>(

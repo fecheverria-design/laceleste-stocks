@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { apiGet, apiPost } from '../../shared/api/client';
-import type { GastoProveedor, Proveedor } from '../../shared/api/types';
+import type { GastoMes, GastoProveedor, Proveedor } from '../../shared/api/types';
 
 const ars0 = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 });
 function arsCorto(n: number): string {
@@ -18,7 +18,19 @@ const inputCls =
 export function ProveedoresPage() {
   const queryClient = useQueryClient();
   const [familia, setFamilia] = useState(''); // '' = todas
+  const [desde, setDesde] = useState('');
+  const [hasta, setHasta] = useState('');
   const [texto, setTexto] = useState('');
+
+  // Querystring de filtros del gasto (familia + período).
+  const gastoQs = () => {
+    const p = new URLSearchParams();
+    if (familia) p.set('familia', familia);
+    if (desde) p.set('desde', desde);
+    if (hasta) p.set('hasta', hasta);
+    const s = p.toString();
+    return s ? `?${s}` : '';
+  };
   // Alta
   const [nuevoNum, setNuevoNum] = useState('');
   const [nuevoNombre, setNuevoNombre] = useState('');
@@ -28,9 +40,12 @@ export function ProveedoresPage() {
   const proveedores = useQuery({ queryKey: ['proveedores'], queryFn: () => apiGet<Proveedor[]>('/api/proveedores') });
   const familias = useQuery({ queryKey: ['familias'], queryFn: () => apiGet<string[]>('/api/familias') });
   const gasto = useQuery({
-    queryKey: ['gasto-proveedores', familia],
-    queryFn: () =>
-      apiGet<GastoProveedor[]>(`/api/proveedores/gasto${familia ? `?familia=${encodeURIComponent(familia)}` : ''}`),
+    queryKey: ['gasto-proveedores', familia, desde, hasta],
+    queryFn: () => apiGet<GastoProveedor[]>(`/api/proveedores/gasto${gastoQs()}`),
+  });
+  const mensual = useQuery({
+    queryKey: ['gasto-mensual', familia, desde, hasta],
+    queryFn: () => apiGet<GastoMes[]>(`/api/proveedores/gasto-mensual${gastoQs()}`),
   });
 
   const crear = useMutation({
@@ -55,6 +70,16 @@ export function ProveedoresPage() {
       .slice(0, 12)
       .reverse();
   }, [gasto.data]);
+
+  // Serie mensual + total del período (resuelve "no se sabe de cuánto es").
+  const mesesChart = useMemo(
+    () => (mensual.data ?? []).map((m) => ({ mes: m.mes, valor: Number(m.gasto_neto) })),
+    [mensual.data],
+  );
+  const totalPeriodo = useMemo(
+    () => (mensual.data ?? []).reduce((a, m) => a + Number(m.gasto_neto), 0),
+    [mensual.data],
+  );
 
   const q = texto.trim().toLowerCase();
   const filas = (proveedores.data ?? []).filter(
@@ -107,19 +132,77 @@ export function ProveedoresPage() {
         </form>
       )}
 
-      {/* Gráfico de gasto por proveedor (filtrable por familia) */}
-      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold text-slate-700">Gasto por proveedor (top 12)</h3>
-          <select className={inputCls} value={familia} onChange={(e) => setFamilia(e.target.value)}>
-            <option value="">Todas las familias</option>
-            {(familias.data ?? []).map((f) => (
-              <option key={f} value={f}>
-                {f}
-              </option>
-            ))}
-          </select>
+      {/* Barra de filtros: familia + período + total */}
+      <div className="flex flex-wrap items-end justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="flex flex-col gap-1 text-xs text-slate-500">
+            Familia
+            <select className={inputCls} value={familia} onChange={(e) => setFamilia(e.target.value)}>
+              <option value="">Todas</option>
+              {(familias.data ?? []).map((f) => (
+                <option key={f} value={f}>
+                  {f}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-slate-500">
+            Desde
+            <input type="date" className={inputCls} value={desde} onChange={(e) => setDesde(e.target.value)} />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-slate-500">
+            Hasta
+            <input type="date" className={inputCls} value={hasta} onChange={(e) => setHasta(e.target.value)} />
+          </label>
+          {(desde || hasta || familia) && (
+            <button
+              onClick={() => {
+                setFamilia('');
+                setDesde('');
+                setHasta('');
+              }}
+              className="pb-2 text-sm font-medium text-sky-600 hover:underline"
+            >
+              Limpiar
+            </button>
+          )}
         </div>
+        <div className="text-right">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Gasto del período {familia && `· ${familia}`}</p>
+          <p className="text-2xl font-semibold tabular-nums text-slate-900">{ars0.format(totalPeriodo)}</p>
+        </div>
+      </div>
+
+      {/* Gasto mensual */}
+      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <h3 className="mb-3 text-sm font-semibold text-slate-700">Gasto por mes (neto)</h3>
+        {mesesChart.length === 0 ? (
+          <p className="text-sm text-slate-500">Sin compras para este filtro.</p>
+        ) : (
+          <ResponsiveContainer width="100%" height={240}>
+            <BarChart data={mesesChart} margin={{ top: 5, right: 16, left: 8, bottom: 0 }}>
+              <XAxis dataKey="mes" tick={{ fontSize: 11, fill: '#64748b' }} tickLine={false} axisLine={{ stroke: '#e2e8f0' }} />
+              <YAxis
+                tickFormatter={arsCorto}
+                width={64}
+                tick={{ fontSize: 11, fill: '#64748b' }}
+                tickLine={false}
+                axisLine={false}
+              />
+              <Tooltip
+                formatter={(v) => [ars0.format(Number(v)), 'Gasto neto']}
+                cursor={{ fill: '#f1f5f9' }}
+                contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e2e8f0' }}
+              />
+              <Bar dataKey="valor" fill="#0284c7" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+
+      {/* Gráfico de gasto por proveedor (top 12) */}
+      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <h3 className="mb-3 text-sm font-semibold text-slate-700">Gasto por proveedor (top 12)</h3>
         {chart.length === 0 ? (
           <p className="text-sm text-slate-500">Sin compras para este filtro.</p>
         ) : (

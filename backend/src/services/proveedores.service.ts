@@ -2,11 +2,13 @@ import { conflict } from '../domain/errors.js';
 import type { CrearProveedorInput } from '../domain/proveedores.schema.js';
 import {
   existeNumero3c,
+  gastoMensual,
   gastoPorProveedorFamilia,
   insertarProveedor,
   listarFamilias,
   listarProveedores,
   type FilaProveedor,
+  type GastoMes,
   type GastoProveedor,
 } from '../repositories/proveedores.repository.js';
 
@@ -18,6 +20,12 @@ export const obtenerGastoProveedores = (filtros: {
   desde?: string;
   hasta?: string;
 }): Promise<GastoProveedor[]> => gastoPorProveedorFamilia(filtros);
+
+export const obtenerGastoMensual = (filtros: {
+  familia?: string;
+  desde?: string;
+  hasta?: string;
+}): Promise<GastoMes[]> => gastoMensual(filtros);
 
 export async function crearProveedor(input: CrearProveedorInput): Promise<{
   id: number;
