@@ -18,8 +18,11 @@ import { generarNro, insertarDetalle, resolverUsuarioIntegracion } from '../repo
 // Auto-crea productos/ubicaciones faltantes. Por depósito arma a lo sumo 2
 // movimientos: una "entrada" (101→D, deltas +) y una "salida" (D→101, deltas −).
 //
-// Uso: npm run import:inventario -- <archivo.csv|tsv> [--dry]
+// Uso: npm run import:inventario -- <archivo.csv|tsv> [--dry] [--exclusivo]
 //   --dry: solo muestra el plan (no escribe nada).
+//   --exclusivo: el conteo es AUTORITATIVO por depósito → todo producto con stock en un
+//                depósito del archivo que NO esté listado se pone en 0. Sin el flag, solo
+//                se ajustan los productos listados (los demás conservan su saldo histórico).
 
 // Baldes virtuales del modelo de 3c — nunca llevan stock, son contrapartida.
 const DEP_AJUSTES = 101;
@@ -51,7 +54,32 @@ interface FilaInv {
   unidad: string;
 }
 
-async function main(archivo: string, dry: boolean): Promise<void> {
+// Modo --exclusivo: por cada depósito del archivo, todo producto que HOY tiene stock
+// ahí pero no figura en el conteo se agrega como contado=0 (→ se ajusta a 0). Así el
+// acopio queda exactamente como lo contado, sin arrastres del histórico de 3c.
+function extrasExclusivo(
+  items: FilaInv[],
+  stockActual: Map<string, number>,
+  ubicId: Map<number, number>,
+  depsArchivo: number[],
+): FilaInv[] {
+  const listado = new Set(items.map((r) => `${r.depId3c}:${r.producto3c}`));
+  const extras: FilaInv[] = [];
+  for (const dep of depsArchivo) {
+    const uid = ubicId.get(dep);
+    if (uid === undefined) continue;
+    for (const [key, cant] of stockActual) {
+      const sep = key.indexOf(':');
+      if (Number(key.slice(0, sep)) !== uid) continue;
+      const prod = key.slice(sep + 1);
+      if (cant === 0 || listado.has(`${dep}:${prod}`)) continue;
+      extras.push({ depId3c: dep, producto3c: prod, contado: 0, denom: '', unidad: 'UN' });
+    }
+  }
+  return extras;
+}
+
+async function main(archivo: string, dry: boolean, exclusivo: boolean): Promise<void> {
   const filas = parseDelimited(readFileSync(archivo, 'utf8'));
   if (filas.length < 2) throw new Error('El archivo no tiene filas de datos (¿solo encabezado?).');
 
@@ -117,10 +145,12 @@ async function main(archivo: string, dry: boolean): Promise<void> {
     // En --dry no escribo: el sistema de los deps aún-sin-stock se asume 0 (es lo que
     // daría tras activar lleva_stock en un depósito sin movimientos previos).
     const stockActual = await leerStock([...ubicId.values()]);
+    const extras = exclusivo ? extrasExclusivo(items, stockActual, ubicId, depsArchivo) : [];
+    const itemsEval = [...items, ...extras];
     let entradas = 0;
     let salidas = 0;
     let sinCambio = 0;
-    for (const r of items) {
+    for (const r of itemsEval) {
       const uid = ubicId.get(r.depId3c);
       const sistema = uid !== undefined ? (stockActual.get(`${uid}:${r.producto3c}`) ?? 0) : 0;
       const delta = redondear3(r.contado - sistema);
@@ -135,6 +165,7 @@ async function main(archivo: string, dry: boolean): Promise<void> {
     console.log(`  · ya existen como ubicación: ${depsArchivo.length - depsFaltantes.length}`);
     console.log(`  · se crearían (DEPOSITO): ${depsFaltantes.length}${depsFaltantes.length ? ' → ' + depsFaltantes.join(', ') : ''}`);
     console.log(`Productos contados: ${items.length} (faltan crear ${prodFaltantes.length})`);
+    if (exclusivo) console.log(`Modo --exclusivo: ${extras.length} producto(s) no listados se pondrían en 0.`);
     console.log(`Renglones de ajuste: +${entradas} entradas / −${salidas} salidas / ${sinCambio} ya en su valor`);
     console.log(`Balde AJUSTES (dep ${DEP_AJUSTES}) existe: ${balde101Existe ? 'sí' : 'no (se crearía)'}`);
     if (baldesEnArchivo) console.log(`⚠ ${baldesEnArchivo} fila(s) de baldes virtuales (101/102) ignoradas.`);
@@ -165,6 +196,8 @@ async function main(archivo: string, dry: boolean): Promise<void> {
   const ubicId2 = new Map(ubicRows2.map((u) => [u.depId3c, u.id]));
   const aIdAjustes = ubicId2.get(DEP_AJUSTES)!;
   const stockActual = await leerStock([...ubicId2.values()]);
+  // En --exclusivo, sumar los no-listados (contado=0) para que el conteo sea autoritativo.
+  const itemsEval = exclusivo ? [...items, ...extrasExclusivo(items, stockActual, ubicId2, depsArchivo)] : items;
 
   // 7) Por depósito, separar entradas (delta+) y salidas (delta−).
   const usuarioId = await resolverUsuarioIntegracion();
@@ -178,7 +211,7 @@ async function main(archivo: string, dry: boolean): Promise<void> {
     const uid = ubicId2.get(dep)!;
     const entradas: { producto3c: string; cantidadReal: string; unidad: string }[] = [];
     const salidas: { producto3c: string; cantidadReal: string; unidad: string }[] = [];
-    for (const r of items.filter((x) => x.depId3c === dep)) {
+    for (const r of itemsEval.filter((x) => x.depId3c === dep)) {
       const sistema = stockActual.get(`${uid}:${r.producto3c}`) ?? 0;
       const delta = redondear3(r.contado - sistema);
       if (Math.abs(delta) < 0.0005) {
@@ -259,13 +292,14 @@ async function tipoAjusteId(): Promise<number> {
 
 const argv = process.argv.slice(2);
 const dry = argv.includes('--dry');
+const exclusivo = argv.includes('--exclusivo');
 const archivo = argv.find((a) => !a.startsWith('--'));
 if (!archivo) {
-  console.error('Uso: npm run import:inventario -- <archivo.csv|tsv> [--dry]');
+  console.error('Uso: npm run import:inventario -- <archivo.csv|tsv> [--dry] [--exclusivo]');
   process.exit(1);
 }
 
-main(archivo, dry).catch((err: unknown) => {
+main(archivo, dry, exclusivo).catch((err: unknown) => {
   console.error('❌ Error importando inventario:', err);
   process.exit(1);
 });
