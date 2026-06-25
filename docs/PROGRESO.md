@@ -2,6 +2,26 @@
 
 > Estado para retomar fácil. Última actualización: 2026-06-25.
 
+## 🚩 CIERRE FASE 1 — PR a `dev` (2026-06-25)
+Branch `feat/movimientos-fase1-backend` listo para PR a `dev`. **72 tests verdes**,
+typecheck/lint/build limpios (back y front). Lo construido en Fase 1 (además del backend
+de movimientos/auth/stock):
+- **Panel** (landing) con valorización del stock a precio vigente + gráficos (Recharts).
+- **Precios**: histórico con tipo COMPRA/ACTUALIZACION (vigente = última compra), gráfico
+  de compras, alta/edición; importer `import:precios`.
+- **Consumos por área**: cantidad + promedio semanal + **costo $ por área** (cantidad ×
+  precio vigente, comparable).
+- **Proveedores**: gasto real por familia (de compras reales), vista mensual + período,
+  alta de proveedor (numero_3c obligatorio); tabla `compras` + `import:compras`.
+- **Calidad de datos**: fix de fusión de movimientos por NUMERO, ajustes vía balde 101,
+  devoluciones invertidas, conteo autoritativo de acopios (`--exclusivo`). Ver
+  `docs/IMPORTACION-3C.md`.
+- Datos reales de J cargados: ~17.585 movimientos, 13.160 precios, 11.601 compras,
+  inventario anclado (0 negativos).
+- **Acción manual de J**: pushear branch (hecho por la sesión si hubo credenciales) y
+  crear el PR en GitHub (no hay `gh`). Pendientes menores: asegurar M2M `abastecimientos`
+  (API key + idempotencia), ~35 productos sin precio (one-off, cargar a mano si importan).
+
 ### 🆕 Sesión 2026-06-25 — Calidad de datos de movimientos (importante)
 Se corrigieron varios temas de cómo se interpreta el histórico de 3c. **Todo documentado
 en `docs/IMPORTACION-3C.md`** (fuente única de las reglas de import — leer ahí si un
