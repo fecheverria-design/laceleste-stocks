@@ -167,6 +167,27 @@ describe('precios (historial con fecha de vigencia)', () => {
     expect(vig?.tipo).toBe('ACTUALIZACION');
   });
 
+  it('crear con tipo ACTUALIZACION no pisa el vigente si hay una COMPRA', async () => {
+    const fx = await sembrarEscenario({ productos3c: ['401'] });
+    await crearPrecio({ producto_3c: '401', precio: 100, tipo: 'COMPRA', vigente_desde: ymd(-10) }, { usuarioId: fx.usuarioId });
+    await crearPrecio({ producto_3c: '401', precio: 500, tipo: 'ACTUALIZACION', vigente_desde: ymd(-1) }, { usuarioId: fx.usuarioId });
+
+    const vig = await vigentePorProducto('401');
+    expect(vig?.precio).toBe('100.0000');
+    expect(vig?.tipo).toBe('COMPRA');
+  });
+
+  it('editar el tipo de ACTUALIZACION a COMPRA la convierte en el vigente', async () => {
+    const fx = await sembrarEscenario({ productos3c: ['401'] });
+    await crearPrecio({ producto_3c: '401', precio: 100, tipo: 'COMPRA', vigente_desde: ymd(-10) }, { usuarioId: fx.usuarioId });
+    const act = await crearPrecio({ producto_3c: '401', precio: 500, tipo: 'ACTUALIZACION', vigente_desde: ymd(-1) }, { usuarioId: fx.usuarioId });
+
+    await editarPrecio(act.id, { tipo: 'COMPRA' });
+    const vig = await vigentePorProducto('401');
+    expect(vig?.precio).toBe('500.0000'); // ahora es la COMPRA más reciente
+    expect(vig?.tipo).toBe('COMPRA');
+  });
+
   it('pedir historial de un producto inexistente da 404', async () => {
     await sembrarEscenario({ productos3c: ['401'] });
     await expect(obtenerHistorialPrecios('NO_EXISTE')).rejects.toMatchObject({

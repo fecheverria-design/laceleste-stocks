@@ -41,34 +41,46 @@ export async function crearPrecio(input: CrearPrecioInput, ctx: { usuarioId: num
     throw notFound('PRODUCTO_NO_ENCONTRADO', `No existe el producto ${input.producto_3c}`);
   }
   const vigenteDesde = input.vigente_desde ?? hoyYmd();
-  // Carga manual desde la UI: sin proveedor (null) y como COMPRA (precio que se paga →
-  // pasa a ser el vigente).
-  if (await existePrecioEnFecha(input.producto_3c, null, vigenteDesde, 'COMPRA')) {
-    throw conflict('PRECIO_DUPLICADO', `Ya hay un precio para ${input.producto_3c} con vigencia ${vigenteDesde}`);
+  const tipo = input.tipo ?? 'COMPRA'; // default COMPRA (precio que se paga → vigente)
+  // Carga manual desde la UI: sin proveedor (null).
+  if (await existePrecioEnFecha(input.producto_3c, null, vigenteDesde, tipo)) {
+    throw conflict(
+      'PRECIO_DUPLICADO',
+      `Ya hay un precio (${tipo.toLowerCase()}) para ${input.producto_3c} con fecha ${vigenteDesde}`,
+    );
   }
   return insertarPrecio({
     producto3c: input.producto_3c,
     precio: input.precio,
-    tipo: 'COMPRA',
+    tipo,
     vigenteDesde,
     usuarioId: ctx.usuarioId,
   });
 }
 
-// PUT — corregir un precio ya cargado (monto y/o fecha).
+// PUT — corregir un precio ya cargado (monto, fecha y/o tipo).
 export async function editarPrecio(id: number, input: EditarPrecioInput): Promise<PrecioRow> {
   const actual = await obtenerPrecioPorId(id);
   if (!actual) throw notFound('PRECIO_NO_ENCONTRADO', `No existe el precio ${id}`);
 
   const nuevaFecha = input.vigente_desde ?? actual.vigente_desde;
+  const nuevoTipo = input.tipo ?? actual.tipo;
+  // Si cambia fecha o tipo, revisar que no choque con otro registro de esa terna.
   if (
-    input.vigente_desde &&
-    (await existePrecioEnFecha(actual.producto_3c, actual.proveedor_id, nuevaFecha, actual.tipo, id))
+    (input.vigente_desde || input.tipo) &&
+    (await existePrecioEnFecha(actual.producto_3c, actual.proveedor_id, nuevaFecha, nuevoTipo, id))
   ) {
-    throw conflict('PRECIO_DUPLICADO', `Ya hay otro precio para ${actual.producto_3c} con vigencia ${nuevaFecha}`);
+    throw conflict(
+      'PRECIO_DUPLICADO',
+      `Ya hay otro precio (${nuevoTipo.toLowerCase()}) para ${actual.producto_3c} con fecha ${nuevaFecha}`,
+    );
   }
 
-  const row = await actualizarPrecio(id, { precio: input.precio, vigenteDesde: input.vigente_desde });
+  const row = await actualizarPrecio(id, {
+    precio: input.precio,
+    tipo: input.tipo,
+    vigenteDesde: input.vigente_desde,
+  });
   if (!row) throw notFound('PRECIO_NO_ENCONTRADO', `No existe el precio ${id}`);
   return row;
 }

@@ -17,22 +17,26 @@ const monto = z
 
 const fechaYmd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Formato esperado YYYY-MM-DD');
 
+const tipoPrecio = z.enum(['COMPRA', 'ACTUALIZACION']);
+
 export const CrearPrecioSchema = z.object({
   producto_3c: z.string().trim().min(1).max(32),
   precio: monto,
+  tipo: tipoPrecio.optional(), // default: COMPRA
   vigente_desde: fechaYmd.optional(), // default: hoy
 });
 
 export type CrearPrecioInput = z.infer<typeof CrearPrecioSchema>;
 
-// Editar un precio ya cargado (corregir monto o fecha). Al menos un campo.
+// Editar un precio ya cargado (corregir monto, fecha o tipo). Al menos un campo.
 export const EditarPrecioSchema = z
   .object({
     precio: monto.optional(),
+    tipo: tipoPrecio.optional(),
     vigente_desde: fechaYmd.optional(),
   })
-  .refine((p) => p.precio !== undefined || p.vigente_desde !== undefined, {
-    message: 'Nada para editar: mandá precio y/o vigente_desde',
+  .refine((p) => p.precio !== undefined || p.vigente_desde !== undefined || p.tipo !== undefined, {
+    message: 'Nada para editar: mandá precio, tipo y/o vigente_desde',
   });
 
 export type EditarPrecioInput = z.infer<typeof EditarPrecioSchema>;

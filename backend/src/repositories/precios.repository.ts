@@ -144,10 +144,11 @@ export async function obtenerPrecioPorId(id: number): Promise<PrecioRow | undefi
 
 export async function actualizarPrecio(
   id: number,
-  cambios: { precio?: number; vigenteDesde?: string },
+  cambios: { precio?: number; tipo?: string; vigenteDesde?: string },
 ): Promise<PrecioRow | undefined> {
-  const set: { precio?: string; vigenteDesde?: string } = {};
+  const set: { precio?: string; tipo?: string; vigenteDesde?: string } = {};
   if (cambios.precio !== undefined) set.precio = String(cambios.precio);
+  if (cambios.tipo !== undefined) set.tipo = cambios.tipo;
   if (cambios.vigenteDesde !== undefined) set.vigenteDesde = cambios.vigenteDesde;
   const [row] = await db.update(precios).set(set).where(eq(precios.id, id)).returning(selectPrecio);
   return row;

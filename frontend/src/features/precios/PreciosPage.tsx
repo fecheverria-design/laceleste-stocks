@@ -10,7 +10,7 @@ import {
   YAxis,
 } from 'recharts';
 import { apiDelete, apiGet, apiPost, apiPut } from '../../shared/api/client';
-import type { PrecioHistorial, PrecioVigente } from '../../shared/api/types';
+import type { PrecioHistorial, PrecioVigente, TipoPrecio } from '../../shared/api/types';
 
 const money = new Intl.NumberFormat('es-AR', {
   style: 'currency',
@@ -41,14 +41,34 @@ function TipoBadge({ tipo }: { tipo: string }) {
   );
 }
 
+// Tooltip del gráfico de compras: fecha, precio y proveedor del punto.
+interface PuntoCompra {
+  fecha: string;
+  precio: number;
+  proveedor: string;
+}
+function TooltipCompra({ active, payload }: { active?: boolean; payload?: { payload: PuntoCompra }[] }) {
+  if (!active || !payload?.length) return null;
+  const p = payload[0]!.payload;
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs shadow-sm">
+      <div className="font-medium text-slate-700">{fechaCorta(p.fecha)}</div>
+      <div className="tabular-nums text-slate-900">{money.format(p.precio)}</div>
+      <div className="text-slate-500">{p.proveedor}</div>
+    </div>
+  );
+}
+
 // ── Gráfico + historial editable de un producto ─────────────────────────────
 function HistorialPrecios({ producto3c, unidad }: { producto3c: string; unidad: string }) {
   const queryClient = useQueryClient();
   const [nuevoPrecio, setNuevoPrecio] = useState('');
   const [nuevaFecha, setNuevaFecha] = useState(hoyYmd());
+  const [nuevoTipo, setNuevoTipo] = useState<TipoPrecio>('COMPRA');
   const [editId, setEditId] = useState<number | null>(null);
   const [editPrecio, setEditPrecio] = useState('');
   const [editFecha, setEditFecha] = useState('');
+  const [editTipo, setEditTipo] = useState<TipoPrecio>('COMPRA');
 
   const historial = useQuery({
     queryKey: ['precios-historial', producto3c],
@@ -63,17 +83,23 @@ function HistorialPrecios({ producto3c, unidad }: { producto3c: string; unidad: 
 
   const crear = useMutation({
     mutationFn: () =>
-      apiPost('/api/precios', { producto_3c: producto3c, precio: Number(nuevoPrecio), vigente_desde: nuevaFecha }),
+      apiPost('/api/precios', {
+        producto_3c: producto3c,
+        precio: Number(nuevoPrecio),
+        tipo: nuevoTipo,
+        vigente_desde: nuevaFecha,
+      }),
     onSuccess: async () => {
       setNuevoPrecio('');
       setNuevaFecha(hoyYmd());
+      setNuevoTipo('COMPRA');
       await invalidar();
     },
   });
 
   const editar = useMutation({
     mutationFn: (id: number) =>
-      apiPut(`/api/precios/${id}`, { precio: Number(editPrecio), vigente_desde: editFecha }),
+      apiPut(`/api/precios/${id}`, { precio: Number(editPrecio), tipo: editTipo, vigente_desde: editFecha }),
     onSuccess: async () => {
       setEditId(null);
       await invalidar();
@@ -94,12 +120,13 @@ function HistorialPrecios({ producto3c, unidad }: { producto3c: string; unidad: 
   const serie = [...filas]
     .filter((f) => f.tipo === 'COMPRA')
     .sort((a, b) => a.vigente_desde.localeCompare(b.vigente_desde))
-    .map((f) => ({ fecha: f.vigente_desde, precio: Number(f.precio) }));
+    .map((f) => ({ fecha: f.vigente_desde, precio: Number(f.precio), proveedor: f.proveedor_nombre ?? '—' }));
 
   const empezarEdicion = (f: PrecioHistorial) => {
     setEditId(f.id);
     setEditPrecio(f.precio);
     setEditFecha(f.vigente_desde);
+    setEditTipo(f.tipo);
   };
 
   return (
@@ -126,11 +153,7 @@ function HistorialPrecios({ producto3c, unidad }: { producto3c: string; unidad: 
                 tickLine={false}
                 axisLine={false}
               />
-              <Tooltip
-                formatter={(v) => [money.format(Number(v)), 'Precio']}
-                labelFormatter={(l) => fechaCorta(String(l))}
-                contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e2e8f0' }}
-              />
+              <Tooltip content={<TooltipCompra />} />
               <Line
                 type="monotone"
                 dataKey="precio"
@@ -165,7 +188,14 @@ function HistorialPrecios({ producto3c, unidad }: { producto3c: string; unidad: 
           />
         </label>
         <label className="flex flex-col gap-1 text-xs text-slate-500">
-          Vigente desde
+          Tipo
+          <select className={inputCls} value={nuevoTipo} onChange={(e) => setNuevoTipo(e.target.value as TipoPrecio)}>
+            <option value="COMPRA">Compra</option>
+            <option value="ACTUALIZACION">Actualización</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-slate-500">
+          Fecha
           <input type="date" className={inputCls} value={nuevaFecha} onChange={(e) => setNuevaFecha(e.target.value)} />
         </label>
         <button
@@ -205,7 +235,12 @@ function HistorialPrecios({ producto3c, unidad }: { producto3c: string; unidad: 
                       onChange={(e) => setEditFecha(e.target.value)}
                     />
                   </td>
-                  <td className="py-2"><TipoBadge tipo={f.tipo} /></td>
+                  <td className="py-2">
+                    <select className={inputCls} value={editTipo} onChange={(e) => setEditTipo(e.target.value as TipoPrecio)}>
+                      <option value="COMPRA">Compra</option>
+                      <option value="ACTUALIZACION">Actualización</option>
+                    </select>
+                  </td>
                   <td className="py-2 text-slate-500">{f.proveedor_nombre ?? '—'}</td>
                   <td className="py-2 text-right">
                     <input
