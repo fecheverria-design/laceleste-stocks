@@ -7,6 +7,7 @@ const tabs = [
   { to: '/stock', label: 'Stock' },
   { to: '/consumos', label: 'Consumos' },
   { to: '/precios', label: 'Precios' },
+  { to: '/proveedores', label: 'Proveedores' },
   { to: '/health', label: 'Estado' },
 ];
 

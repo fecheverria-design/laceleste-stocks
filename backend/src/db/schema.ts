@@ -53,6 +53,7 @@ export const productos = pgTable('productos', {
   codigo3c: varchar('codigo_3c', { length: 32 }).primaryKey(),
   nombre: varchar('nombre', { length: 200 }).notNull(),
   unidadBase: varchar('unidad_base', { length: 16 }).notNull(), // 'KG' | 'UN' | 'LT'
+  familia: varchar('familia', { length: 64 }), // nullable; viene de 3c (PACKAGING, MATERIAS PRIMAS…)
   presentacion: jsonb('presentacion'), // {"bulto":"bolsa","equivale":25,"unidad":"KG"} — puerta abierta
   activo: boolean('activo').notNull().default(true),
 });
@@ -196,5 +197,35 @@ export const precios = pgTable(
     // el mismo día y varios proveedores; hace idempotente la importación (upsert por esta clave).
     uniqueIndex('uq_precio_prod_prov_fecha_tipo').on(t.producto3c, t.proveedorId, t.vigenteDesde, t.tipo),
     check('chk_precio_positivo', sql`${t.precio} >= 0`),
+  ],
+);
+
+// Compras reales a proveedores (una fila = un renglón de una factura/orden de 3c). Base
+// del "gasto por proveedor". precio_total es el neto (sin IVA); total_con_iva es lo
+// efectivamente pagado. Idempotente por (numero, producto_3c).
+export const compras = pgTable(
+  'compras',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    numero: varchar('numero', { length: 64 }).notNull(), // NUMERO del documento de 3c
+    fecha: date('fecha').notNull(),
+    producto3c: varchar('producto_3c', { length: 32 })
+      .notNull()
+      .references(() => productos.codigo3c),
+    proveedorId: integer('proveedor_id').references(() => proveedores.id), // nullable si no resuelve
+    cantidad: numeric('cantidad', { precision: 14, scale: 4 }).notNull(),
+    precioUnitario: numeric('precio_unitario', { precision: 14, scale: 4 }).notNull(),
+    precioTotal: numeric('precio_total', { precision: 16, scale: 2 }).notNull(), // neto (sin IVA)
+    iva: numeric('iva', { precision: 6, scale: 4 }), // alícuota (0.21, 0.105, 0)
+    totalConIva: numeric('total_con_iva', { precision: 16, scale: 2 }), // VALOR TOTAL (con IVA)
+    usuarioId: integer('usuario_id')
+      .notNull()
+      .references(() => usuarios.id),
+    creadoEn: timestamp('creado_en', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('idx_compras_proveedor').on(t.proveedorId),
+    index('idx_compras_fecha').on(t.fecha.desc()),
+    uniqueIndex('uq_compras_numero_producto').on(t.numero, t.producto3c),
   ],
 );

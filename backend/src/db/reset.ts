@@ -9,7 +9,7 @@ import { db, pool } from './client.js';
 
 async function main(): Promise<void> {
   await db.execute(
-    sql`TRUNCATE precios, movimientos_detalle, movimientos_auditoria, movimientos, productos, ubicaciones, proveedores, lotes RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE compras, precios, movimientos_detalle, movimientos_auditoria, movimientos, productos, ubicaciones, proveedores, lotes RESTART IDENTITY CASCADE`,
   );
 
   // Reinicia las secuencias de correlativos (seq_rint_2025, seq_rec_2026, …) para

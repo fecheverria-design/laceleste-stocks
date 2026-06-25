@@ -23,7 +23,8 @@
     "import:ubicaciones": "tsx src/db/import-ubicaciones.ts",
     "import:movimientos": "tsx src/db/import-movimientos.ts",
     "import:inventario": "tsx src/db/import-inventario.ts",
-    "import:precios": "tsx src/db/import-precios.ts"
+    "import:precios": "tsx src/db/import-precios.ts",
+    "import:compras": "tsx src/db/import-compras.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

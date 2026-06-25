@@ -189,6 +189,24 @@ export interface Consumos {
   items: ConsumoArea[];
 }
 
+// ── Proveedores + gasto (compras reales) ─────────────────────────────────────
+export interface Proveedor {
+  id: number;
+  numero_3c: number | null;
+  nombre: string;
+  cuit: string | null;
+  compras: number;
+  gasto_neto: string; // numeric serializado
+  familias: string[] | null;
+}
+export interface GastoProveedor {
+  proveedor_id: number;
+  nombre: string;
+  familia: string | null;
+  compras: number;
+  gasto_neto: string;
+}
+
 // ── Historial de ediciones ───────────────────────────────────────────────────
 export interface CambioAuditoria {
   campo: string;

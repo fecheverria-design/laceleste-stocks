@@ -92,6 +92,22 @@ PROVEEDORES (nombre), FECHA, TIPO (COMPRA|ACTUALIZACION)`.
 
 ---
 
+## `import:compras -- <archivo> [--dry]`
+
+Compras reales a proveedores (base del **gasto por proveedor**). Una fila = un renglón de
+factura/orden. Columnas: `NUMERO, FECHA, ARTICU_ID (producto), CANTIDAD, PRECIO_UNITARIO,
+PRECIO_TOTAL (neto), PERSONAS_ID (proveedor), FAMILIA, IVA, VALOR TOTAL (con IVA),
+PROVEEDORES (nombre)`. Ignora DOC_ID/ID/PRECIO_LISTA/MES/AÑO.
+
+- El **gasto** se mide por `precio_total` (neto, sin IVA); `total_con_iva` es lo pagado.
+- Auto-crea productos (y **setea su `familia`**) y proveedores (numero_3c = PERSONAS_ID).
+- Idempotente por `(numero, producto_3c)`.
+- La hoja **Proveedores** del front usa esto: lista con gasto total + ranking por familia
+  (`GET /api/proveedores`, `/api/proveedores/gasto?familia=`). Alta de proveedor exige
+  `numero_3c` (regla #1).
+
+---
+
 ## Procedimiento: cambiar lógica de import SIN mover el stock
 
 El stock vigente está validado por J y debe mantenerse. Para reimportar movimientos
@@ -114,6 +130,8 @@ y `count(*) WHERE cantidad < 0` = 0. **Hacer `pg_dump` antes.**
 
 | Fecha | Cambio | Commit |
 |---|---|---|
+| 2026-06-25 | Compras reales (`import:compras`) + hoja Proveedores con gasto por familia; `familia` en productos | (este commit) |
+| 2026-06-25 | Consumos por área (lo que sale de FABRICA a las áreas) + promedio semanal | `a3ef321` |
 | 2026-06-25 | Movimientos: agrupar por (tipo+numero+dirección); ajustes vía balde 101; devoluciones (cantidad negativa) se invierten | `5ab66f4` |
 | 2026-06-25 | Importer: fix colisión de NUMERO entre tipos de documento | `b917cd8` |
 | 2026-06-25 | Inventario: modo `--exclusivo` (conteo autoritativo por depósito) | `fdf46da` |
