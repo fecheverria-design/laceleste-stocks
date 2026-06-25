@@ -1,6 +1,21 @@
 # PROGRESO — laceleste-movimientos
 
-> Estado para retomar fácil. Última actualización: 2026-06-24.
+> Estado para retomar fácil. Última actualización: 2026-06-25.
+
+### 🆕 Sesión 2026-06-25 — Calidad de datos de movimientos (importante)
+Se corrigieron varios temas de cómo se interpreta el histórico de 3c. **Todo documentado
+en `docs/IMPORTACION-3C.md`** (fuente única de las reglas de import — leer ahí si un
+movimiento/stock aparece mal).
+- **Bug de fusión**: el NUMERO de 3c es único por tipo de documento, no global → se
+  fusionaban ~484 movimientos. Fix: agrupar por (tipo+numero+dirección).
+- **Ajustes**: en 3c vienen como `Rint` desde el balde 101 → ahora se clasifican AJUSTE
+  (101→FABRICA suma, FABRICA→101 resta).
+- **Devoluciones**: cantidad negativa → se invierte la dirección (antes se descartaban).
+- **Acopios**: `import:inventario --exclusivo` (conteo autoritativo por depósito).
+- **Método de re-sync sin mover stock**: foto → wipe → reimport → re-anclar `--exclusivo`
+  (detallado en IMPORTACION-3C.md). El stock quedó idéntico (430 ítems, 0 negativos) y el
+  histórico completo: 15.849 movimientos → **17.585** (se recuperó lo fusionado + splits).
+- Backups: `backup_pre_resync_20260625.dump` (gitignored).
 
 ## ⏱️ AL VOLVER — empezá por acá
 **Estado**: Fase 1 + import 3c + inventario + **módulo de PRECIOS (histórico con tipo COMPRA/ACTUALIZACION)** + **PANEL con valorización y gráficos (Recharts)**. Todo commiteado en `feat/movimientos-fase1-backend`. **70 tests verdes.**

@@ -61,6 +61,8 @@ Estas reglas no se negocian. Si una tarea las contradice, frenar y avisar.
 
 DDL completo de referencia en `docs/ARCHITECTURE.md` §8. Al implementar, traducir a schema Drizzle manteniendo nombres y tipos.
 
+**Reglas de importación de 3c (movimientos/inventario/precios) en `docs/IMPORTACION-3C.md`.** Es la fuente única de cómo se clasifican e interpretan los datos de 3c (mapeo de tipos, ajustes vía balde 101, devoluciones, conteo autoritativo, precio vigente, etc.). Si un movimiento/stock/precio importado aparece mal, empezar por ahí.
+
 ## Workflow
 
 - Una fase, una branch (`feat/movimientos-faseN-...`), un PR, una revisión. No avanzar de fase sin revisión humana y tests en verde.
