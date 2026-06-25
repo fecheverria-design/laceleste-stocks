@@ -6,6 +6,13 @@ import type { Consumos } from '../../shared/api/types';
 
 const nf = new Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 });
 const nf0 = new Intl.NumberFormat('es-AR', { maximumFractionDigits: 0 });
+const ars0 = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 });
+function arsCorto(n: number): string {
+  if (n >= 1e9) return `$${(n / 1e9).toFixed(1)} MM`;
+  if (n >= 1e6) return `$${(n / 1e6).toFixed(1)} M`;
+  if (n >= 1e3) return `$${(n / 1e3).toFixed(0)} mil`;
+  return `$${n.toFixed(0)}`;
+}
 const hoyYmd = () => new Date().toISOString().slice(0, 10);
 const haceSemanas = (n: number) => {
   const d = new Date();
@@ -49,6 +56,14 @@ export function ConsumosPage() {
 
   // El gráfico solo es representativo para UN producto (todas sus áreas en la misma
   // unidad). Comparar entre productos no sirve: mezcla kg, unidades, litros.
+  // Costo de consumo por área ($, comparable entre áreas y productos). Respeta los filtros.
+  const costoPorArea = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const i of items) if (i.costo != null) m.set(i.area_nombre, (m.get(i.area_nombre) ?? 0) + i.costo);
+    return [...m.entries()].map(([label, valor]) => ({ label, valor })).sort((a, b) => b.valor - a.valor);
+  }, [items]);
+  const costoFiltrado = useMemo(() => items.reduce((a, i) => a + (i.costo ?? 0), 0), [items]);
+
   const productosFiltrados = useMemo(() => [...new Set(items.map((i) => i.producto_3c))], [items]);
   const unProducto = productosFiltrados.length === 1 ? items[0] : null;
   // Para el producto en foco, muestro TODAS sus áreas (ignora el filtro de área, que
@@ -67,7 +82,7 @@ export function ConsumosPage() {
           <h2 className="text-xl font-semibold">Consumos por área</h2>
           <p className="text-sm text-slate-500">
             {data
-              ? `Promedio semanal sobre ${nf.format(data.semanas)} semanas (${data.desde} → ${data.hasta})`
+              ? `${data.desde} → ${data.hasta} (${nf.format(data.semanas)} sem) · costo consumido ${ars0.format(costoFiltrado)}`
               : 'Cargando…'}
           </p>
         </div>
@@ -105,6 +120,46 @@ export function ConsumosPage() {
 
       {data && (
         <>
+          {/* Costo de consumo por área ($): comparable entre áreas y productos */}
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="mb-3 text-sm font-semibold text-slate-700">
+              Costo de consumo por área {unProducto ? `· ${unProducto.producto_nombre}` : ''}
+            </h3>
+            {costoPorArea.length === 0 ? (
+              <p className="text-sm text-slate-500">Sin costo (faltan precios para estos productos).</p>
+            ) : (
+              <ResponsiveContainer width="100%" height={Math.max(180, costoPorArea.length * 30)}>
+                <BarChart data={costoPorArea} layout="vertical" margin={{ top: 0, right: 16, left: 8, bottom: 0 }}>
+                  <XAxis
+                    type="number"
+                    tickFormatter={arsCorto}
+                    tick={{ fontSize: 11, fill: '#64748b' }}
+                    tickLine={false}
+                    axisLine={{ stroke: '#e2e8f0' }}
+                  />
+                  <YAxis
+                    type="category"
+                    dataKey="label"
+                    width={140}
+                    tick={{ fontSize: 11, fill: '#475569' }}
+                    tickLine={false}
+                    axisLine={false}
+                  />
+                  <Tooltip
+                    formatter={(v) => [ars0.format(Number(v)), 'Costo']}
+                    cursor={{ fill: '#f1f5f9' }}
+                    contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e2e8f0' }}
+                  />
+                  <Bar dataKey="valor" radius={[0, 4, 4, 0]}>
+                    {costoPorArea.map((_, i) => (
+                      <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             <h3 className="mb-3 text-sm font-semibold text-slate-700">
               {unProducto
@@ -159,12 +214,13 @@ export function ConsumosPage() {
                   <th className="px-4 py-3 text-right font-medium">Prom. semanal</th>
                   <th className="px-4 py-3 text-right font-medium">Total período</th>
                   <th className="px-4 py-3 font-medium">Unidad</th>
+                  <th className="px-4 py-3 text-right font-medium">Costo período</th>
                 </tr>
               </thead>
               <tbody>
                 {items.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-4 py-6 text-slate-500">
+                    <td colSpan={6} className="px-4 py-6 text-slate-500">
                       Sin consumos para este filtro.
                     </td>
                   </tr>
@@ -181,6 +237,9 @@ export function ConsumosPage() {
                     </td>
                     <td className="px-4 py-2 text-right tabular-nums text-slate-500">{nf.format(i.total)}</td>
                     <td className="px-4 py-2 text-slate-500">{i.unidad_base}</td>
+                    <td className="px-4 py-2 text-right tabular-nums text-slate-700">
+                      {i.costo == null ? <span className="text-slate-400">s/precio</span> : ars0.format(i.costo)}
+                    </td>
                   </tr>
                 ))}
               </tbody>

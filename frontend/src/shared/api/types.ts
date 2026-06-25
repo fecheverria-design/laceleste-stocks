@@ -181,11 +181,14 @@ export interface ConsumoArea {
   total: number;
   promedio_semanal: number;
   renglones: number;
+  precio_vigente: number | null;
+  costo: number | null;
 }
 export interface Consumos {
   desde: string;
   hasta: string;
   semanas: number;
+  costo_total: number;
   items: ConsumoArea[];
 }
 
