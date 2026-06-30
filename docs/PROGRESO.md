@@ -18,6 +18,26 @@ que descuentan stock de FABRICA por `cantidad_real`. PULL puro: su app es read-o
 - **Operación diaria:** correr con `--fecha=<hoy>` cuando el real ya esté cargado en su app
   (idempotente: re-correr no duplica). Pendiente: J contrasta totales por área/día contra 3c.
 
+### Recepciones (la otra pata) — PROBADA E2E (2026-06-30)
+Script `npm run sync:recepciones -- --fecha=YYYY-MM-DD [--dry]` (commit `feat(sync): PULL de
+recepciones`). Materializa **RECEPCION auto-confirmada** que **suma** stock a FABRICA.
+- **Su modelo es distinto al de abastecimiento:** la recepción es agenda + checklist de estados;
+  la CANTIDAD solo vive en la tabla `bpm` (`cantidad_total`, unidades base), y solo para ítems
+  que pasaron por control BPM/pesado. Por eso el sync hace 2 pasos: `GET /api/recepciones?fecha=`
+  (agenda) + `GET /api/bpm/recepcion/:id` (cantidades). Solo materializa ítems con BPM y
+  cantidad>0; pre-filtra productos que no estén en nuestro maestro (saltea ese renglón, no pierde
+  la recepción). Origen = `RECEPCION_ORIGEN_DEP_ID_3C` (default 102, balde proveedores sin stock),
+  destino = FABRICA. Idempotente por `recep:<id>`.
+- **Refactor del service:** se extrajo `registrarAutoConfirmado` (núcleo tx/idempotencia/stock
+  compartido) y se sumó `registrarRecepcion` + `RecepcionSchema`, espejo de abastecimiento. El
+  stock se mueve por DIRECCIÓN (la matview `stock_actual` ignora `signo_stock`): recepción suma
+  al destino, abastecimiento resta del origen.
+- **Corrida real semana 06-23 a 06-29:** 43 RECEPCION (`REC-2026-00578`…`00620`), 95 renglones,
+  0 errores, 5 recepciones sin BPM/cantidad (salteadas). Backup `backup_pre_sync_recep_20260630.dump`.
+  Sin doble conteo (0 RECEPCION previas en el rango). **84 tests verdes** (+6 de recepción).
+- **Pendiente:** J contrasta totales por proveedor/día contra 3c. A futuro: ¿mapear
+  `cod_proveedor` → acopio puntual (dep_id_3c) en vez del balde 102 genérico?
+
 ## 🚩 CIERRE FASE 1 — PR a `dev` (2026-06-25)
 Branch `feat/movimientos-fase1-backend` listo para PR a `dev`. **72 tests verdes**,
 typecheck/lint/build limpios (back y front). Lo construido en Fase 1 (además del backend
