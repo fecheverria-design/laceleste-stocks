@@ -128,7 +128,7 @@ NO se modela en v1: productos compuestos / recetas / BOM.
 | Login | Propio, usuarios y roles, JWT |
 | Conteos de área | NO en esta app |
 | Auditoría | Quién creó y quién confirmó, con timestamp |
-| Inmutabilidad | Confirmado = inmutable; error → contramovimiento |
+| Inmutabilidad | Confirmado = inmutable en cantidad/producto. Anulación v1 = **flip de estado** CONFIRMADO→ANULADO + sellos (no contramovimiento — ver §8/§9, decisión 2026-06-19) |
 
 Roles (modelo de 4 documentado; v1 usa los dos primeros):
 - **ADMIN** (J, sistemas): todo — usuarios, anular, configurar productos/ubicaciones, reportes.
@@ -251,21 +251,27 @@ CREATE INDEX idx_det_producto ON movimientos_detalle(producto_3c);
 ```
 
 ### stock_actual (vista materializada — refresh on confirm)
+**Modelo (revisado 2026-06-19, migración `0005`): DOBLE ENTRADA restringida a depósitos con stock.** El stock vive solo en `ubicaciones.lleva_stock = true` (definir con `npm run db:stock-en -- <dep_id…>`; hoy: solo FABRICA). Cada renglón **suma al destino y resta del origen**, pero solo cuenta el lado que lleva stock. Así la **dirección** define el signo (no el tipo): un mismo `Rint` es egreso (FABRICA→área) o ingreso (101→FABRICA) según a dónde va, y los baldes virtuales (ajustes 101, proveedores 102, devolución…) no acumulan. `signo_stock` quedó sin uso para el cálculo.
 ```sql
 CREATE MATERIALIZED VIEW stock_actual AS
-SELECT
-  d.producto_3c,
-  CASE WHEN tm.codigo = 'RINT' THEN m.origen_id ELSE m.destino_id END AS ubicacion_id,
-  SUM(d.cantidad_real * tm.signo_stock) AS cantidad,
-  MAX(m.confirmado_en) AS actualizado_en
-FROM movimientos m
-JOIN tipos_movimiento tm ON tm.id = m.tipo_id
-JOIN movimientos_detalle d ON d.movimiento_id = m.id
-WHERE m.estado = 'CONFIRMADO'
-GROUP BY d.producto_3c, ubicacion_id;
+SELECT producto_3c, ubicacion_id, SUM(delta) AS cantidad, MAX(actualizado_en) AS actualizado_en
+FROM (
+  SELECT d.producto_3c, m.destino_id AS ubicacion_id, d.cantidad_real AS delta, m.confirmado_en AS actualizado_en
+  FROM movimientos m JOIN movimientos_detalle d ON d.movimiento_id = m.id
+  JOIN ubicaciones u ON u.id = m.destino_id
+  WHERE m.estado = 'CONFIRMADO' AND u.lleva_stock          -- ingreso (+) al destino
+  UNION ALL
+  SELECT d.producto_3c, m.origen_id, -d.cantidad_real, m.confirmado_en
+  FROM movimientos m JOIN movimientos_detalle d ON d.movimiento_id = m.id
+  JOIN ubicaciones u ON u.id = m.origen_id
+  WHERE m.estado = 'CONFIRMADO' AND u.lleva_stock          -- egreso (−) del origen
+) t
+GROUP BY producto_3c, ubicacion_id;
 CREATE UNIQUE INDEX idx_stock_prod_ubic ON stock_actual(producto_3c, ubicacion_id);
 ```
-Refresh: dentro de la transacción de confirmación, `REFRESH MATERIALIZED VIEW CONCURRENTLY stock_actual`. Si crece y se vuelve lento, reemplazar por tabla con triggers o snapshots mensuales.
+Refresh: dentro de la transacción de confirmación, `REFRESH MATERIALIZED VIEW CONCURRENTLY stock_actual`. Si crece y se vuelve lento, reemplazar por tabla con triggers o snapshots mensuales. **El refresh va precedido de `pg_advisory_xact_lock` (xact-level): serializa el par refresh+commit entre transacciones simultáneas; sin él, dos confirmaciones concurrentes pueden refrescar con snapshots que no ven el commit de la otra y la matview queda sin uno de los movimientos (regla #5/#6).**
+
+**Anulación = flip de estado (decisión 2026-06-19).** Como `stock_actual` filtra `WHERE estado = 'CONFIRMADO'`, marcar el original `ANULADO` (+ sellos `anulado_por`/`anulado_en`) y refrescar la matview ya **revierte el stock** en una sola tx. Un contramovimiento físico *además* del flip **duplicaría la reversión**, así que las dos mecánicas se excluyen y v1 usa SOLO el flip. La inmutabilidad de la regla #4 se preserva en su intención: nunca se editan cantidad/producto del confirmado, solo se voltea el estado y se sellan los campos de auditoría que el schema ya tiene para eso (regla #7). El lock `FOR UPDATE` sobre la fila serializa dos anulaciones simultáneas.
 
 ### usuarios, lotes, proveedores
 ```sql
@@ -300,17 +306,23 @@ El abastecimiento llega desde la app del compañero por **API REST**: un POST co
 
 ## 9. Endpoints REST
 
-Patrón `/api/...`, JWT en header `Authorization: Bearer`.
+Patrón `/api/...`, JWT en header `Authorization: Bearer`. **Protección (Fase 1):** lecturas de movimientos/stock e **historial** requieren login (cualquier rol); **editar** (`PUT /movimientos/:id`) lo puede hacer cualquier rol logueado (queda en el historial); `anular` requiere rol **ADMIN** (DEPOSITO no anula); `login` es público; `abastecimientos` es M2M (abierto por ahora). El middleware `requireAuth`/`requireRole` cuelga `req.user` desde el token.
 
 | Método | Path | Descripción |
 |---|---|---|
-| POST | `/api/movimientos` | Crear movimiento en BORRADOR |
-| GET | `/api/movimientos` | Listar con filtros: `desde`, `hasta`, `tipo`, `ubicacion`, `estado` (paginado) |
-| GET | `/api/movimientos/:id` | Detalle |
+| POST | `/api/auth/login` | **Login: valida credenciales (bcrypt) y devuelve `{token, user}`. Público. Implementado en Fase 1.** |
+| GET | `/api/auth/me` | **Identidad del token. Requiere Bearer. Implementado en Fase 1.** |
+| POST | `/api/abastecimientos` | **Ingreso desde la app del compañero: crea RINT y lo AUTO-CONFIRMA (transaccional). Implementado en Fase 1. M2M: abierto (auth de máquina por API key, pendiente).** |
+| POST | `/api/movimientos` | **Crear movimiento (cualquier tipo) AUTO-CONFIRMADO. Transaccional. Cualquier rol logueado. Implementado en Fase 1.** (No usa BORRADOR: la app crea confirmado y se corrige editando.) |
+| GET | `/api/movimientos` | **Listar con filtros: `desde`, `hasta`, `tipo`, `ubicacion`, `estado` + paginado (`page`/`limit`). Devuelve `{items, page, limit, total}`. `ubicacion` matchea origen O destino. Implementado en Fase 1.** |
+| GET | `/api/movimientos/:id` | **Detalle (cabecera + renglones). 404 si no existe. Implementado en Fase 1.** |
+| PUT | `/api/movimientos/:id` | **Editar (reemplazo completo, cualquier rol logueado). Recalcula stock + deja historial. 409 si ANULADO. Implementado en Fase 1.** |
+| GET | `/api/movimientos/:id/historial` | **Ediciones del movimiento (auditoría). Requiere login. Implementado en Fase 1.** |
 | PUT | `/api/movimientos/:id/confirmar` | BORRADOR → CONFIRMADO. Asigna nro, descuenta stock. **Transaccional.** |
-| PUT | `/api/movimientos/:id/anular` | CONFIRMADO → ANULADO. Genera contramovimiento. No edita el original. |
+| PUT | `/api/movimientos/:id/anular` | CONFIRMADO → ANULADO. **Flip de estado + sellos (anulado_por/anulado_en), transaccional. Implementado en Fase 1.** No genera contramovimiento. |
 | GET | `/api/movimientos/export` | Export Excel (mismos filtros que el listado) |
 | GET | `/api/stock` | Stock actual. Params: `ubicacion_id`, `producto_3c` |
+| GET | `/api/ubicaciones` · `/api/productos` · `/api/tipos` | **Catálogos para selects del front. Requieren login. Implementado en Fase 1.** |
 | GET | `/api/stock/:producto_3c/kardex` | Kardex: movimientos con saldo running |
 | PUT | `/api/movimientos/:id/sincronizar-3c` | Marca `nro_3c` cuando se replicó en 3c |
 

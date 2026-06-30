@@ -27,3 +27,4 @@ Thumbs.db
 
 # Vite
 frontend/.vite/
+backup_*.dump

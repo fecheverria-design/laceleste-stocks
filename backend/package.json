@@ -14,18 +14,32 @@
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
-    "db:seed": "tsx src/db/seed.ts"
+    "db:seed": "tsx src/db/seed.ts",
+    "db:seed:dev": "tsx src/db/seed-dev.ts",
+    "db:reset": "tsx src/db/reset.ts",
+    "db:stock-en": "tsx src/db/stock-en.ts",
+    "import:productos": "tsx src/db/import-productos.ts",
+    "import:proveedores": "tsx src/db/import-proveedores.ts",
+    "import:ubicaciones": "tsx src/db/import-ubicaciones.ts",
+    "import:movimientos": "tsx src/db/import-movimientos.ts",
+    "import:inventario": "tsx src/db/import-inventario.ts",
+    "import:precios": "tsx src/db/import-precios.ts",
+    "import:compras": "tsx src/db/import-compras.ts"
   },
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
     "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
     "pg": "^8.21.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@types/bcryptjs": "^2.4.6",
     "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^25.9.2",
     "@types/pg": "^8.20.0",
     "drizzle-kit": "^0.31.10",

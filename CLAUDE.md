@@ -43,7 +43,7 @@ Estas reglas no se negocian. Si una tarea las contradice, frenar y avisar.
 1. **IDs de 3c = fuente de verdad.** Nunca inventar códigos de productos ni de depósitos. `productos.codigo_3c` y `ubicaciones.dep_id_3c` vienen del ERP 3c. Lo único con numeración propia es `movimientos.nro` (formato `RINT-2026-00452`), a propósito, con campo `nro_3c` nullable para mapear al sincronizar.
 2. **El stock se descuenta SIEMPRE por `cantidad_real`, nunca por `cantidad_sugerida`.** El egreso físico es la verdad; el sugerido es solo referencia. La diferencia se registra, no se juzga.
 3. **Las capas solo hablan hacia abajo.** routes → controllers → services → repositories. Nunca al revés. Un repository nunca llama a un service.
-4. **Los movimientos CONFIRMADOS son inmutables.** Si hay error, se anula con un contramovimiento; nunca se edita el original.
+4. **Auditabilidad sobre inmutabilidad** (regla relajada 2026-06-19 por decisión de J). Los movimientos **son editables por cualquier usuario logueado** (corregir un remito mal cargado es la operación diaria), PERO **toda edición deja historial**: `movimientos_auditoria` registra quién, cuándo y qué cambió (valor antes/después). Editar es transaccional y recalcula el stock; un movimiento **ANULADO no se edita**. La **anulación es flip de estado** (CONFIRMADO→ANULADO + sellos, transaccional, solo ADMIN, NO contramovimiento — `stock_actual` filtra por estado y un contramovimiento duplicaría la reversión). Ver `ARCHITECTURE.md` §8/§9.
 5. **La lógica de stock y las transiciones de estado SIEMPRE van con test.** Sin excepción. Incluye transaccionalidad y concurrencia, no solo happy path.
 6. **El endpoint `confirmar` es transaccional.** Cambio de estado + asignación de correlativo + refresh de stock, todo en una transacción de DB.
 7. **Todo movimiento registra auditoría:** `usuario_id`, `creado_en`, `confirmado_en`. Toda anulación registra `anulado_por` y `anulado_en`.
@@ -60,6 +60,8 @@ Estas reglas no se negocian. Si una tarea las contradice, frenar y avisar.
 - `stock_actual` es vista materializada con `REFRESH ... CONCURRENTLY` dentro de la transacción de confirmación.
 
 DDL completo de referencia en `docs/ARCHITECTURE.md` §8. Al implementar, traducir a schema Drizzle manteniendo nombres y tipos.
+
+**Reglas de importación de 3c (movimientos/inventario/precios) en `docs/IMPORTACION-3C.md`.** Es la fuente única de cómo se clasifican e interpretan los datos de 3c (mapeo de tipos, ajustes vía balde 101, devoluciones, conteo autoritativo, precio vigente, etc.). Si un movimiento/stock/precio importado aparece mal, empezar por ahí.
 
 ## Workflow
 
