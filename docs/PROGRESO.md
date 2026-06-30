@@ -1,6 +1,22 @@
 # PROGRESO — laceleste-movimientos
 
-> Estado para retomar fácil. Última actualización: 2026-06-25.
+> Estado para retomar fácil. Última actualización: 2026-06-30.
+
+## 🔌 INTEGRACIÓN PULL app del compañero — PROBADA E2E (2026-06-30)
+Script `npm run sync:abastecimientos -- --fecha=YYYY-MM-DD [--dry]` (o `--desde/--hasta`)
+en `backend/src/db/sync-abastecimientos.ts` (commit `e2ae994`). Lee SU API REST
+(`app_ordenes_produccion`) y materializa los abastecimientos como **RINT auto-confirmados**
+que descuentan stock de FABRICA por `cantidad_real`. PULL puro: su app es read-only, no se toca.
+- **Config (.env, no commiteado):** `COMPANERO_API_URL=https://produccion.laceleste.com.ar`
+  (host base **sin** `/api` — el script le pega `/api` solo), usuario de servicio `compras`,
+  y **`DEPOSITO_PRINCIPAL_DEP_ID_3C=1`** (FABRICA = origen; sin esto el run real tira
+  `ORIGEN_REQUERIDO`, el dry no lo detecta).
+- **Corrida real semana 06-23 a 06-29:** 25 RINTs (`RINT-2026-03783`…`03807`), 430 renglones,
+  0 errores. Áreas destino 47 Panadería / 48 Pastelería / 49 Recetas / 50 Sandwichería
+  (`codigo_3c_area` == dep_id_3c confirmado). Backup previo `backup_pre_sync_abast_20260630.dump`.
+  Sin doble descuento (0 RINTs previos en esas fechas; el export 3c era anterior).
+- **Operación diaria:** correr con `--fecha=<hoy>` cuando el real ya esté cargado en su app
+  (idempotente: re-correr no duplica). Pendiente: J contrasta totales por área/día contra 3c.
 
 ## 🚩 CIERRE FASE 1 — PR a `dev` (2026-06-25)
 Branch `feat/movimientos-fase1-backend` listo para PR a `dev`. **72 tests verdes**,
