@@ -1,7 +1,12 @@
 import { env } from '../config/env.js';
 import { db } from '../db/client.js';
 import { AppError, badRequest, conflict, notFound } from '../domain/errors.js';
-import type { AbastecimientoInput, CrearMovimientoInput, EditarMovimientoInput } from '../domain/movimientos.schema.js';
+import type {
+  AbastecimientoInput,
+  CrearMovimientoInput,
+  EditarMovimientoInput,
+  RecepcionInput,
+} from '../domain/movimientos.schema.js';
 import {
   actualizarCabecera,
   bloquearMovimiento,
@@ -40,6 +45,9 @@ export interface RegistrarAbastecimientoOpts {
   usuarioId: number; // a quién se audita el movimiento (regla #7)
 }
 
+// Recepción comparte la misma forma de opts (a quién se audita).
+export type RegistrarRecepcionOpts = RegistrarAbastecimientoOpts;
+
 // Fecha local YYYY-MM-DD y hora HH:MM:SS para las columnas date/time.
 function partesFechaHora(): { fecha: string; hora: string; anio: number } {
   const now = new Date();
@@ -52,30 +60,35 @@ function partesFechaHora(): { fecha: string; hora: string; anio: number } {
   return { fecha: `${yyyy}-${mm}-${dd}`, hora: `${hh}:${mi}:${ss}`, anio: yyyy };
 }
 
-// Ingreso de abastecimiento de la app del compañero → RINT auto-confirmado.
-// TODO transaccional (regla #6): correlativo + cabecera CONFIRMADO + detalle +
-// refresh de stock_actual. El stock se descuenta del DEPÓSITO (origen) por
-// cantidad_real (regla #2). Si algo falla, la tx entera hace rollback (regla #5).
-export async function registrarAbastecimiento(
-  input: AbastecimientoInput,
-  opts: RegistrarAbastecimientoOpts,
-): Promise<MovimientoConDetalle> {
-  const origenDep = input.origen_dep_id_3c ?? env.DEPOSITO_PRINCIPAL_DEP_ID_3C;
-  if (origenDep === undefined) {
-    throw badRequest(
-      'ORIGEN_REQUERIDO',
-      'Falta origen_dep_id_3c y no hay DEPOSITO_PRINCIPAL_DEP_ID_3C configurado',
-    );
-  }
+// Campos de cabecera/renglones comunes a abastecimiento y recepción (lo que el helper
+// auto-confirmado necesita además del tipo + origen/destino ya resueltos).
+type AutoConfirmadoInput = Pick<
+  AbastecimientoInput,
+  'fecha' | 'turno' | 'proyeccion' | 'observaciones' | 'idempotency_key' | 'detalle'
+>;
 
+// Núcleo transaccional compartido (regla #6): idempotencia + correlativo + cabecera
+// CONFIRMADO + detalle + refresh de stock_actual. El stock se mueve por DIRECCIÓN
+// (origen resta, destino suma; cada punta solo si lleva_stock) usando cantidad_real
+// (regla #2). Si algo falla, la tx entera hace rollback (regla #5). Lo comparten
+// registrarAbastecimiento (RINT, descuenta del origen) y registrarRecepcion
+// (RECEPCION, suma al destino): la única diferencia es el tipo y qué punta es el
+// depósito real.
+async function registrarAutoConfirmado(
+  tipoCodigo: string,
+  origenDep: number,
+  destinoDep: number,
+  input: AutoConfirmadoInput,
+  usuarioId: number,
+): Promise<MovimientoConDetalle> {
   const { anio, ...defaultFechaHora } = partesFechaHora();
   const fecha = input.fecha ?? defaultFechaHora.fecha;
   // El correlativo usa el año de la fecha del movimiento, no el del reloj.
   const anioNro = input.fecha ? Number(input.fecha.slice(0, 4)) : anio;
 
   return db.transaction(async (tx) => {
-    // Idempotencia M2M: si ya entró un abastecimiento con esta key, devolver ese mismo
-    // (no duplicar). El índice único uq_mov_idempotencia blinda también las concurrentes.
+    // Idempotencia: si ya entró un movimiento con esta key, devolver ese mismo (no
+    // duplicar). El índice único uq_mov_idempotencia blinda también las concurrentes.
     if (input.idempotency_key) {
       const existenteId = await buscarPorIdempotencia(tx, input.idempotency_key);
       if (existenteId !== undefined) {
@@ -89,12 +102,9 @@ export async function registrarAbastecimiento(
       throw notFound('UBICACION_NO_ENCONTRADA', `No existe ubicación con dep_id_3c=${origenDep} (origen)`);
     }
 
-    const destino = await buscarUbicacionPorDep3c(tx, input.destino_dep_id_3c);
+    const destino = await buscarUbicacionPorDep3c(tx, destinoDep);
     if (!destino) {
-      throw notFound(
-        'UBICACION_NO_ENCONTRADA',
-        `No existe ubicación con dep_id_3c=${input.destino_dep_id_3c} (destino)`,
-      );
+      throw notFound('UBICACION_NO_ENCONTRADA', `No existe ubicación con dep_id_3c=${destinoDep} (destino)`);
     }
 
     const codigos = input.detalle.map((r) => r.producto_3c);
@@ -104,12 +114,12 @@ export async function registrarAbastecimiento(
       throw notFound('PRODUCTO_NO_ENCONTRADO', `Productos inexistentes en el maestro: ${faltan.join(', ')}`);
     }
 
-    const tipo = await tipoPorCodigo(tx, 'RINT');
+    const tipo = await tipoPorCodigo(tx, tipoCodigo);
     if (!tipo) {
-      throw new AppError('TIPO_NO_ENCONTRADO', 'Falta el tipo RINT en tipos_movimiento (corré el seed)', 500);
+      throw new AppError('TIPO_NO_ENCONTRADO', `Falta el tipo ${tipoCodigo} en tipos_movimiento (corré el seed)`, 500);
     }
 
-    const nro = await generarNro(tx, 'RINT', anioNro);
+    const nro = await generarNro(tx, tipoCodigo, anioNro);
 
     const movimientoId = await insertarCabecera(tx, {
       nro,
@@ -120,7 +130,7 @@ export async function registrarAbastecimiento(
       proyeccion: input.proyeccion,
       origenId: origen.id,
       destinoId: destino.id,
-      usuarioId: opts.usuarioId,
+      usuarioId,
       observaciones: input.observaciones,
       idempotenciaKey: input.idempotency_key,
     });
@@ -138,13 +148,48 @@ export async function registrarAbastecimiento(
       })),
     );
 
-    // Descuenta stock del depósito recalculando la matview, dentro de la misma tx.
+    // Recalcula la matview dentro de la misma tx → mueve el stock.
     await refrescarStock(tx);
 
     const creado = await obtenerMovimiento(tx, movimientoId);
     if (!creado) throw new AppError('INTERNAL', 'No se pudo releer el movimiento recién creado', 500);
     return creado;
   });
+}
+
+// Ingreso de abastecimiento de la app del compañero → RINT auto-confirmado.
+// El stock se descuenta del DEPÓSITO (origen) por cantidad_real (regla #2). Origen
+// opcional: si falta, despacha el DEPOSITO_PRINCIPAL (FABRICA).
+export async function registrarAbastecimiento(
+  input: AbastecimientoInput,
+  opts: RegistrarAbastecimientoOpts,
+): Promise<MovimientoConDetalle> {
+  const origenDep = input.origen_dep_id_3c ?? env.DEPOSITO_PRINCIPAL_DEP_ID_3C;
+  if (origenDep === undefined) {
+    throw badRequest(
+      'ORIGEN_REQUERIDO',
+      'Falta origen_dep_id_3c y no hay DEPOSITO_PRINCIPAL_DEP_ID_3C configurado',
+    );
+  }
+  return registrarAutoConfirmado('RINT', origenDep, input.destino_dep_id_3c, input, opts.usuarioId);
+}
+
+// Recepción de mercadería de la app del compañero → RECEPCION auto-confirmada.
+// Suma stock al DEPÓSITO que recibe (destino) por cantidad_real (regla #2). El origen
+// es el proveedor (requerido por el schema); el destino opcional cae a DEPOSITO_PRINCIPAL
+// (FABRICA). Mismo núcleo transaccional/idempotente que el abastecimiento.
+export async function registrarRecepcion(
+  input: RecepcionInput,
+  opts: RegistrarRecepcionOpts,
+): Promise<MovimientoConDetalle> {
+  const destinoDep = input.destino_dep_id_3c ?? env.DEPOSITO_PRINCIPAL_DEP_ID_3C;
+  if (destinoDep === undefined) {
+    throw badRequest(
+      'DESTINO_REQUERIDO',
+      'Falta destino_dep_id_3c y no hay DEPOSITO_PRINCIPAL_DEP_ID_3C configurado',
+    );
+  }
+  return registrarAutoConfirmado('RECEPCION', input.origen_dep_id_3c, destinoDep, input, opts.usuarioId);
 }
 
 export interface AnularMovimientoOpts {

@@ -25,7 +25,8 @@
     "import:inventario": "tsx src/db/import-inventario.ts",
     "import:precios": "tsx src/db/import-precios.ts",
     "import:compras": "tsx src/db/import-compras.ts",
-    "sync:abastecimientos": "tsx src/db/sync-abastecimientos.ts"
+    "sync:abastecimientos": "tsx src/db/sync-abastecimientos.ts",
+    "sync:recepciones": "tsx src/db/sync-recepciones.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
