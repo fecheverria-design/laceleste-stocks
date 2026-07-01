@@ -440,10 +440,12 @@ async function aplicarEdicion(
   const cambios = diffSnapshots(antes, snapshotDesdeInput(input));
   if (cambios.length > 0) {
     await insertarAuditoria(tx, { movimientoId: id, usuarioId, accion: 'EDICION', cambios });
+    // El stock SOLO puede cambiar si cambió tipo/origen/destino/detalle, y todo eso está
+    // capturado en el diff. Sin cambios, la matview ya está correcta → evitamos el REFRESH
+    // (que escanea todo el histórico). Clave para el sync horario reconciliar: cuando un día
+    // no tuvo novedad, la reconciliación es un no-op barato (no refresca stock por gusto).
+    await refrescarStock(tx);
   }
-
-  // El stock puede cambiar (cantidad, tipo, origen/destino): recalcular en la misma tx.
-  await refrescarStock(tx);
 
   const actualizado = await obtenerMovimiento(tx, id);
   if (!actualizado) throw new AppError('INTERNAL', 'No se pudo releer el movimiento editado', 500);
