@@ -33,6 +33,58 @@ export interface ListaArticulos {
   total: number;
 }
 
+// Inventarios (conteo físico → AJUSTE).
+export interface InventarioResumen {
+  id: number;
+  ubicacion_id: number;
+  ubicacion_nombre: string;
+  fecha: string;
+  estado: string;
+  lineas: number;
+  contadas: number;
+  creado_en: string | null;
+  confirmado_en: string | null;
+}
+
+export interface LineaInventario {
+  producto_3c: string;
+  nombre: string;
+  familia: string | null;
+  subfamilia: string | null;
+  unidad: string;
+  stock_sistema: number;
+  cantidad_contada: number | null;
+  diferencia: number | null;
+  porcentaje: number | null;
+}
+
+export interface InventarioDetalle {
+  id: number;
+  ubicacion_id: number;
+  ubicacion_nombre: string;
+  ubicacion_dep_id_3c: number;
+  fecha: string;
+  estado: string;
+  familias: string[] | null;
+  observaciones: string | null;
+  confirmado_en: string | null;
+  movimiento_entrada_id: number | null;
+  movimiento_salida_id: number | null;
+  lineas: LineaInventario[];
+}
+
+export interface ResultadoConfirmacion {
+  inventario: InventarioDetalle;
+  resumen: {
+    entrada_nro: string | null;
+    salida_nro: string | null;
+    renglones_entrada: number;
+    renglones_salida: number;
+    sin_cambio: number;
+    sin_contar: number;
+  };
+}
+
 export type EstadoMovimiento = 'BORRADOR' | 'CONFIRMADO' | 'ANULADO';
 
 export interface MovimientoResumen {

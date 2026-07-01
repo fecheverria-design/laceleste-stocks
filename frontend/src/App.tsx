@@ -8,6 +8,8 @@ import { NuevoMovimientoPage } from './features/movimientos/NuevoMovimientoPage'
 import { MovimientoDetallePage } from './features/movimientos/MovimientoDetallePage';
 import { StockPage } from './features/stock/StockPage';
 import { ArticulosPage } from './features/articulos/ArticulosPage';
+import { InventariosPage } from './features/inventarios/InventariosPage';
+import { InventarioDetallePage } from './features/inventarios/InventarioDetallePage';
 import { HealthPage } from './features/health/HealthPage';
 
 // Lazy: arrastran Recharts, que solo se baja al entrar a estas páginas.
@@ -38,6 +40,8 @@ export function App() {
           <Route path="/movimientos/:id" element={<MovimientoDetallePage />} />
           <Route path="/stock" element={<StockPage />} />
           <Route path="/articulos" element={<ArticulosPage />} />
+          <Route path="/inventarios" element={<InventariosPage />} />
+          <Route path="/inventarios/:id" element={<InventarioDetallePage />} />
           <Route
             path="/consumos"
             element={
