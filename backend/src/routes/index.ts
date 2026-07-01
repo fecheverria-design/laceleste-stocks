@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { articulosRouter } from './articulos.routes.js';
 import { authRouter } from './auth.routes.js';
+import { inventariosRouter } from './inventarios.routes.js';
 import { catalogosRouter } from './catalogos.routes.js';
 import { healthRouter } from './health.routes.js';
 import { movimientosRouter } from './movimientos.routes.js';
@@ -15,6 +16,7 @@ apiRouter.use(authRouter);
 apiRouter.use(healthRouter);
 apiRouter.use(catalogosRouter);
 apiRouter.use(articulosRouter);
+apiRouter.use(inventariosRouter);
 apiRouter.use(movimientosRouter);
 apiRouter.use(preciosRouter);
 apiRouter.use(consumosRouter);
