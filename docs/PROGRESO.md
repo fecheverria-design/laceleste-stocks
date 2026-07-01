@@ -2,19 +2,44 @@
 
 > Estado para retomar fácil. Última actualización: 2026-07-01.
 
-## ⏭️ PRÓXIMO PASO (retomar acá — 2026-07-01) — PASO 2: agendar los syncs
-El **PASO 1 (modo reconciliar + ventana móvil) está HECHO y testeado** (ver abajo). Falta
-solo agendarlo en la PC local de J:
+## ⏭️ PRÓXIMO PASO (retomar acá — 2026-07-01) — PASO 2: registrar la tarea
+El **PASO 1 (modo reconciliar + ventana móvil) y los artefactos del scheduler están
+HECHOS** (ver abajo). Lo único que falta es la **acción manual de J: registrar la tarea**
+en su PC (un comando) y confirmar que corre.
 
-**PASO 2 (scheduler):** Programador de tareas de Windows, cada 1h (luego ajustable a 30
-min), con **"Run task as soon as possible after a scheduled start is missed"** activado.
-Dos tareas (o una que corra los dos comandos): `npm -w backend run sync:abastecimientos`
-y `npm -w backend run sync:recepciones` **sin argumentos** (así usan la ventana móvil:
-hoy + 2 días atrás). Apagar la PC ≠ perder datos (la fuente de verdad es SU server,
-siempre on; al volver, la ventana móvil re-lee y reconcilia). Solo se pierde *frescura*
-mientras está apagada. Requiere `.env` cargado (los scripts leen `../.env`) y Docker
-Postgres levantado. A futuro: mover esto a un server propio (`stock.laceleste.com.ar`) con
-cron real, al lado de la app del compañero (`produccion.laceleste.com.ar`).
+**Registrar (una vez, en PowerShell como el usuario que queda logueado):**
+```
+cd D:\Bibliotecas\Desktop\Appstocks
+powershell -ExecutionPolicy Bypass -File scripts\register-sync-task.ps1
+```
+Probar a mano: `Start-ScheduledTask -TaskName "LaCeleste Sync en vivo"` y mirar
+`logs\sync-live.log`. Ajustar frecuencia (ej. cada 30 min) editando el `<Interval>` del
+XML y re-registrando.
+
+## ✅ PASO 2 — Scheduler de Windows (artefactos) — HECHO (2026-07-01), falta registrar
+Todo en `scripts/` (versionado):
+- **`sync-live.cmd`**: wrapper que corre los DOS syncs en orden (abastecimientos +
+  recepciones), asegura el Postgres de Docker (`docker compose up -d db`, best-effort) y
+  loguea con timestamp en `logs/sync-live.log` (gitignored: `*.log`). **Reenvía argumentos**
+  → probar sin escribir: `scripts\sync-live.cmd --dry`. Corre los syncs **sin `--fecha`** →
+  usan la **ventana móvil** (hoy + `VENTANA_DIAS_ATRAS`, default 2).
+- **`laceleste-sync.xml`**: definición de la tarea. Cada **1h** (`<Interval>PT1H</Interval>`
+  sin Duration = indefinido), **`StartWhenAvailable=true`** (= "run ASAP after a missed
+  start": si la PC estuvo apagada, corre apenas puede), `MultipleInstancesPolicy=IgnoreNew`
+  (no se apilan si una corrida se demora), `LogonType=InteractiveToken` (corre con la
+  sesión del usuario → ve Docker Desktop; NO guarda contraseña), `RunOnlyIfNetworkAvailable`.
+  La ruta del `<Command>` es la de la PC de J (`D:\Bibliotecas\...`); si el repo se mueve,
+  actualizarla.
+- **`register-sync-task.ps1`**: importa el XML a nombre del usuario actual (`-Force` para
+  actualizar; sin password). Imprime la próxima corrida y los comandos útiles.
+- **Smoke-test OK (2026-07-01)**: `sync-live.cmd --dry` corrió end-to-end → Docker up,
+  ventana móvil (2026-06-29…07-01), login OK a `produccion.laceleste.com.ar`, 8 abast /
+  123 renglones + 14 recep / 44 renglones en dry (nada escrito), exit 0.
+
+Apagar la PC ≠ perder datos: la fuente de verdad es SU server (siempre on); al volver, la
+ventana móvil re-lee y reconcilia. Solo se pierde *frescura* mientras está apagada. A
+futuro: mover esto a un server propio (`stock.laceleste.com.ar`) con cron real, al lado de
+la app del compañero (`produccion.laceleste.com.ar`).
 
 ## ✅ PASO 1 — Syncs "en vivo" (modo RECONCILIAR + ventana móvil) — HECHO (2026-07-01)
 El bloqueo era que los syncs eran **"crear una vez"** (idempotencia: abast por
