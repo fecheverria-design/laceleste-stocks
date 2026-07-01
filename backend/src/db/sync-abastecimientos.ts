@@ -19,12 +19,24 @@ import type { AbastecimientoInput } from '../domain/movimientos.schema.js';
 // Idempotente vía idempotency_key = `abast:<fecha>:<codigo_3c_area>` (uq_mov_idempotencia):
 // re-sincronizar la misma fecha NO duplica.
 //
+// MODO RECONCILIAR (sync en vivo): el service se llama con { reconciliar: true }. Si el
+// RINT de esa (fecha, área) YA existe, en vez de dejarlo como estaba lo REEDITA con el
+// estado fresco de la app del compañero (si a la tarde corrigieron el real o cargaron más
+// renglones, se refleja) → auditado + stock recalculado. Sin cambios = no-op (no ensucia
+// el historial). Por eso ahora sí sirve correr cada ~1h.
+//
+// VENTANA MÓVIL: sin argumentos, sincroniza HOY + los VENTANA_DIAS_ATRAS días previos
+// (default 2). Así, si la PC estuvo apagada, al volver reconcilia sola los días que se
+// perdió; los días sin novedad son no-op. --fecha / --desde/--hasta siguen mandando.
+//
 // Uso:
+//   npm run sync:abastecimientos                              (hoy + 2 días atrás)
 //   npm run sync:abastecimientos -- --fecha=2026-06-30 [--dry]
 //   npm run sync:abastecimientos -- --desde=2026-06-01 --hasta=2026-06-30 [--dry]
 //
 // Config (.env): COMPANERO_API_URL (base, ej. https://ordenes.laceleste.com.ar),
-//   COMPANERO_API_USER, COMPANERO_API_PASS (usuario de servicio de SU sistema).
+//   COMPANERO_API_USER, COMPANERO_API_PASS (usuario de servicio de SU sistema),
+//   VENTANA_DIAS_ATRAS (opcional, default 2: cuántos días hacia atrás barre la ventana).
 
 interface FilaIntegral {
   area: string;
@@ -69,7 +81,37 @@ function parseArgs(argv: string[]): { fechas: string[]; dry: boolean } {
     }
     return { fechas: rangoFechas(desde, hasta), dry };
   }
-  throw new Error('Falta --fecha=YYYY-MM-DD (o --desde/--hasta para un rango)');
+  // Sin argumentos → VENTANA MÓVIL: hoy + N días atrás (default 2, VENTANA_DIAS_ATRAS).
+  // Es el modo del scheduler: reconcilia lo reciente y autorrecupera días perdidos si la
+  // PC estuvo apagada. Los días sin cambios son no-op (gracias al modo reconciliar).
+  return { fechas: ventanaMovil(diasAtrasEnv()), dry };
+}
+
+// Cuántos días hacia atrás barre la ventana móvil (además de hoy). Default 2.
+function diasAtrasEnv(): number {
+  const raw = process.env.VENTANA_DIAS_ATRAS?.trim();
+  if (!raw) return 2;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0) throw new Error(`VENTANA_DIAS_ATRAS inválido: ${raw} (entero >= 0)`);
+  return n;
+}
+
+// [hoy - diasAtras … hoy] como YYYY-MM-DD. Usa la fecha LOCAL (el real se carga en el
+// día local del compañero), no UTC, para no adelantarse/atrasarse un día.
+function ventanaMovil(diasAtras: number): string[] {
+  const hoy = new Date();
+  const y = hoy.getFullYear();
+  const m = hoy.getMonth();
+  const d = hoy.getDate();
+  const out: string[] = [];
+  for (let i = diasAtras; i >= 0; i--) {
+    const f = new Date(y, m, d - i);
+    const yyyy = f.getFullYear();
+    const mm = String(f.getMonth() + 1).padStart(2, '0');
+    const dd = String(f.getDate()).padStart(2, '0');
+    out.push(`${yyyy}-${mm}-${dd}`);
+  }
+  return out;
 }
 
 // Lista de fechas YYYY-MM-DD inclusive, en UTC para no correrse por timezone.
@@ -240,9 +282,10 @@ async function main(): Promise<void> {
       }
 
       try {
-        // Idempotente: si ya existe un mov con esta idempotency_key, el service devuelve
-        // el mismo (no duplica, no re-descuenta stock). Re-correr la fecha es seguro.
-        const mov = await registrarAbastecimiento(input, { usuarioId });
+        // reconciliar: si el RINT de esta (fecha, área) ya existe, el service lo REEDITA
+        // con el estado fresco (real corregido / renglones nuevos) en vez de dejarlo como
+        // estaba; auditado y con stock recalculado. Sin cambios = no-op. No duplica.
+        const mov = await registrarAbastecimiento(input, { usuarioId, reconciliar: true });
         movimientos++;
         renglones += g.detalle.length;
         console.log(`    ✔ ${mov.nro} → área ${g.destino_dep_id_3c} (${g.detalle.length} renglón/es)`);

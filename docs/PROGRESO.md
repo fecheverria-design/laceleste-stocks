@@ -1,6 +1,51 @@
 # PROGRESO — laceleste-movimientos
 
-> Estado para retomar fácil. Última actualización: 2026-06-30.
+> Estado para retomar fácil. Última actualización: 2026-07-01.
+
+## ⏭️ PRÓXIMO PASO (retomar acá — 2026-07-01) — PASO 2: agendar los syncs
+El **PASO 1 (modo reconciliar + ventana móvil) está HECHO y testeado** (ver abajo). Falta
+solo agendarlo en la PC local de J:
+
+**PASO 2 (scheduler):** Programador de tareas de Windows, cada 1h (luego ajustable a 30
+min), con **"Run task as soon as possible after a scheduled start is missed"** activado.
+Dos tareas (o una que corra los dos comandos): `npm -w backend run sync:abastecimientos`
+y `npm -w backend run sync:recepciones` **sin argumentos** (así usan la ventana móvil:
+hoy + 2 días atrás). Apagar la PC ≠ perder datos (la fuente de verdad es SU server,
+siempre on; al volver, la ventana móvil re-lee y reconcilia). Solo se pierde *frescura*
+mientras está apagada. Requiere `.env` cargado (los scripts leen `../.env`) y Docker
+Postgres levantado. A futuro: mover esto a un server propio (`stock.laceleste.com.ar`) con
+cron real, al lado de la app del compañero (`produccion.laceleste.com.ar`).
+
+## ✅ PASO 1 — Syncs "en vivo" (modo RECONCILIAR + ventana móvil) — HECHO (2026-07-01)
+El bloqueo era que los syncs eran **"crear una vez"** (idempotencia: abast por
+`(fecha,área)`, recep por `recep:<id>`) → re-correr el mismo día NO incorporaba lo cargado
+después de la 1ª corrida. Resuelto:
+- **Modo RECONCILIAR (opt-in) en `registrarAutoConfirmado`** (`movimientos.service.ts`):
+  en el hit de idempotencia, si viene `{ reconciliar: true }` y el movimiento **no** está
+  ANULADO, en vez de devolverlo tal cual lo **reedita** con el estado fresco de su app
+  (real corregido / renglones nuevos). Sin cambios = **no-op** (el diff da vacío, no
+  escribe auditoría). Un ANULADO a mano **no se resucita** (se devuelve tal cual, el sync
+  no lo cuenta como error). El POST M2M sigue en "crear una vez" (default `reconciliar:false`).
+- **Transacción anidada resuelta por refactor (no savepoints):** se extrajo el cuerpo de
+  `editarMovimiento` a un helper **`aplicarEdicion(tx, …)`** que opera dentro de una tx ya
+  abierta. `editarMovimiento` quedó como wrapper que abre la tx y delega; el modo
+  reconciliar llama a `aplicarEdicion` con **el mismo `tx`** del registro → una sola
+  transacción, sin anidar. (Llamar a `editarMovimiento` desde otra tx habría abierto una
+  tx separada en otra conexión: no vería lo no-commiteado y podría trabarse.)
+- **Ventana móvil en los scripts** (`sync-abastecimientos.ts` / `sync-recepciones.ts`):
+  sin argumentos, barren **hoy + `VENTANA_DIAS_ATRAS` días atrás** (default 2, configurable
+  por `.env`) → autorrecuperan días perdidos si la PC estuvo apagada; días sin novedad =
+  no-op. `--fecha` y `--desde/--hasta` siguen funcionando igual. Ambos scripts llaman al
+  service con `{ reconciliar: true }`.
+- **Tests (regla #5):** `tests/reconciliacion.service.test.ts` — real corregido reedita +
+  ajusta stock + 1 fila de auditoría; sin cambios = no-op (0 auditoría); renglón nuevo
+  aparece en detalle+stock sin tocar el existente; sin `reconciliar` = idempotencia clásica
+  (no reedita); ANULADO respetado (no resucita, no error). **89 tests verdes** (+5).
+- **Caso borde NO cubierto (a propósito):** si el compañero **borra/pone en 0** el real de
+  un área ya sincronizada, esa área desaparece de su tabla → el sync no la ve → **no la
+  reconcilia** (queda el valor viejo). Reconciliar solo pisa lo que sigue presente. Cubrirlo
+  exige comparar contra lo ya materializado del día (bastante más laburo). Anotado; fuera de
+  este paso. Se corrige a mano editando/anulando el movimiento en el front si pasa.
 
 ## 🔌 INTEGRACIÓN PULL app del compañero — PROBADA E2E (2026-06-30)
 Script `npm run sync:abastecimientos -- --fecha=YYYY-MM-DD [--dry]` (o `--desde/--hasta`)

@@ -23,12 +23,23 @@ import type { RecepcionInput } from '../domain/movimientos.schema.js';
 // Idempotente vía idempotency_key = `recep:<id>` (el id de recepción es único en su app):
 // re-sincronizar la misma fecha NO duplica.
 //
+// MODO RECONCILIAR (sync en vivo): el service se llama con { reconciliar: true }. Si la
+// RECEPCION #id YA existe, en vez de dejarla como estaba la REEDITA con el estado fresco
+// (si después del primer pull pasaron más ítems por BPM o corrigieron una cantidad, se
+// refleja) → auditado + stock recalculado. Sin cambios = no-op. Por eso sirve correr cada ~1h.
+//
+// VENTANA MÓVIL: sin argumentos, sincroniza HOY + los VENTANA_DIAS_ATRAS días previos
+// (default 2). Autorrecupera días perdidos si la PC estuvo apagada; los días sin novedad
+// son no-op. --fecha / --desde/--hasta siguen mandando.
+//
 // Uso:
+//   npm run sync:recepciones                               (hoy + 2 días atrás)
 //   npm run sync:recepciones -- --fecha=2026-06-26 [--dry]
 //   npm run sync:recepciones -- --desde=2026-06-01 --hasta=2026-06-30 [--dry]
 //
 // Config (.env): COMPANERO_API_URL/USER/PASS, DEPOSITO_PRINCIPAL_DEP_ID_3C (destino),
-//   RECEPCION_ORIGEN_DEP_ID_3C (opcional, default 102).
+//   RECEPCION_ORIGEN_DEP_ID_3C (opcional, default 102),
+//   VENTANA_DIAS_ATRAS (opcional, default 2: días hacia atrás de la ventana móvil).
 
 interface ItemRecepcion {
   id: number;
@@ -78,7 +89,36 @@ function parseArgs(argv: string[]): { fechas: string[]; dry: boolean } {
     }
     return { fechas: rangoFechas(desde, hasta), dry };
   }
-  throw new Error('Falta --fecha=YYYY-MM-DD (o --desde/--hasta para un rango)');
+  // Sin argumentos → VENTANA MÓVIL: hoy + N días atrás (default 2, VENTANA_DIAS_ATRAS).
+  // Modo del scheduler: reconcilia lo reciente y autorrecupera días perdidos. Días sin
+  // cambios = no-op (modo reconciliar).
+  return { fechas: ventanaMovil(diasAtrasEnv()), dry };
+}
+
+// Cuántos días hacia atrás barre la ventana móvil (además de hoy). Default 2.
+function diasAtrasEnv(): number {
+  const raw = process.env.VENTANA_DIAS_ATRAS?.trim();
+  if (!raw) return 2;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0) throw new Error(`VENTANA_DIAS_ATRAS inválido: ${raw} (entero >= 0)`);
+  return n;
+}
+
+// [hoy - diasAtras … hoy] como YYYY-MM-DD, en fecha LOCAL (no UTC) para no correrse un día.
+function ventanaMovil(diasAtras: number): string[] {
+  const hoy = new Date();
+  const y = hoy.getFullYear();
+  const m = hoy.getMonth();
+  const d = hoy.getDate();
+  const out: string[] = [];
+  for (let i = diasAtras; i >= 0; i--) {
+    const f = new Date(y, m, d - i);
+    const yyyy = f.getFullYear();
+    const mm = String(f.getMonth() + 1).padStart(2, '0');
+    const dd = String(f.getDate()).padStart(2, '0');
+    out.push(`${yyyy}-${mm}-${dd}`);
+  }
+  return out;
 }
 
 // Lista de fechas YYYY-MM-DD inclusive, en UTC para no correrse por timezone.
@@ -268,7 +308,10 @@ async function main(): Promise<void> {
       }
 
       try {
-        const mov = await registrarRecepcion(input, { usuarioId });
+        // reconciliar: si la RECEPCION de este id ya existe, el service la REEDITA con el
+        // estado fresco (más ítems por BPM / cantidad corregida) en vez de dejarla igual;
+        // auditado y con stock recalculado. Sin cambios = no-op. No duplica.
+        const mov = await registrarRecepcion(input, { usuarioId, reconciliar: true });
         movimientos++;
         renglones += detalle.length;
         console.log(`    ✔ ${mov.nro} ← recep #${r.id} ${r.proveedor_nombre ?? ''} (${detalle.length} renglón/es)`);
