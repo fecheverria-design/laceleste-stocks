@@ -31,10 +31,12 @@
       <Enabled>true</Enabled>
     </TimeTrigger>
   </Triggers>
-  <Principal id="Author">
-    <LogonType>InteractiveToken</LogonType>
-    <RunLevel>LeastPrivilege</RunLevel>
-  </Principal>
+  <Principals>
+    <Principal id="Author">
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
   <Settings>
     <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
     <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
