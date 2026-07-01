@@ -16,22 +16,41 @@ const rubro = z
   .nullish()
   .transform((s) => s ?? null);
 
-export const CrearArticuloSchema = z.object({
+// Texto opcional que '' → null.
+const textoNull = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max)
+    .transform((s) => (s === '' ? null : s))
+    .nullish()
+    .transform((s) => s ?? null);
+
+// Factor de bulto: número positivo o null (1 = suelto).
+const factorBulto = z
+  .number()
+  .finite()
+  .positive()
+  .nullish()
+  .transform((n) => n ?? null);
+
+// Campos de presentación/bulto/ABC/info comunes a alta y edición.
+const camposComunes = {
   nombre: z.string().trim().min(1, 'El nombre es obligatorio').max(200),
   unidad_base: z.string().trim().min(1, 'La unidad es obligatoria').max(16),
   familia: rubro,
   subfamilia: rubro,
-});
+  presentacion_compra: textoNull(100),
+  unidades_por_bulto: factorBulto,
+  clasificacion_abc: textoNull(4).transform((s) => (s === null ? null : s.toUpperCase())),
+  informacion: textoNull(500),
+};
+
+export const CrearArticuloSchema = z.object(camposComunes);
 export type CrearArticuloInput = z.infer<typeof CrearArticuloSchema>;
 
 // Editar: mismos campos + activo (baja lógica). El codigo_3c NO se edita (es la PK).
-export const EditarArticuloSchema = z.object({
-  nombre: z.string().trim().min(1, 'El nombre es obligatorio').max(200),
-  unidad_base: z.string().trim().min(1, 'La unidad es obligatoria').max(16),
-  familia: rubro,
-  subfamilia: rubro,
-  activo: z.boolean().optional(),
-});
+export const EditarArticuloSchema = z.object({ ...camposComunes, activo: z.boolean().optional() });
 export type EditarArticuloInput = z.infer<typeof EditarArticuloSchema>;
 
 // Filtros del listado del maestro: búsqueda por texto (código o nombre), familia,

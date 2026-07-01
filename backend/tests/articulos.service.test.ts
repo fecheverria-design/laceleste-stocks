@@ -3,14 +3,23 @@ import { db } from '../src/db/client.js';
 import { productos } from '../src/db/schema.js';
 import { AppError } from '../src/domain/errors.js';
 import {
-  crearArticulo,
-  editarArticulo,
+  crearArticulo as crearArticuloSvc,
+  editarArticulo as editarArticuloSvc,
   obtenerArticulos,
 } from '../src/services/articulos.service.js';
 import { cerrarPool, limpiar } from './helpers/db.js';
 
 // Alta/edición del maestro de artículos. El código de un artículo NUEVO se genera
 // continuando la numeración (max(codigo_3c numérico)+1) y queda marcado creado_local.
+
+// Rellena los campos de presentación/bulto/ABC/info (no relevantes para estos tests).
+const EXTRA = { presentacion_compra: null, unidades_por_bulto: null, clasificacion_abc: null, informacion: null };
+const crearArticulo = (o: { nombre: string; unidad_base: string; familia: string | null; subfamilia: string | null }) =>
+  crearArticuloSvc({ ...EXTRA, ...o });
+const editarArticulo = (
+  codigo: string,
+  o: { nombre: string; unidad_base: string; familia: string | null; subfamilia: string | null; activo?: boolean },
+) => editarArticuloSvc(codigo, { ...EXTRA, ...o });
 
 async function sembrarProductos(items: { codigo3c: string; nombre: string; familia?: string }[]): Promise<void> {
   await db.insert(productos).values(

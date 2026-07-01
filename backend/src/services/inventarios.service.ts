@@ -36,6 +36,8 @@ export interface LineaInventario {
   familia: string | null;
   subfamilia: string | null;
   unidad: string;
+  presentacion_compra: string | null;
+  unidades_por_bulto: number | null; // factor de bulto (null/1 = suelto)
   stock_sistema: number;
   cantidad_contada: number | null;
   diferencia: number | null; // contado − sistema (null si no se contó)
@@ -61,6 +63,8 @@ async function armarDetalle(cab: InventarioCabecera): Promise<InventarioDetalle>
       familia: f.familia,
       subfamilia: f.subfamilia,
       unidad: f.unidad,
+      presentacion_compra: f.presentacion_compra,
+      unidades_por_bulto: f.unidades_por_bulto === null ? null : Number(f.unidades_por_bulto),
       stock_sistema: sistema,
       cantidad_contada: contada,
       diferencia,

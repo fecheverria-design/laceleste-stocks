@@ -13,17 +13,36 @@ interface FormArticulo {
   unidad_base: string;
   familia: string;
   subfamilia: string;
+  presentacion_compra: string;
+  unidades_por_bulto: string;
+  clasificacion_abc: string;
+  informacion: string;
   activo: boolean;
 }
 
-const vacio: FormArticulo = { nombre: '', unidad_base: 'UN', familia: '', subfamilia: '', activo: true };
+const vacio: FormArticulo = {
+  nombre: '',
+  unidad_base: 'UNIDAD',
+  familia: '',
+  subfamilia: '',
+  presentacion_compra: '',
+  unidades_por_bulto: '',
+  clasificacion_abc: '',
+  informacion: '',
+  activo: true,
+};
 
 function aPayload(f: FormArticulo) {
+  const bulto = f.unidades_por_bulto.trim().replace(',', '.');
   return {
     nombre: f.nombre.trim(),
     unidad_base: f.unidad_base.trim(),
     familia: f.familia.trim() || null,
     subfamilia: f.subfamilia.trim() || null,
+    presentacion_compra: f.presentacion_compra.trim() || null,
+    unidades_por_bulto: bulto === '' ? null : Number(bulto),
+    clasificacion_abc: f.clasificacion_abc.trim() || null,
+    informacion: f.informacion.trim() || null,
     activo: f.activo,
   };
 }
@@ -93,6 +112,10 @@ export function ArticulosPage() {
       unidad_base: a.unidad_base,
       familia: a.familia ?? '',
       subfamilia: a.subfamilia ?? '',
+      presentacion_compra: a.presentacion_compra ?? '',
+      unidades_por_bulto: a.unidades_por_bulto ?? '',
+      clasificacion_abc: a.clasificacion_abc ?? '',
+      informacion: a.informacion ?? '',
       activo: a.activo,
     });
   };
@@ -193,6 +216,43 @@ export function ArticulosPage() {
                 onChange={(e) => setForm({ ...form, subfamilia: e.target.value })}
               />
             </label>
+            <label className="flex flex-col gap-1 text-xs text-slate-500 lg:col-span-2">
+              Presentación / unidad mín. compra
+              <input
+                className={inputCls}
+                placeholder="1 Caja = 36 ud."
+                value={form.presentacion_compra}
+                onChange={(e) => setForm({ ...form, presentacion_compra: e.target.value })}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-slate-500">
+              Unid. por bulto
+              <input
+                className={inputCls}
+                inputMode="decimal"
+                placeholder="36"
+                value={form.unidades_por_bulto}
+                onChange={(e) => setForm({ ...form, unidades_por_bulto: e.target.value })}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-slate-500">
+              ABC
+              <input
+                className={inputCls}
+                maxLength={4}
+                placeholder="B"
+                value={form.clasificacion_abc}
+                onChange={(e) => setForm({ ...form, clasificacion_abc: e.target.value })}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-slate-500 lg:col-span-3">
+              Información
+              <input
+                className={inputCls}
+                value={form.informacion}
+                onChange={(e) => setForm({ ...form, informacion: e.target.value })}
+              />
+            </label>
           </div>
           <datalist id="familias-list">
             {(familias.data ?? []).map((f) => (
@@ -241,7 +301,10 @@ export function ArticulosPage() {
               <th className="px-4 py-3">Nombre</th>
               <th className="px-4 py-3">Familia</th>
               <th className="px-4 py-3">Subfamilia</th>
+              <th className="px-4 py-3">Presentación</th>
+              <th className="px-4 py-3 text-right">Ud/bulto</th>
               <th className="px-4 py-3">Unidad</th>
+              <th className="px-4 py-3">ABC</th>
               <th className="px-4 py-3">Estado</th>
               <th className="px-4 py-3"></th>
             </tr>
@@ -249,14 +312,14 @@ export function ArticulosPage() {
           <tbody>
             {articulos.isLoading && (
               <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-slate-400">
+                <td colSpan={10} className="px-4 py-6 text-center text-slate-400">
                   Cargando…
                 </td>
               </tr>
             )}
             {!articulos.isLoading && items.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-slate-400">
+                <td colSpan={10} className="px-4 py-6 text-center text-slate-400">
                   Sin artículos.
                 </td>
               </tr>
@@ -274,7 +337,12 @@ export function ArticulosPage() {
                 <td className="px-4 py-2">{a.nombre}</td>
                 <td className="px-4 py-2 text-slate-600">{a.familia ?? '—'}</td>
                 <td className="px-4 py-2 text-slate-600">{a.subfamilia ?? '—'}</td>
+                <td className="px-4 py-2 text-xs text-slate-500">{a.presentacion_compra ?? '—'}</td>
+                <td className="px-4 py-2 text-right tabular-nums text-slate-600">
+                  {a.unidades_por_bulto ? Number(a.unidades_por_bulto) : '—'}
+                </td>
                 <td className="px-4 py-2 text-slate-600">{a.unidad_base}</td>
+                <td className="px-4 py-2 text-slate-600">{a.clasificacion_abc ?? '—'}</td>
                 <td className="px-4 py-2">
                   {a.activo ? (
                     <span className="text-emerald-600">activo</span>

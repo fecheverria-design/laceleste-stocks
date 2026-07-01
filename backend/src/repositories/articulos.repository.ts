@@ -13,6 +13,10 @@ export interface FilaArticulo {
   unidad_base: string;
   familia: string | null;
   subfamilia: string | null;
+  presentacion_compra: string | null;
+  unidades_por_bulto: string | null; // numeric → string (o null)
+  clasificacion_abc: string | null;
+  informacion: string | null;
   activo: boolean;
   creado_local: boolean;
 }
@@ -37,6 +41,10 @@ const COLS = {
   unidad_base: productos.unidadBase,
   familia: productos.familia,
   subfamilia: productos.subfamilia,
+  presentacion_compra: productos.presentacionCompra,
+  unidades_por_bulto: productos.unidadesPorBulto,
+  clasificacion_abc: productos.clasificacionAbc,
+  informacion: productos.informacion,
   activo: productos.activo,
   creado_local: productos.creadoLocal,
 };
@@ -89,16 +97,22 @@ export async function generarCodigoArticulo(tx: Tx): Promise<string> {
   return String(next);
 }
 
+// Campos editables del artículo (presentación/bulto/ABC/info incluidos). numeros como
+// string para el numeric de Drizzle; null cuando no aplica.
+export interface ArticuloCampos {
+  nombre: string;
+  unidadBase: string;
+  familia: string | null;
+  subfamilia: string | null;
+  presentacionCompra: string | null;
+  unidadesPorBulto: string | null;
+  clasificacionAbc: string | null;
+  informacion: string | null;
+}
+
 export async function insertarArticulo(
   tx: Tx,
-  datos: {
-    codigo3c: string;
-    nombre: string;
-    unidadBase: string;
-    familia: string | null;
-    subfamilia: string | null;
-    creadoLocal: boolean;
-  },
+  datos: ArticuloCampos & { codigo3c: string; creadoLocal: boolean },
 ): Promise<FilaArticulo> {
   const [row] = await tx
     .insert(productos)
@@ -108,6 +122,10 @@ export async function insertarArticulo(
       unidadBase: datos.unidadBase,
       familia: datos.familia,
       subfamilia: datos.subfamilia,
+      presentacionCompra: datos.presentacionCompra,
+      unidadesPorBulto: datos.unidadesPorBulto,
+      clasificacionAbc: datos.clasificacionAbc,
+      informacion: datos.informacion,
       creadoLocal: datos.creadoLocal,
     })
     .returning(COLS);
@@ -117,7 +135,7 @@ export async function insertarArticulo(
 
 export async function actualizarArticulo(
   codigo3c: string,
-  datos: { nombre: string; unidadBase: string; familia: string | null; subfamilia: string | null; activo?: boolean },
+  datos: ArticuloCampos & { activo?: boolean },
 ): Promise<FilaArticulo | undefined> {
   const [row] = await db
     .update(productos)
@@ -126,6 +144,10 @@ export async function actualizarArticulo(
       unidadBase: datos.unidadBase,
       familia: datos.familia,
       subfamilia: datos.subfamilia,
+      presentacionCompra: datos.presentacionCompra,
+      unidadesPorBulto: datos.unidadesPorBulto,
+      clasificacionAbc: datos.clasificacionAbc,
+      informacion: datos.informacion,
       ...(datos.activo === undefined ? {} : { activo: datos.activo }),
     })
     .where(eq(productos.codigo3c, codigo3c))

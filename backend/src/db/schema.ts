@@ -55,7 +55,14 @@ export const productos = pgTable('productos', {
   unidadBase: varchar('unidad_base', { length: 16 }).notNull(), // 'KG' | 'UN' | 'LT'
   familia: varchar('familia', { length: 64 }), // nullable; viene de 3c (PACKAGING, MATERIAS PRIMAS…)
   subfamilia: varchar('subfamilia', { length: 64 }), // nullable; subrubro de 3c (sub-agrupa el conteo)
-  presentacion: jsonb('presentacion'), // {"bulto":"bolsa","equivale":25,"unidad":"KG"} — puerta abierta
+  // Presentación / unidad mínima de compra (texto descriptivo del bulto: "1 Caja = 36 ud.").
+  presentacionCompra: varchar('presentacion_compra', { length: 100 }),
+  // Factor: cuántas UNIDADES BASE trae un bulto (36, 80, 300…). 1 = se cuenta suelto.
+  // Habilita contar en bultos en el inventario: base = bultos * unidades_por_bulto.
+  unidadesPorBulto: numeric('unidades_por_bulto', { precision: 12, scale: 3 }),
+  clasificacionAbc: varchar('clasificacion_abc', { length: 4 }), // A | B | C (importancia)
+  informacion: text('informacion'), // notas libres (ej. medidas)
+  presentacion: jsonb('presentacion'), // {"bulto":"bolsa","equivale":25,"unidad":"KG"} — puerta abierta (legacy)
   activo: boolean('activo').notNull().default(true),
   // true = artículo creado en NUESTRA app (no vino de 3c). Su codigo_3c es propio (continúa
   // la numeración) y NO es un ID oficial de 3c → trazabilidad para mapear/corregir si 3c

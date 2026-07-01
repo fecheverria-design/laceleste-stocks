@@ -22,6 +22,10 @@ export interface Articulo {
   unidad_base: string;
   familia: string | null;
   subfamilia: string | null;
+  presentacion_compra: string | null;
+  unidades_por_bulto: string | null; // numeric → string
+  clasificacion_abc: string | null;
+  informacion: string | null;
   activo: boolean;
   creado_local: boolean;
 }
@@ -52,6 +56,8 @@ export interface LineaInventario {
   familia: string | null;
   subfamilia: string | null;
   unidad: string;
+  presentacion_compra: string | null;
+  unidades_por_bulto: number | null;
   stock_sistema: number;
   cantidad_contada: number | null;
   diferencia: number | null;

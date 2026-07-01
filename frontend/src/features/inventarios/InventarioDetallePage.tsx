@@ -2,21 +2,18 @@ import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router-dom';
 import { apiGet, apiPost, apiPut } from '../../shared/api/client';
-import type { InventarioDetalle, ResultadoConfirmacion } from '../../shared/api/types';
+import type { InventarioDetalle, LineaInventario, ResultadoConfirmacion } from '../../shared/api/types';
 
-const inputCls =
-  'w-28 rounded-lg border border-slate-300 px-2 py-1 text-sm outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500';
+const numCls =
+  'w-20 rounded-lg border border-slate-300 px-2 py-1 text-right text-sm outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500';
 
-// Parsea lo escrito: '' → null (sin contar); coma o punto decimal. NaN si inválido.
-function parseContada(v: string): number | null | typeof NaN {
+const parseNum = (v: string): number | null => {
   const t = v.trim();
   if (t === '') return null;
   return Number(t.replace(',', '.'));
-}
-function esInvalido(v: string): boolean {
-  const n = parseContada(v);
-  return n !== null && (Number.isNaN(n) || n < 0);
-}
+};
+const factorDe = (l: LineaInventario): number => (l.unidades_por_bulto && l.unidades_por_bulto > 1 ? l.unidades_por_bulto : 1);
+const round3 = (n: number): number => Math.round(n * 1000) / 1000;
 
 export function InventarioDetallePage() {
   const { id } = useParams();
@@ -28,18 +25,20 @@ export function InventarioDetallePage() {
     queryFn: () => apiGet<InventarioDetalle>(`/api/inventarios/${invId}`),
   });
 
-  const [contadas, setContadas] = useState<Record<string, string>>({});
+  // Conteo en dos partes: bultos (× factor) + sueltas (unidad base). base = bultos*factor + sueltas.
+  const [bultos, setBultos] = useState<Record<string, string>>({});
+  const [sueltas, setSueltas] = useState<Record<string, string>>({});
   const [initId, setInitId] = useState<number | null>(null);
   const [busqueda, setBusqueda] = useState('');
   const [nuevoProd, setNuevoProd] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
 
-  // Inicializa los inputs cuando llega el detalle (una vez por inventario).
   useEffect(() => {
     if (detalle.data && initId !== detalle.data.id) {
-      const init: Record<string, string> = {};
-      for (const l of detalle.data.lineas) init[l.producto_3c] = l.cantidad_contada === null ? '' : String(l.cantidad_contada);
-      setContadas(init);
+      const su: Record<string, string> = {};
+      for (const l of detalle.data.lineas) su[l.producto_3c] = l.cantidad_contada === null ? '' : String(l.cantidad_contada);
+      setSueltas(su);
+      setBultos({});
       setInitId(detalle.data.id);
     }
   }, [detalle.data, initId]);
@@ -47,8 +46,27 @@ export function InventarioDetallePage() {
   const inv = detalle.data;
   const editable = inv?.estado === 'BORRADOR';
 
+  // base contada de una línea (null si no se cargó nada). NaN si algo es inválido.
+  const baseDe = (l: LineaInventario): number | null => {
+    const b = bultos[l.producto_3c] ?? '';
+    const s = sueltas[l.producto_3c] ?? '';
+    if (b.trim() === '' && s.trim() === '') return null;
+    const nb = b.trim() === '' ? 0 : parseNum(b);
+    const ns = s.trim() === '' ? 0 : parseNum(s);
+    if (nb === null || ns === null || Number.isNaN(nb) || Number.isNaN(ns)) return NaN;
+    return round3(nb * factorDe(l) + ns);
+  };
+
+  const lineaInvalida = (l: LineaInventario): boolean => {
+    const base = baseDe(l);
+    return base !== null && (Number.isNaN(base) || base < 0);
+  };
+
   const payloadLineas = () =>
-    (inv?.lineas ?? []).map((l) => ({ producto_3c: l.producto_3c, cantidad_contada: parseContada(contadas[l.producto_3c] ?? '') as number | null }));
+    (inv?.lineas ?? []).map((l) => {
+      const base = baseDe(l);
+      return { producto_3c: l.producto_3c, cantidad_contada: base === null || Number.isNaN(base) ? null : base };
+    });
 
   const guardar = useMutation({
     mutationFn: () => apiPut<InventarioDetalle>(`/api/inventarios/${invId}/lineas`, { lineas: payloadLineas() }),
@@ -70,7 +88,7 @@ export function InventarioDetallePage() {
 
   const confirmar = useMutation({
     mutationFn: async () => {
-      await apiPut(`/api/inventarios/${invId}/lineas`, { lineas: payloadLineas() }); // guarda antes de confirmar
+      await apiPut(`/api/inventarios/${invId}/lineas`, { lineas: payloadLineas() });
       return apiPost<ResultadoConfirmacion>(`/api/inventarios/${invId}/confirmar`, {});
     },
     onSuccess: async (res) => {
@@ -88,14 +106,14 @@ export function InventarioDetallePage() {
     onError: (e) => setMsg(e instanceof Error ? e.message : 'No se pudo confirmar'),
   });
 
-  const hayInvalidos = useMemo(() => Object.values(contadas).some(esInvalido), [contadas]);
+  const hayInvalidos = (inv?.lineas ?? []).some(lineaInvalida);
 
   const filas = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
     return (inv?.lineas ?? []).filter((l) => !q || l.nombre.toLowerCase().includes(q) || l.producto_3c.includes(q));
   }, [inv?.lineas, busqueda]);
 
-  const contadasCount = (inv?.lineas ?? []).filter((l) => (contadas[l.producto_3c] ?? '').trim() !== '').length;
+  const contadasCount = (inv?.lineas ?? []).filter((l) => baseDe(l) !== null).length;
 
   if (detalle.isLoading) return <p className="text-slate-500">Cargando…</p>;
   if (!inv) return <p className="text-rose-600">No se encontró el inventario.</p>;
@@ -168,14 +186,20 @@ export function InventarioDetallePage() {
         {hayInvalidos && <span className="text-sm text-rose-600">Hay cantidades inválidas (negativas o no numéricas).</span>}
       </div>
 
+      <p className="text-xs text-slate-400">
+        En productos con bulto (ej. “1 Caja = 36”), cargá los <b>bultos</b> y las <b>sueltas</b>: el contado sale
+        automático (bultos × factor + sueltas). Los que se cuentan de a uno, solo “sueltas”.
+      </p>
+
       <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
         <table className="w-full text-sm">
           <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
             <tr>
-              <th className="px-3 py-3">Código</th>
               <th className="px-3 py-3">Producto</th>
-              <th className="px-3 py-3">Familia</th>
+              <th className="px-3 py-3">Presentación</th>
               <th className="px-3 py-3 text-right">Sistema</th>
+              <th className="px-3 py-3 text-right">Bultos</th>
+              <th className="px-3 py-3 text-right">Sueltas</th>
               <th className="px-3 py-3 text-right">Contado</th>
               <th className="px-3 py-3 text-right">Diferencia</th>
               <th className="px-3 py-3 text-right">%</th>
@@ -183,32 +207,50 @@ export function InventarioDetallePage() {
           </thead>
           <tbody>
             {filas.map((l) => {
-              const raw = contadas[l.producto_3c] ?? '';
-              const n = parseContada(raw);
-              const cont = n === null || Number.isNaN(n) ? null : n;
-              const dif = cont === null ? null : Math.round((cont - l.stock_sistema) * 1000) / 1000;
+              const factor = factorDe(l);
+              const base = baseDe(l);
+              const cont = base === null || Number.isNaN(base) ? null : base;
+              const dif = cont === null ? null : round3(cont - l.stock_sistema);
               const pct = cont === null || l.stock_sistema === 0 ? null : Math.round(((cont - l.stock_sistema) / l.stock_sistema) * 1000) / 10;
               const difColor = dif === null ? '' : dif === 0 ? 'text-slate-400' : dif > 0 ? 'text-emerald-600' : 'text-rose-600';
               return (
                 <tr key={l.producto_3c} className="border-b border-slate-100 last:border-0">
-                  <td className="px-3 py-1.5 font-mono text-xs text-slate-500">{l.producto_3c}</td>
-                  <td className="px-3 py-1.5">{l.nombre}</td>
-                  <td className="px-3 py-1.5 text-xs text-slate-500">{l.familia ?? '—'}</td>
+                  <td className="px-3 py-1.5">
+                    <div>{l.nombre}</div>
+                    <div className="font-mono text-[10px] text-slate-400">
+                      {l.producto_3c} · {l.familia ?? '—'}
+                    </div>
+                  </td>
+                  <td className="px-3 py-1.5 text-xs text-slate-500">{l.presentacion_compra ?? '—'}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums text-slate-600">
                     {l.stock_sistema} <span className="text-xs text-slate-400">{l.unidad}</span>
                   </td>
                   <td className="px-3 py-1.5 text-right">
+                    {editable && factor > 1 ? (
+                      <input
+                        className={numCls}
+                        inputMode="decimal"
+                        value={bultos[l.producto_3c] ?? ''}
+                        onChange={(e) => setBultos((p) => ({ ...p, [l.producto_3c]: e.target.value }))}
+                        title={`× ${factor}`}
+                      />
+                    ) : (
+                      <span className="text-slate-300">—</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-1.5 text-right">
                     {editable ? (
                       <input
-                        className={`${inputCls} text-right ${esInvalido(raw) ? 'border-rose-400' : ''}`}
+                        className={numCls}
                         inputMode="decimal"
-                        value={raw}
-                        onChange={(e) => setContadas((p) => ({ ...p, [l.producto_3c]: e.target.value }))}
+                        value={sueltas[l.producto_3c] ?? ''}
+                        onChange={(e) => setSueltas((p) => ({ ...p, [l.producto_3c]: e.target.value }))}
                       />
                     ) : (
                       <span className="tabular-nums">{l.cantidad_contada ?? '—'}</span>
                     )}
                   </td>
+                  <td className="px-3 py-1.5 text-right tabular-nums font-medium">{cont === null ? '—' : cont}</td>
                   <td className={`px-3 py-1.5 text-right tabular-nums ${difColor}`}>{dif === null ? '—' : dif > 0 ? `+${dif}` : dif}</td>
                   <td className={`px-3 py-1.5 text-right tabular-nums ${difColor}`}>{pct === null ? '—' : `${pct > 0 ? '+' : ''}${pct}%`}</td>
                 </tr>

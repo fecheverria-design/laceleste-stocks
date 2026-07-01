@@ -156,6 +156,8 @@ export type LineaDetalle = {
   familia: string | null;
   subfamilia: string | null;
   unidad: string;
+  presentacion_compra: string | null;
+  unidades_por_bulto: string | null; // factor para contar en bultos (null/1 = suelto)
   cantidad_contada: string | null;
   stock_sistema: string; // del stock_actual para la ubicación del inventario (0 si no hay)
 }
@@ -164,6 +166,7 @@ export type LineaDetalle = {
 export async function lineasDetalle(inventarioId: number, ubicacionId: number): Promise<LineaDetalle[]> {
   const res = await db.execute<LineaDetalle>(
     sql`SELECT l.producto_3c, p.nombre, p.familia, p.subfamilia, l.unidad,
+               p.presentacion_compra, p.unidades_por_bulto::text AS unidades_por_bulto,
                l.cantidad_contada::text AS cantidad_contada,
                COALESCE(s.cantidad, 0)::text AS stock_sistema
         FROM inventario_lineas l
