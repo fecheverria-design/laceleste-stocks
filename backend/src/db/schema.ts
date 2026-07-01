@@ -54,6 +54,7 @@ export const productos = pgTable('productos', {
   nombre: varchar('nombre', { length: 200 }).notNull(),
   unidadBase: varchar('unidad_base', { length: 16 }).notNull(), // 'KG' | 'UN' | 'LT'
   familia: varchar('familia', { length: 64 }), // nullable; viene de 3c (PACKAGING, MATERIAS PRIMAS…)
+  subfamilia: varchar('subfamilia', { length: 64 }), // nullable; subrubro de 3c (sub-agrupa el conteo)
   presentacion: jsonb('presentacion'), // {"bulto":"bolsa","equivale":25,"unidad":"KG"} — puerta abierta
   activo: boolean('activo').notNull().default(true),
 });

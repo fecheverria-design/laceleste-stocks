@@ -1,0 +1,1 @@
+ALTER TABLE "productos" ADD COLUMN "subfamilia" varchar(64);
