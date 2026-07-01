@@ -156,7 +156,18 @@ movimiento/stock aparece mal).
 1. **✅ INVENTARIO INICIAL — HECHO (2026-06-22)**. Se cargó la "foto" del inventario físico vía `import:inventario`. Quedó **0 negativos** en todo el sistema. **Decisión de J: stock real = solo FABRICA, pero los acopios se llevan EN PARALELO** (cada depósito de proveedor lleva su propio stock; ej. al recibir mercadería poniendo origen 210 Morrovalle en vez del 102 genérico, se descuenta del acopio del 210). El import enciende `lleva_stock` en todos los depósitos del archivo (15 hoy: FABRICA + 14 acopios). Cinco productos quedaron negativos en acopios (historial de 3c sin conteo) → **J decidió ponerlos en 0** (acopio agotado, un negativo es físicamente imposible). Detalle del importer en "FASE DE PRECISIÓN DE STOCK".
 2. **Estado de la importación de 3c** (corrida en el dev de J): productos, proveedores, ubicaciones y **15.849 movimientos** importados. Tipos mapeados: Rint→RINT, ReMe/Fcpr→RECEPCION, RINV→AJUSTE. **NCC queda afuera** (módulo facturas futuro). Solo FABRICA lleva stock (`npm run db:stock-en -- 1`). ⚠️ El dev tiene los datos REALES de J (no la demo).
 3. **🔴 ACCIÓN MANUAL DE J — cambiar default branch a `main` en GitHub**: `main` y `dev` ya están pusheados, pero `gh`/token no están. Settings → Branches → Default → `main`. Después borrar `feat/movimientos-fase0-setup`. PR de Fase 1: base `dev` ← `feat/movimientos-fase1-backend`.
-4. **Otros slices pendientes** (cuando se cierre el stock): idempotencia del POST de abastecimientos (+ API key M2M), export Excel / kardex, validación de form en el front, módulo de facturas (NCC).
+4. **Otros slices pendientes** (cuando se cierre el stock): módulo de facturas (NCC).
+   - ✅ **Idempotencia + API key M2M del POST de abastecimientos — HECHO** (commit `6505622`).
+   - ✅ **Export de listado a CSV/Excel — HECHO**: `GET /api/movimientos/export.csv` (mismos
+     filtros del listado) + botón "Exportar Excel" en el front. CSV afinado para Excel es-AR
+     (BOM UTF-8, separador `;`, coma decimal). **Decisión de J (2026-07-01): dejarlo así**
+     (no pasar a `.xlsx` nativo por ahora).
+   - ✅ **Validación del form (crear/editar) — HECHA y cableada**: `validar()`/`tieneErrores()`
+     en `movimientoForm.ts`, usada en `NuevoMovimientoPage` y `MovimientoDetallePage`; bloquea
+     el submit y muestra errores por campo (`MovimientoFormFields`). Refleja el schema Zod
+     (regla #8). **Decisión de J (2026-07-01): dejarla así** (no sumar chequeos finos).
+   - ⏳ **Kardex por producto** (libro mayor con saldo corriendo) — **el único real pendiente**
+     de este bloque; no pedido aún.
 5. **Setup**: Docker desde `D:\DockerData` (`docker compose up -d`). Backend `npm -w backend run dev` (3000) + front `npm -w frontend run dev` (5173) → http://localhost:5173. Login: `admin@laceleste.local` / `laceleste123`. Para volver a datos demo: `npm -w backend run db:reset` + `db:seed:dev`. Comandos de import: `import:productos|proveedores|ubicaciones|movimientos` y `db:stock-en`.
 
 ## 📥 Importación de Excel — productos (HECHO, falta proveedores y movimientos)
@@ -268,9 +279,10 @@ Branch `feat/movimientos-fase1-backend`.
 - Creadas y pusheadas `main` (desde scaffold Fase 0 = baseline desplegable) y `dev` (desde main). Falta el paso manual: setear `main` como default branch en GitHub (no hay `gh`/token). Las fases mergean por PR a `dev`; `dev`→`main` al liberar.
 
 ### ⏳ Pendiente en Fase 1 (próximos increments)
-- **POST /api/movimientos** (crear BORRADOR) + **PUT /:id/confirmar**, export Excel, kardex, sincronizar-3c.
-- **Idempotencia** del POST de abastecimientos + **API key** para asegurar ese endpoint M2M.
-- **GET /api/movimientos** (listado con filtros + paginado), **GET /api/movimientos/:id**, export Excel, kardex, sincronizar-3c.
+- **Kardex por producto** (libro mayor con saldo corriendo) — único real pendiente del bloque export.
+- **Sincronizar-3c** (empujar de vuelta a 3c / mapear `nro_3c`), si se decide hacerlo.
+- (Ya HECHO: listado con filtros+paginado, detalle, export CSV/Excel, idempotencia + API key M2M,
+  crear/editar/anular auto-confirmado. Ver arriba.)
 
 ### ❓ Supuestos del contrato del POST — VALIDAR con el compañero
 1. **Área destino** identificada por su `dep_id_3c` de 3c (campo `destino_dep_id_3c`).
