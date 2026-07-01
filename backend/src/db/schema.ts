@@ -57,6 +57,10 @@ export const productos = pgTable('productos', {
   subfamilia: varchar('subfamilia', { length: 64 }), // nullable; subrubro de 3c (sub-agrupa el conteo)
   presentacion: jsonb('presentacion'), // {"bulto":"bolsa","equivale":25,"unidad":"KG"} — puerta abierta
   activo: boolean('activo').notNull().default(true),
+  // true = artículo creado en NUESTRA app (no vino de 3c). Su codigo_3c es propio (continúa
+  // la numeración) y NO es un ID oficial de 3c → trazabilidad para mapear/corregir si 3c
+  // luego usa ese mismo número (matiz de la Regla #1, decisión de J).
+  creadoLocal: boolean('creado_local').notNull().default(false),
 });
 
 export const usuarios = pgTable('usuarios', {

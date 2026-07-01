@@ -1,0 +1,1 @@
+ALTER TABLE "productos" ADD COLUMN "creado_local" boolean DEFAULT false NOT NULL;
