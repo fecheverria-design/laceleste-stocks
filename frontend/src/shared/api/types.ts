@@ -15,6 +15,24 @@ export interface SesionResult {
   user: AuthUser;
 }
 
+// Maestro de artículos (productos).
+export interface Articulo {
+  codigo_3c: string;
+  nombre: string;
+  unidad_base: string;
+  familia: string | null;
+  subfamilia: string | null;
+  activo: boolean;
+  creado_local: boolean;
+}
+
+export interface ListaArticulos {
+  items: Articulo[];
+  page: number;
+  limit: number;
+  total: number;
+}
+
 export type EstadoMovimiento = 'BORRADOR' | 'CONFIRMADO' | 'ANULADO';
 
 export interface MovimientoResumen {
