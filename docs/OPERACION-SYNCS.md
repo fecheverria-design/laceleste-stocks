@@ -94,8 +94,52 @@ npm -w backend run sync:recepciones -- --desde=2026-06-20 --hasta=2026-06-30
   ```
   (0 filas = sin duplicados.)
 
+## Backups y recuperación
+
+**Dónde vive todo:** una sola base PostgreSQL 16 en Docker, en el volumen
+`laceleste_movimientos_pgdata`, que físicamente está en **D:**
+(`D:\DockerData\DockerDesktopWSL\disk\docker_data.vhdx`). No en C:. La base es chica (~30 MB).
+
+**Backup automático (ya configurado):** la tarea **`LaCeleste Backup DB`** corre
+`scripts\backup-db.ps1` **todos los días a las 13:00**. Hace un `pg_dump -Fc` (comprimido,
+~1,5 MB), lo **verifica** con `pg_restore -l` y lo copia a
+`C:\Users\MSI\Dropbox\laceleste-backups\` → **Dropbox lo sube a la nube (off-site)**. Rota
+solo: borra los de más de 14 días. Requiere Docker corriendo y **Dropbox abierto/logueado**.
+
+```powershell
+# Backup a mano cuando quieras (además del diario)
+powershell -ExecutionPolicy Bypass -File scripts\backup-db.ps1
+Get-Content logs\backup-db.log -Tail 20            # ver resultado
+Get-ScheduledTaskInfo -TaskName "LaCeleste Backup DB"
+```
+
+> ⚠️ **El backup depende de que Dropbox esté corriendo y sincronizando.** Cada tanto,
+> confirmá en el ícono de Dropbox que la carpeta `laceleste-backups` está al día (tilde
+> verde). Si Dropbox está cerrado, el dump queda solo local (no off-site).
+
+**Restaurar un backup** (recuperar la base de un `.dump`):
+
+```powershell
+# 1) Elegí el dump (de Dropbox\laceleste-backups) y copialo al contenedor
+docker cp "C:\Users\MSI\Dropbox\laceleste-backups\laceleste_YYYYMMDD_HHMM.dump" laceleste_movimientos_db:/tmp/restore.dump
+# 2) Restaurá encima de la base actual (--clean pisa lo que haya)
+docker exec laceleste_movimientos_db pg_restore -U laceleste -d laceleste_movimientos --clean --if-exists /tmp/restore.dump
+# 3) Refrescá la vista de stock
+docker exec laceleste_movimientos_db psql -U laceleste -d laceleste_movimientos -c "REFRESH MATERIALIZED VIEW stock_actual;"
+```
+
+**Recuperación total en una PC nueva** (si se pierde/rompe la máquina):
+1. Instalar Docker Desktop + clonar el repo + poner el `.env`.
+2. `docker compose up -d` (crea la base vacía con las migraciones del init).
+3. Bajar el último `.dump` de Dropbox y correr el `pg_restore` de arriba.
+
+**Trazabilidad:** dentro de la base, `movimientos_auditoria` guarda quién/cuándo/qué en cada
+edición, y toda anulación sella `anulado_por`/`anulado_en`. Esa historia viaja dentro del
+`.dump`, así que los backups también preservan el rastro de cambios.
+
 ## A futuro
 
 Cuando exista server propio (ej. `stock.laceleste.com.ar`, al lado de
 `produccion.laceleste.com.ar`), mover estos syncs a **cron** en ese server: siempre on, sin
 depender de la PC de J. La lógica (reconciliar + ventana móvil) no cambia; solo el disparador.
+El backup también convendría moverlo ahí (y/o a un bucket cloud) en esa etapa.
