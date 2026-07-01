@@ -72,6 +72,38 @@ después de la 1ª corrida. Resuelto:
   exige comparar contra lo ya materializado del día (bastante más laburo). Anotado; fuera de
   este paso. Se corrige a mano editando/anulando el movimiento en el front si pasa.
 
+## 🆕 Sesión 2026-07-01 (tarde) — Artículos + Inventarios (branch `feat/inventarios`)
+Feature nueva en su propia branch (aparte del PR de sync, que quedó en `feat/movimientos-fase1-backend`).
+
+### Fase A — Rubros en el maestro de productos (HECHO)
+- `productos` ahora tiene **`familia`** (ya existía, 0009) + **`subfamilia`** (migración `0011`).
+  `import:productos` captura FAMILIA/SUBFAMILIA (antes las ignoraba; si el archivo no trae la
+  columna, COALESCE conserva lo cargado). **Pendiente de J: re-correr `import:productos` con su
+  archivo** para completar rubros (hoy 469/1185 con familia). Familias reales: MATERIAS PRIMAS,
+  PACKAGING, LIMPIEZA, DESCARTABLES, MERCHANDISING (las 5 de insumos) + otras.
+
+### Increment B — Maestro de Artículos (HECHO)
+- Módulo `articulos`: `GET /api/articulos` (q/familia/activo + paginado), `/articulos/familias`,
+  `POST` (alta), `PUT /:codigo` (editar). Front: tab **Artículos** (buscar, filtrar por familia,
+  alta, edición, baja lógica). **Alta con código propio**: se autogenera continuando la numeración
+  de 3c (max(codigo_3c numérico)+1) con advisory lock; marca **`creado_local`** (migración `0012`).
+  **Decisión de J** (matiz Regla #1): 3c manda para los existentes; los nuevos siguen la numeración.
+  ⚠️ Riesgo residual: si 3c luego asigna ese mismo número a otro producto, el import lo pisaría; el
+  flag `creado_local` permite detectarlo. Mitigación futura: que el import avise/saltee esos.
+
+### Increment C — Inventarios (conteo físico → AJUSTE) (HECHO)
+- Tablas `inventarios` + `inventario_lineas` (migración `0013`). Endpoints: crear hoja (por depósito
+  + familias, default las 5 de insumos), listar, detalle (con stock vivo + diferencia + %), guardar
+  avances, agregar producto, descartar, **confirmar**. Front: tab **Inventarios** (lista + alta) y
+  hoja de conteo (input por producto, diferencia/% en vivo, Guardar/Confirmar).
+- **Confirmar** (reglas #5/#6, transaccional): por línea contada con diferencia genera un **AJUSTE
+  contra el balde 101** (delta>0 entrada 101→dep, delta<0 salida dep→101), deja el stock **exacto en
+  lo contado**, refresca, marca CONFIRMADO y linkea los movimientos. **Líneas sin contar se saltean**
+  (no se ponen en 0). Reusa la lógica de `import:inventario`. 9 tests (105 verdes en total).
+- ⚠️ Nota: el delta se calcula contra el stock **vivo al confirmar** → confirmar apenas se termina de
+  contar (si un sync entró mercadería en el medio, el conteo podría quedar viejo). Es el mismo modelo
+  que el conteo manual en 3c.
+
 ## 🔌 INTEGRACIÓN PULL app del compañero — PROBADA E2E (2026-06-30)
 Script `npm run sync:abastecimientos -- --fecha=YYYY-MM-DD [--dry]` (o `--desde/--hasta`)
 en `backend/src/db/sync-abastecimientos.ts` (commit `e2ae994`). Lee SU API REST
