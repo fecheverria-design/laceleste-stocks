@@ -84,7 +84,18 @@ function parseArgs(argv: string[]): { fechas: string[]; dry: boolean } {
   // Sin argumentos → VENTANA MÓVIL: hoy + N días atrás (default 2, VENTANA_DIAS_ATRAS).
   // Es el modo del scheduler: reconcilia lo reciente y autorrecupera días perdidos si la
   // PC estuvo apagada. Los días sin cambios son no-op (gracias al modo reconciliar).
-  return { fechas: ventanaMovil(diasAtrasEnv()), dry };
+  return { fechas: aplicarPiso(ventanaMovil(diasAtrasEnv())), dry };
+}
+
+// Piso de reconciliación: la ventana móvil NUNCA sincroniza fechas anteriores a SYNC_PISO
+// (YYYY-MM-DD). Es el corte con el histórico de 3c: lo <= piso lo cubre el import de 3c
+// (con nro_3c); el sync (sin nro_3c) sólo toca de ahí en adelante, sin solaparse ni
+// duplicar. No afecta --fecha/--desde/--hasta (cargas manuales explícitas).
+function aplicarPiso(fechas: string[]): string[] {
+  const piso = process.env.SYNC_PISO?.trim();
+  if (!piso) return fechas;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(piso)) throw new Error(`SYNC_PISO inválido: ${piso} (esperado YYYY-MM-DD)`);
+  return fechas.filter((f) => f >= piso);
 }
 
 // Cuántos días hacia atrás barre la ventana móvil (además de hoy). Default 2.
