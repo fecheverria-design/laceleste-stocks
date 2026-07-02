@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { db } from '../src/db/client.js';
+import { env } from '../src/config/env.js';
 import { AppError } from '../src/domain/errors.js';
 import { obtenerStock, registrarRecepcion } from '../src/services/movimientos.service.js';
 import { cerrarPool, limpiar, sembrarEscenario } from './helpers/db.js';
@@ -60,22 +61,29 @@ describe('registrarRecepcion (RECEPCION auto-confirmada)', () => {
   });
 
   it('usa DEPOSITO_PRINCIPAL como destino cuando no se pasa destino_dep_id_3c', async () => {
-    // El escenario siembra el depósito principal en dep 1 (= DEPOSITO_PRINCIPAL_DEP_ID_3C).
     const fx = await sembrarEscenario({ productos3c: ['401'] });
+    // El destino por defecto sale de env.DEPOSITO_PRINCIPAL_DEP_ID_3C. Lo fijamos acá
+    // (al depósito sembrado) para que el test NO dependa del .env del dev: en CI la
+    // variable no está seteada y antes esto hacía fallar la suite. Se restaura al final.
+    const prev = env.DEPOSITO_PRINCIPAL_DEP_ID_3C;
+    env.DEPOSITO_PRINCIPAL_DEP_ID_3C = fx.deposito.depId3c;
+    try {
+      const mov = await registrarRecepcion(
+        {
+          origen_dep_id_3c: fx.area.depId3c, // proveedor
+          detalle: [{ producto_3c: '401', cantidad_real: 50, unidad: 'UNIDAD' }],
+        },
+        { usuarioId: fx.usuarioId },
+      );
 
-    const mov = await registrarRecepcion(
-      {
-        origen_dep_id_3c: fx.area.depId3c, // proveedor
-        detalle: [{ producto_3c: '401', cantidad_real: 50, unidad: 'UNIDAD' }],
-      },
-      { usuarioId: fx.usuarioId },
-    );
-
-    expect(mov.estado).toBe('CONFIRMADO');
-    const stock = await obtenerStock({ producto3c: '401' });
-    expect(stock).toHaveLength(1);
-    expect(stock[0]!.ubicacion_id).toBe(fx.deposito.id); // cayó a FABRICA (dep 1)
-    expect(stock[0]!.cantidad).toBe(50);
+      expect(mov.estado).toBe('CONFIRMADO');
+      const stock = await obtenerStock({ producto3c: '401' });
+      expect(stock).toHaveLength(1);
+      expect(stock[0]!.ubicacion_id).toBe(fx.deposito.id); // cayó al depósito principal
+      expect(stock[0]!.cantidad).toBe(50);
+    } finally {
+      env.DEPOSITO_PRINCIPAL_DEP_ID_3C = prev;
+    }
   });
 
   it('falla si un producto no existe y NO deja movimiento (rollback de validación)', async () => {
