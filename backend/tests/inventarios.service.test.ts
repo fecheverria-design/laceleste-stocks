@@ -10,8 +10,8 @@ import {
 } from '../src/services/inventarios.service.js';
 import { cerrarPool, limpiar, sembrarEscenario } from './helpers/db.js';
 
-// Inventario (conteo físico → AJUSTE). Al confirmar, el stock queda EXACTO en lo contado
-// por cada línea con diferencia; las no contadas se saltean (no se ponen en 0).
+// Inventario (conteo físico → movimiento INVENTARIO). Al confirmar, el stock queda EXACTO
+// en lo contado por cada línea con diferencia; las no contadas se saltean (no se ponen en 0).
 
 // Escenario: depósito (dep 1) con stock inicial de 3 productos PACKAGING + 1 MATERIAS PRIMAS.
 // El stock se siembra con una RECEPCION desde el área (que no lleva stock) hacia el depósito.
@@ -45,7 +45,7 @@ const stockDe = async (producto3c: string): Promise<number> => {
   return s[0]?.cantidad ?? 0;
 };
 
-describe('inventarios (conteo físico → AJUSTE)', () => {
+describe('inventarios (conteo físico → INVENTARIO)', () => {
   beforeEach(limpiar);
   afterAll(cerrarPool);
 
@@ -63,7 +63,7 @@ describe('inventarios (conteo físico → AJUSTE)', () => {
     expect(l401.diferencia).toBeNull();
   });
 
-  it('confirmar con contado > sistema genera AJUSTE de entrada y deja el stock en lo contado', async () => {
+  it('confirmar con contado > sistema genera INVENTARIO de entrada y deja el stock en lo contado', async () => {
     const fx = await escenario();
     const inv = await crearInventario({ ubicacion_id: fx.deposito.id, fecha: '2026-07-05', familias: ['PACKAGING'] }, fx.usuarioId);
     await guardarLineas(inv.id, { lineas: [{ producto_3c: '401', cantidad_contada: 120 }] });
@@ -73,11 +73,11 @@ describe('inventarios (conteo físico → AJUSTE)', () => {
     expect(res.inventario.estado).toBe('CONFIRMADO');
     expect(res.resumen.renglones_entrada).toBe(1);
     expect(res.resumen.renglones_salida).toBe(0);
-    expect(res.resumen.entrada_nro).toMatch(/^AJU-\d{4}-\d{5}$/);
+    expect(res.resumen.entrada_nro).toMatch(/^INV-\d{4}-\d{5}$/);
     expect(await stockDe('401')).toBe(120); // 100 + 20
   });
 
-  it('confirmar con contado < sistema genera AJUSTE de salida', async () => {
+  it('confirmar con contado < sistema genera INVENTARIO de salida', async () => {
     const fx = await escenario();
     const inv = await crearInventario({ ubicacion_id: fx.deposito.id, fecha: '2026-07-05', familias: ['PACKAGING'] }, fx.usuarioId);
     await guardarLineas(inv.id, { lineas: [{ producto_3c: '402', cantidad_contada: 40 }] });
@@ -85,7 +85,7 @@ describe('inventarios (conteo físico → AJUSTE)', () => {
     const res = await confirmarInventario(inv.id, fx.usuarioId);
 
     expect(res.resumen.renglones_salida).toBe(1);
-    expect(res.resumen.salida_nro).toMatch(/^AJU-\d{4}-\d{5}$/);
+    expect(res.resumen.salida_nro).toMatch(/^INV-\d{4}-\d{5}$/);
     expect(await stockDe('402')).toBe(40); // 50 − 10
   });
 

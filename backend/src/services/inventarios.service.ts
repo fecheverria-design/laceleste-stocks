@@ -154,8 +154,8 @@ export async function eliminarInventario(id: number): Promise<void> {
 export interface ResultadoConfirmacion {
   inventario: InventarioDetalle;
   resumen: {
-    entrada_nro: string | null; // AJUSTE que SUMA (faltaba stock: contado > sistema)
-    salida_nro: string | null; // AJUSTE que RESTA (sobraba: contado < sistema)
+    entrada_nro: string | null; // INVENTARIO que SUMA (faltaba stock: contado > sistema)
+    salida_nro: string | null; // INVENTARIO que RESTA (sobraba: contado < sistema)
     renglones_entrada: number;
     renglones_salida: number;
     sin_cambio: number; // contados que ya coincidían
@@ -164,7 +164,7 @@ export interface ResultadoConfirmacion {
 }
 
 // Confirma el inventario (regla #6, transaccional): por cada línea CONTADA con diferencia,
-// genera un AJUSTE contra el balde 101 para dejar el stock exacto en lo contado (regla #5:
+// genera un movimiento INVENTARIO contra el balde 101 para dejar el stock exacto en lo contado (regla #5:
 // mueve stock → con tests). delta = contado − sistema(vivo). delta>0 → entrada (101→dep);
 // delta<0 → salida (dep→101). Líneas sin contar se SALTEAN (no se ponen en 0). El resumen
 // se calcula DENTRO de la tx (antes del refresh) porque después las diferencias son 0.
@@ -201,14 +201,17 @@ export async function confirmarInventario(id: number, usuarioId: number): Promis
     let salidaNro: string | null = null;
 
     if (entradas.length > 0 || salidas.length > 0) {
-      const tipo = await tipoPorCodigo(tx, 'AJUSTE');
-      if (!tipo) throw new Error('Falta el tipo AJUSTE en tipos_movimiento (corré el seed)');
+      // El conteo confirmado es un RECUENTO, no un ajuste operativo: va con tipo
+      // INVENTARIO para no mezclarse con los AJUSTE del día a día (decisión de J,
+      // 2026-07-01). El efecto en stock es el mismo (dirección contra el balde 101).
+      const tipo = await tipoPorCodigo(tx, 'INVENTARIO');
+      if (!tipo) throw new Error('Falta el tipo INVENTARIO en tipos_movimiento (corré db:migrate y el seed)');
       const balde = await asegurarBalde101(tx);
       const anio = Number(inv.fecha.slice(0, 4));
       const obs = `Inventario #${id} (${inv.fecha})`;
 
       if (entradas.length > 0) {
-        entradaNro = await generarNro(tx, 'AJUSTE', anio);
+        entradaNro = await generarNro(tx, 'INVENTARIO', anio);
         movEntradaId = await crearAjuste(tx, {
           nro: entradaNro,
           tipoId: tipo.id,
@@ -221,7 +224,7 @@ export async function confirmarInventario(id: number, usuarioId: number): Promis
         });
       }
       if (salidas.length > 0) {
-        salidaNro = await generarNro(tx, 'AJUSTE', anio);
+        salidaNro = await generarNro(tx, 'INVENTARIO', anio);
         movSalidaId = await crearAjuste(tx, {
           nro: salidaNro,
           tipoId: tipo.id,
