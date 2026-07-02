@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import { db, pool } from './client.js';
 import { compras, productos, proveedores } from './schema.js';
 import { parseDelimited } from './csv.js';
+import { esCompraReal } from '../domain/familias.js';
 import { resolverUsuarioIntegracion } from '../repositories/movimientos.repository.js';
 
 // Importa las COMPRAS reales a proveedores (base del gasto por proveedor). Una fila = un
@@ -13,6 +14,10 @@ import { resolverUsuarioIntegracion } from '../repositories/movimientos.reposito
 //
 // Idempotente: upsert por (numero, producto_3c). Auto-crea productos (y setea su familia)
 // y proveedores faltantes. Uso: npm run import:compras -- <archivo> [--dry]
+//
+// Excluye las familias que NO son compras reales (SERVICIOS, TRANSPORTE TERCERIZADO,
+// AJUSTE DE SALDO, GASTOS SOCIOS, IMPUESTOS, GASTOS BANCARIOS — ver domain/familias.ts):
+// no entran al gasto por proveedor.
 
 function parseFecha(s: string): string | null {
   const m = s.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
@@ -80,6 +85,7 @@ async function main(archivo: string, dry: boolean): Promise<void> {
 
   const porClave = new Map<string, FilaCompra>();
   let saltadas = 0;
+  let excluidasFamilia = 0;
   for (let i = 1; i < filas.length; i++) {
     const f = filas[i]!;
     const numero = c(f, col.NUMERO);
@@ -93,6 +99,13 @@ async function main(archivo: string, dry: boolean): Promise<void> {
       saltadas++;
       continue;
     }
+    const familia = c(f, col.FAMILIA).slice(0, 64);
+    // Familias que no son compras reales (servicios, flete tercerizado, ajuste de
+    // saldo) no cuentan en el gasto (ver domain/familias.ts, decisión de J 2026-07-01).
+    if (!esCompraReal(familia)) {
+      excluidasFamilia++;
+      continue;
+    }
     const ivaRaw = c(f, col.IVA);
     const totalRaw = c(f, col.VALOR_TOTAL);
     porClave.set(`${numero}|${producto3c}`, {
@@ -100,7 +113,7 @@ async function main(archivo: string, dry: boolean): Promise<void> {
       fecha,
       producto3c,
       nombre: c(f, col.DENOMINACION).slice(0, 200) || `Art ${producto3c}`,
-      familia: c(f, col.FAMILIA).slice(0, 64),
+      familia,
       proveedorNum,
       proveedorNombre: c(f, col.PROVEEDOR).slice(0, 150) || `Proveedor ${proveedorNum}`,
       cantidad: Number.isFinite(cantidad) ? cantidad : 0,
@@ -121,7 +134,7 @@ async function main(archivo: string, dry: boolean): Promise<void> {
 
   const gastoTotal = registros.reduce((a, r) => a + r.precioTotal, 0);
   console.log(
-    `Filas: ${filas.length - 1} · compras válidas: ${registros.length} · saltadas: ${saltadas} · productos: ${prods.size} · proveedores: ${provs.size} · gasto neto total: $${gastoTotal.toLocaleString('es-AR')}`,
+    `Filas: ${filas.length - 1} · compras válidas: ${registros.length} · saltadas: ${saltadas} · excluidas por familia (no compra real): ${excluidasFamilia} · productos: ${prods.size} · proveedores: ${provs.size} · gasto neto total: $${gastoTotal.toLocaleString('es-AR')}`,
   );
   if (dry) {
     console.log('— DRY RUN: no se escribió nada. Muestra (primeras 5):');
