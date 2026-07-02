@@ -7,6 +7,7 @@ import {
   obtenerFamilias,
   obtenerGastoMensual,
   obtenerGastoProveedores,
+  obtenerProductosProveedor,
   obtenerProveedores,
 } from '../services/proveedores.service.js';
 
@@ -36,6 +37,15 @@ export async function getGastoMensual(req: Request, res: Response): Promise<void
     throw badRequest('VALIDACION', z.prettifyError(parsed.error));
   }
   res.status(200).json(await obtenerGastoMensual(parsed.data));
+}
+
+// GET /api/proveedores/:id/productos — detalle de productos que le compramos (de qué es el gasto).
+export async function getProductosProveedor(req: Request, res: Response): Promise<void> {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    throw badRequest('VALIDACION', 'id de proveedor inválido');
+  }
+  res.status(200).json(await obtenerProductosProveedor(id));
 }
 
 // POST /api/proveedores — alta (numero_3c obligatorio).

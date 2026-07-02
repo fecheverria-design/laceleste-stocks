@@ -21,3 +21,28 @@ const EXCLUIDAS = new Set<string>(FAMILIAS_NO_COMPRA.map((f) => f.toUpperCase())
 export function esCompraReal(familia: string | null | undefined): boolean {
   return !EXCLUIDAS.has((familia ?? '').trim().toUpperCase());
 }
+
+// Familias que NO se muestran en el GRÁFICO de gasto por proveedor: las que no son compra
+// real (arriba) + los productos esporádicos (compras no recurrentes, no de insumos
+// productivos, que J no quiere en el gráfico). Decisión de J, 2026-07-02.
+export const FAMILIAS_EXCLUIDAS_GASTO = [...FAMILIAS_NO_COMPRA, 'PRODUCTOS ESPORADICOS'] as const;
+
+// Productos FICTICIOS / de prueba (por codigo_3c): no cuentan en NINGÚN reporte de plata —
+// ni gasto, ni valorización del Panel. PRUEBA (480) tenía ~$12 M de compras falsas y stock
+// inventado. Decisión de J, 2026-07-02.
+export const PRODUCTOS_FICTICIOS = ['480'] as const;
+
+const FAMILIAS_GASTO_SET = new Set<string>(FAMILIAS_EXCLUIDAS_GASTO.map((f) => f.toUpperCase()));
+const FICTICIOS_SET = new Set<string>(PRODUCTOS_FICTICIOS);
+
+// true si el producto NO es ficticio (cuenta en la valorización / Panel y demás reportes).
+export function esProductoReal(codigo3c: string): boolean {
+  return !FICTICIOS_SET.has(codigo3c);
+}
+
+// true si esa compra (por familia del producto + código) cuenta en el gráfico de gasto.
+// Un producto sin familia se conserva (no cae en la lista de familias excluidas).
+export function cuentaEnGasto(familia: string | null | undefined, codigo3c: string): boolean {
+  if (FICTICIOS_SET.has(codigo3c)) return false;
+  return !FAMILIAS_GASTO_SET.has((familia ?? '').trim().toUpperCase());
+}

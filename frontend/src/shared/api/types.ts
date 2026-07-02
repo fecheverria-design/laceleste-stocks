@@ -285,6 +285,14 @@ export interface GastoProveedor {
   compras: number;
   gasto_neto: string;
 }
+// Detalle de un proveedor: productos que le compramos (de qué es su gasto).
+export interface ProductoDeProveedor {
+  producto_3c: string;
+  producto_nombre: string;
+  familia: string | null;
+  compras: number;
+  gasto_neto: string;
+}
 export interface GastoMes {
   mes: string; // YYYY-MM
   gasto_neto: string;

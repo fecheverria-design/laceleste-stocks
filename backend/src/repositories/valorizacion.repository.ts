@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
+import { PRODUCTOS_FICTICIOS } from '../domain/familias.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Valorización del stock = cantidad (stock_actual) × precio vigente del producto.
@@ -28,6 +29,11 @@ const CTE = sql`
     FROM stock_actual s
     JOIN vig ON vig.producto_3c = s.producto_3c
     WHERE s.cantidad > 0
+      -- Los productos ficticios/de prueba no valorizan (ver domain/familias.ts).
+      AND s.producto_3c NOT IN (${sql.join(
+        PRODUCTOS_FICTICIOS.map((cod) => sql`${cod}`),
+        sql`, `,
+      )})
   )`;
 
 export type ValorPorDeposito = {

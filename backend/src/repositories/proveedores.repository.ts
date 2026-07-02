@@ -1,11 +1,27 @@
 import { eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { proveedores } from '../db/schema.js';
+import { FAMILIAS_EXCLUIDAS_GASTO, PRODUCTOS_FICTICIOS } from '../domain/familias.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Proveedores + su gasto (de la tabla `compras`). El gasto se mide por `precio_total`
 // (neto, sin IVA). Las familias salen de productos.familia de lo que se le compró.
+//
+// El gráfico de gasto muestra SOLO compras de insumos reales: excluye las familias que no
+// son compra (servicios, ajustes, impuestos…), los productos esporádicos y los productos
+// de prueba (ver domain/familias.ts, decisión de J 2026-07-02). El filtro va a nivel query
+// porque estas compras se cargaron ANTES de que existiera la regla en el import.
 // ─────────────────────────────────────────────────────────────────────────────
+
+// Condición SQL de "cuenta en el gasto". Requiere alias `c` (compras) y `p` (productos).
+// Un producto sin familia se conserva (no cae en la lista de familias excluidas).
+const CUENTA_EN_GASTO = sql`c.producto_3c NOT IN (${sql.join(
+  PRODUCTOS_FICTICIOS.map((cod) => sql`${cod}`),
+  sql`, `,
+)}) AND (p.familia IS NULL OR upper(p.familia) NOT IN (${sql.join(
+  FAMILIAS_EXCLUIDAS_GASTO.map((f) => sql`${f}`),
+  sql`, `,
+)}))`;
 
 export type FilaProveedor = {
   id: number;
@@ -19,16 +35,18 @@ export type FilaProveedor = {
 
 // Lista de proveedores con su gasto total y las familias que le compramos.
 export async function listarProveedores(): Promise<FilaProveedor[]> {
+  // FILTER en las agregaciones: el proveedor sigue apareciendo aunque su único gasto sea de
+  // familias/productos excluidos (queda en 0), pero esas compras no suman al gasto ni a las familias.
   const res = await db.execute<FilaProveedor>(
     sql`SELECT pv.id, pv.numero_3c, pv.nombre, pv.cuit,
-               count(c.id)::int AS compras,
-               COALESCE(sum(c.precio_total), 0)::text AS gasto_neto,
-               array_remove(array_agg(DISTINCT p.familia), NULL) AS familias
+               count(c.id) FILTER (WHERE ${CUENTA_EN_GASTO})::int AS compras,
+               COALESCE(sum(c.precio_total) FILTER (WHERE ${CUENTA_EN_GASTO}), 0)::text AS gasto_neto,
+               array_remove(array_agg(DISTINCT p.familia) FILTER (WHERE ${CUENTA_EN_GASTO}), NULL) AS familias
         FROM proveedores pv
         LEFT JOIN compras c ON c.proveedor_id = pv.id
         LEFT JOIN productos p ON p.codigo_3c = c.producto_3c
         GROUP BY pv.id, pv.numero_3c, pv.nombre, pv.cuit
-        ORDER BY sum(c.precio_total) DESC NULLS LAST, pv.nombre`,
+        ORDER BY sum(c.precio_total) FILTER (WHERE ${CUENTA_EN_GASTO}) DESC NULLS LAST, pv.nombre`,
   );
   return res.rows;
 }
@@ -48,7 +66,7 @@ export async function gastoPorProveedorFamilia(filtros: {
   desde?: string;
   hasta?: string;
 }): Promise<GastoProveedor[]> {
-  const conds = [sql`c.proveedor_id IS NOT NULL`];
+  const conds = [sql`c.proveedor_id IS NOT NULL`, CUENTA_EN_GASTO];
   if (filtros.familia) conds.push(sql`p.familia = ${filtros.familia}`);
   if (filtros.desde) conds.push(sql`c.fecha >= ${filtros.desde}`);
   if (filtros.hasta) conds.push(sql`c.fecha <= ${filtros.hasta}`);
@@ -67,6 +85,33 @@ export async function gastoPorProveedorFamilia(filtros: {
   return res.rows;
 }
 
+export type ProductoDeProveedor = {
+  producto_3c: string;
+  producto_nombre: string;
+  familia: string | null;
+  compras: number;
+  gasto_neto: string;
+};
+
+// Productos que le compramos a un proveedor (el detalle de "de qué es" su gasto).
+// Mismo filtro que la lista (solo compras reales) y SIN período → suma exactamente igual
+// que la columna "Gasto neto" de listarProveedores. Ordenado por gasto desc.
+export async function productosPorProveedor(proveedorId: number): Promise<ProductoDeProveedor[]> {
+  const res = await db.execute<ProductoDeProveedor>(
+    sql`SELECT c.producto_3c,
+               COALESCE(p.nombre, '(sin maestro)') AS producto_nombre,
+               p.familia,
+               count(c.id)::int AS compras,
+               sum(c.precio_total)::text AS gasto_neto
+        FROM compras c
+        LEFT JOIN productos p ON p.codigo_3c = c.producto_3c
+        WHERE c.proveedor_id = ${proveedorId} AND ${CUENTA_EN_GASTO}
+        GROUP BY c.producto_3c, p.nombre, p.familia
+        ORDER BY sum(c.precio_total) DESC NULLS LAST`,
+  );
+  return res.rows;
+}
+
 export type GastoMes = { mes: string; gasto_neto: string; compras: number };
 
 // Gasto neto por mes (YYYY-MM), filtrable por familia y rango. Para la vista mensual.
@@ -75,7 +120,7 @@ export async function gastoMensual(filtros: {
   desde?: string;
   hasta?: string;
 }): Promise<GastoMes[]> {
-  const conds = [sql`TRUE`];
+  const conds = [CUENTA_EN_GASTO];
   if (filtros.familia) conds.push(sql`p.familia = ${filtros.familia}`);
   if (filtros.desde) conds.push(sql`c.fecha >= ${filtros.desde}`);
   if (filtros.hasta) conds.push(sql`c.fecha <= ${filtros.hasta}`);
@@ -91,10 +136,17 @@ export async function gastoMensual(filtros: {
   return res.rows;
 }
 
-// Familias distintas (para el filtro del gráfico).
+// Familias distintas para el filtro del gráfico. Deja fuera las familias excluidas del
+// gasto, así no aparecen como opción (serían siempre 0).
 export async function listarFamilias(): Promise<string[]> {
   const res = await db.execute<{ familia: string }>(
-    sql`SELECT DISTINCT familia FROM productos WHERE familia IS NOT NULL ORDER BY familia`,
+    sql`SELECT DISTINCT familia FROM productos
+        WHERE familia IS NOT NULL
+          AND upper(familia) NOT IN (${sql.join(
+            FAMILIAS_EXCLUIDAS_GASTO.map((f) => sql`${f}`),
+            sql`, `,
+          )})
+        ORDER BY familia`,
   );
   return res.rows.map((r) => r.familia);
 }
