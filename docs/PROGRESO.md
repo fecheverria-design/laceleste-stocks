@@ -322,6 +322,14 @@ Branch `feat/movimientos-fase1-backend`.
 3. **Renglón**: `producto_3c`, `cantidad_real` (oblig.), `cantidad_sugerida`/`stock_contado` (opc.), `unidad`.
 4. **Idempotencia**: NO implementada. Si la app del compañero re-empuja el mismo abastecimiento, se duplica. Falta acordar un id externo único para deduplicar (recomendado: que su app mande su propio id y lo guardemos para rechazar duplicados).
 
+## 📥 Carga de datos reales de 3c + tipo INVENTARIO (2026-07-01)
+- **Maestro de productos** re-importado (`import:productos`): 1187 productos, 1186 con familia (antes 469), 201 con bulto (U>1), 360 ABC, 272 presentación. 999 filas plantilla vacías saltadas.
+- **Precios** cargados (`import:precios`, archivo COMPRAS+VARIACIONES): 13.288 (9.506 compras + 3.782 variaciones), 658 productos con precio, 702 proveedores, rango 02/2024–06/2026.
+- **Exclusión de familias que NO son compra real** (`domain/familias.ts` → `FAMILIAS_NO_COMPRA`): SERVICIOS, TRANSPORTE TERCERIZADO, AJUSTE DE SALDO, GASTOS SOCIOS, IMPUESTOS, GASTOS BANCARIOS. `import:compras` las excluye del gasto por proveedor. 5 tests. Decisión de J.
+- **Stock al día** cargado (`import:inventario --exclusivo`, STOCKSDEFINITIVO al 01/07): 15 depósitos (FABRICA + acopios), 577 productos contados. Con `--exclusivo`, 5 frescos no listados (BANANA/GRANOLA/MANDARINA/MANZANA/esporádico obras) → 0. `import:inventario` ahora acepta alias `ARTICULO` para el código.
+- **Tipo de movimiento `INVENTARIO`** (mig. `0015`, catálogo, `signo_stock` 0, correlativo `INV-`): el recuento/carga de foto queda **separado** del AJUSTE operativo (no se mezclan en reportes/kardex). Lo usan `import:inventario` y el módulo Inventarios (confirmar conteo). El efecto en stock es el mismo (dirección contra balde 101; la vista `stock_actual` no mira el tipo). Decisión de J.
+- **Pendiente**: `PAPEL MANTECA 36X40` (dep 1) quedó en **-0,004** porque el archivo lo trae así (única fila negativa del archivo); corregir a 0 en el origen o con un recuento puntual → dejar 0 negativos.
+
 ## 🧷 Recordatorios sueltos (cancha de J)
 - **C: del equipo de J está al límite (~99% usado).** Conviene una limpieza a fondo del disco del sistema (Docker Desktop, descargas) cuando haya un rato; el cierre de Fase 0 necesitó liberar npm-cache+Temp para tener aire.
 - Definir el **contrato fino del POST** con el compañero (campos exactos, auth, idempotencia si re-empuja el mismo abastecimiento).
