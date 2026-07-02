@@ -15,6 +15,16 @@ const COLORS = ['#0284c7', '#0ea5e9', '#06b6d4', '#14b8a6', '#22c55e', '#84cc16'
 const inputCls =
   'rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500';
 
+// Querystring de filtros (familia + período), compartido por la lista, los gráficos y el detalle.
+function buildQs(familia: string, desde: string, hasta: string): string {
+  const p = new URLSearchParams();
+  if (familia) p.set('familia', familia);
+  if (desde) p.set('desde', desde);
+  if (hasta) p.set('hasta', hasta);
+  const s = p.toString();
+  return s ? `?${s}` : '';
+}
+
 export function ProveedoresPage() {
   const queryClient = useQueryClient();
   const [familia, setFamilia] = useState(''); // '' = todas
@@ -23,21 +33,17 @@ export function ProveedoresPage() {
   const [texto, setTexto] = useState('');
 
   // Querystring de filtros del gasto (familia + período).
-  const gastoQs = () => {
-    const p = new URLSearchParams();
-    if (familia) p.set('familia', familia);
-    if (desde) p.set('desde', desde);
-    if (hasta) p.set('hasta', hasta);
-    const s = p.toString();
-    return s ? `?${s}` : '';
-  };
+  const gastoQs = () => buildQs(familia, desde, hasta);
   // Alta
   const [nuevoNum, setNuevoNum] = useState('');
   const [nuevoNombre, setNuevoNombre] = useState('');
   const [nuevoCuit, setNuevoCuit] = useState('');
   const [mostrarAlta, setMostrarAlta] = useState(false);
 
-  const proveedores = useQuery({ queryKey: ['proveedores'], queryFn: () => apiGet<Proveedor[]>('/api/proveedores') });
+  const proveedores = useQuery({
+    queryKey: ['proveedores', familia, desde, hasta],
+    queryFn: () => apiGet<Proveedor[]>(`/api/proveedores${gastoQs()}`),
+  });
   const familias = useQuery({ queryKey: ['familias'], queryFn: () => apiGet<string[]>('/api/familias') });
   const gasto = useQuery({
     queryKey: ['gasto-proveedores', familia, desde, hasta],
@@ -270,7 +276,7 @@ export function ProveedoresPage() {
               </tr>
             )}
             {filas.map((p) => (
-              <FilaProveedor key={p.id} p={p} />
+              <FilaProveedor key={p.id} p={p} familia={familia} desde={desde} hasta={hasta} />
             ))}
           </tbody>
         </table>
@@ -280,12 +286,13 @@ export function ProveedoresPage() {
 }
 
 // Fila de proveedor expandible: al clickearla despliega los productos que le compramos
-// (de qué es su gasto). La query del detalle se dispara solo al abrir (enabled).
-function FilaProveedor({ p }: { p: Proveedor }) {
+// (de qué es su gasto). La query del detalle se dispara solo al abrir (enabled) y respeta
+// los filtros de familia/período de la barra (queryKey incluye los filtros → refetch al cambiarlos).
+function FilaProveedor({ p, familia, desde, hasta }: { p: Proveedor; familia: string; desde: string; hasta: string }) {
   const [abierto, setAbierto] = useState(false);
   const productos = useQuery({
-    queryKey: ['proveedor-productos', p.id],
-    queryFn: () => apiGet<ProductoDeProveedor[]>(`/api/proveedores/${p.id}/productos`),
+    queryKey: ['proveedor-productos', p.id, familia, desde, hasta],
+    queryFn: () => apiGet<ProductoDeProveedor[]>(`/api/proveedores/${p.id}/productos${buildQs(familia, desde, hasta)}`),
     enabled: abierto,
   });
   const items = productos.data ?? [];
@@ -316,7 +323,9 @@ function FilaProveedor({ p }: { p: Proveedor }) {
             ) : productos.isError ? (
               <p className="text-xs text-rose-600">No se pudo cargar el detalle.</p>
             ) : items.length === 0 ? (
-              <p className="text-xs text-slate-500">Sin compras de insumos reales para este proveedor.</p>
+              <p className="text-xs text-slate-500">
+                Sin compras de insumos reales para este proveedor{familia || desde || hasta ? ' en el filtro elegido' : ''}.
+              </p>
             ) : (
               <table className="w-full text-xs">
                 <thead>

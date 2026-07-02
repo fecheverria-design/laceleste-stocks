@@ -23,6 +23,18 @@ const CUENTA_EN_GASTO = sql`c.producto_3c NOT IN (${sql.join(
   sql`, `,
 )}))`;
 
+// Filtros opcionales de la vista de proveedores (misma barra que los gráficos).
+export type FiltrosGasto = { familia?: string; desde?: string; hasta?: string };
+
+// "Cuenta en el gasto" + filtros opcionales de familia/período. Requiere alias `c` y `p`.
+function condGasto(filtros?: FiltrosGasto) {
+  const parts = [CUENTA_EN_GASTO];
+  if (filtros?.familia) parts.push(sql`p.familia = ${filtros.familia}`);
+  if (filtros?.desde) parts.push(sql`c.fecha >= ${filtros.desde}`);
+  if (filtros?.hasta) parts.push(sql`c.fecha <= ${filtros.hasta}`);
+  return sql.join(parts, sql` AND `);
+}
+
 export type FilaProveedor = {
   id: number;
   numero_3c: number | null;
@@ -33,20 +45,21 @@ export type FilaProveedor = {
   familias: string[] | null;
 };
 
-// Lista de proveedores con su gasto total y las familias que le compramos.
-export async function listarProveedores(): Promise<FilaProveedor[]> {
-  // FILTER en las agregaciones: el proveedor sigue apareciendo aunque su único gasto sea de
-  // familias/productos excluidos (queda en 0), pero esas compras no suman al gasto ni a las familias.
+// Lista de proveedores con su gasto y las familias que le compramos. Los filtros de
+// familia/período (misma barra que los gráficos) recortan las agregaciones: compras,
+// gasto y familias reflejan solo lo que entra al filtro; el proveedor igual aparece.
+export async function listarProveedores(filtros?: FiltrosGasto): Promise<FilaProveedor[]> {
+  const cond = condGasto(filtros);
   const res = await db.execute<FilaProveedor>(
     sql`SELECT pv.id, pv.numero_3c, pv.nombre, pv.cuit,
-               count(c.id) FILTER (WHERE ${CUENTA_EN_GASTO})::int AS compras,
-               COALESCE(sum(c.precio_total) FILTER (WHERE ${CUENTA_EN_GASTO}), 0)::text AS gasto_neto,
-               array_remove(array_agg(DISTINCT p.familia) FILTER (WHERE ${CUENTA_EN_GASTO}), NULL) AS familias
+               count(c.id) FILTER (WHERE ${cond})::int AS compras,
+               COALESCE(sum(c.precio_total) FILTER (WHERE ${cond}), 0)::text AS gasto_neto,
+               array_remove(array_agg(DISTINCT p.familia) FILTER (WHERE ${cond}), NULL) AS familias
         FROM proveedores pv
         LEFT JOIN compras c ON c.proveedor_id = pv.id
         LEFT JOIN productos p ON p.codigo_3c = c.producto_3c
         GROUP BY pv.id, pv.numero_3c, pv.nombre, pv.cuit
-        ORDER BY sum(c.precio_total) FILTER (WHERE ${CUENTA_EN_GASTO}) DESC NULLS LAST, pv.nombre`,
+        ORDER BY sum(c.precio_total) FILTER (WHERE ${cond}) DESC NULLS LAST, pv.nombre`,
   );
   return res.rows;
 }
@@ -94,9 +107,13 @@ export type ProductoDeProveedor = {
 };
 
 // Productos que le compramos a un proveedor (el detalle de "de qué es" su gasto).
-// Mismo filtro que la lista (solo compras reales) y SIN período → suma exactamente igual
-// que la columna "Gasto neto" de listarProveedores. Ordenado por gasto desc.
-export async function productosPorProveedor(proveedorId: number): Promise<ProductoDeProveedor[]> {
+// Mismo filtro de compras reales + los filtros de familia/período de la barra → recorta
+// igual que la lista, así la suma del detalle cuadra con la columna "Gasto neto".
+// `compras` = cuántas veces se le compró ese producto en el período. Ordenado por gasto desc.
+export async function productosPorProveedor(
+  proveedorId: number,
+  filtros?: FiltrosGasto,
+): Promise<ProductoDeProveedor[]> {
   const res = await db.execute<ProductoDeProveedor>(
     sql`SELECT c.producto_3c,
                COALESCE(p.nombre, '(sin maestro)') AS producto_nombre,
@@ -105,7 +122,7 @@ export async function productosPorProveedor(proveedorId: number): Promise<Produc
                sum(c.precio_total)::text AS gasto_neto
         FROM compras c
         LEFT JOIN productos p ON p.codigo_3c = c.producto_3c
-        WHERE c.proveedor_id = ${proveedorId} AND ${CUENTA_EN_GASTO}
+        WHERE c.proveedor_id = ${proveedorId} AND ${condGasto(filtros)}
         GROUP BY c.producto_3c, p.nombre, p.familia
         ORDER BY sum(c.precio_total) DESC NULLS LAST`,
   );
