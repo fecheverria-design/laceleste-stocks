@@ -106,6 +106,7 @@ export interface MovimientoResumen {
   destino_id: number;
   destino_dep_id_3c: number;
   destino_nombre: string;
+  proveedor_nombre: string | null; // solo RECEPCION; null en el resto
   usuario_id: number;
   creado_en: string | null;
   confirmado_en: string | null;
@@ -190,6 +191,9 @@ export interface MovimientoDetalle {
   destino_id: number;
   destino_dep_id_3c: number;
   destino_nombre: string;
+  proveedor_id: number | null;
+  proveedor_nombre: string | null;
+  proveedor_numero_3c: number | null;
   confirmado_en: string | null;
   anulado_en: string | null;
   detalle: RenglonDetalle[];

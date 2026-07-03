@@ -71,7 +71,9 @@ function partesFechaHora(): { fecha: string; hora: string; anio: number } {
 type AutoConfirmadoInput = Pick<
   AbastecimientoInput,
   'fecha' | 'turno' | 'proyeccion' | 'observaciones' | 'idempotency_key' | 'detalle'
->;
+> & {
+  proveedor_id?: number | null; // solo lo manda la recepción; el abastecimiento lo deja undefined
+};
 
 // Núcleo transaccional compartido (regla #6): idempotencia + correlativo + cabecera
 // CONFIRMADO + detalle + refresh de stock_actual. El stock se mueve por DIRECCIÓN
@@ -120,6 +122,7 @@ async function registrarAutoConfirmado(
                 turno: input.turno,
                 proyeccion: input.proyeccion,
                 observaciones: input.observaciones,
+                proveedor_id: input.proveedor_id, // undefined en abastecimiento → no toca la columna
                 detalle: input.detalle,
               },
               usuarioId,
@@ -167,6 +170,7 @@ async function registrarAutoConfirmado(
       usuarioId,
       observaciones: input.observaciones,
       idempotenciaKey: input.idempotency_key,
+      proveedorId: input.proveedor_id ?? null,
     });
 
     await insertarDetalle(
@@ -422,6 +426,7 @@ async function aplicarEdicion(
     turno: input.turno,
     proyeccion: input.proyeccion,
     observaciones: input.observaciones,
+    proveedorId: input.proveedor_id, // undefined en edición manual → preserva el proveedor
   });
   await borrarDetalle(tx, id);
   await insertarDetalle(

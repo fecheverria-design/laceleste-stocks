@@ -1,6 +1,6 @@
-import { inArray } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { db, pool } from './client.js';
-import { productos } from './schema.js';
+import { productos, proveedores } from './schema.js';
 import { resolverUsuarioIntegracion } from '../repositories/movimientos.repository.js';
 import { registrarRecepcion } from '../services/movimientos.service.js';
 import { AppError } from '../domain/errors.js';
@@ -230,6 +230,25 @@ interface RenglonRecep {
   unidad: string;
 }
 
+// Resuelve el cod_proveedor de 3c (que la app de Tincho manda en la recepción) a nuestro
+// proveedores.id vía numero_3c (regla #1: los ids de 3c mandan). Cachea por corrida para
+// no repetir la query. Devuelve null si el proveedor no está en nuestro maestro (la
+// recepción igual se materializa; queda sin proveedor asociado hasta importar el maestro).
+const cacheProveedor = new Map<number, number | null>();
+async function resolverProveedorId(cod: number | string | null): Promise<number | null> {
+  const num = cod === null || cod === undefined ? null : Number(cod);
+  if (num === null || !Number.isInteger(num) || num <= 0) return null;
+  if (cacheProveedor.has(num)) return cacheProveedor.get(num)!;
+  const [row] = await db
+    .select({ id: proveedores.id })
+    .from(proveedores)
+    .where(eq(proveedores.numero3c, num))
+    .limit(1);
+  const id = row?.id ?? null;
+  cacheProveedor.set(num, id);
+  return id;
+}
+
 async function main(): Promise<void> {
   const { fechas, dry } = parseArgs(process.argv.slice(2));
   const baseUrl = requireEnv('COMPANERO_API_URL').replace(/\/+$/, '');
@@ -256,6 +275,7 @@ async function main(): Promise<void> {
   let renglones = 0;
   let saltadasSinBpm = 0;
   let prodSalteados = 0;
+  let provNoResuelto = 0;
   let errores = 0;
 
   for (const fecha of fechas) {
@@ -302,17 +322,23 @@ async function main(): Promise<void> {
         continue;
       }
 
+      // Proveedor real de la mercadería (además del balde 102 que usa el stock).
+      const proveedorId = await resolverProveedorId(r.cod_proveedor);
+      const provNota = proveedorId === null && r.cod_proveedor ? ` ⚠ proveedor #${r.cod_proveedor} no está en el maestro` : '';
+      if (provNota) provNoResuelto++;
+
       const input: RecepcionInput = {
         idempotency_key: `recep:${r.id}`,
         origen_dep_id_3c: origenDep,
         // destino omitido → DEPOSITO_PRINCIPAL (FABRICA)
         fecha: (r.fecha ?? fecha).slice(0, 10),
+        proveedor_id: proveedorId,
         detalle,
         observaciones: `Sync recepción #${r.id} ${r.proveedor_nombre ?? ''} (${fecha})`.trim(),
       };
 
       if (dry) {
-        console.log(`    [dry] recep #${r.id} ${r.proveedor_nombre ?? ''}: ${detalle.length} renglón(es)${faltan ? ` (+${faltan} salteado)` : ''}`);
+        console.log(`    [dry] recep #${r.id} ${r.proveedor_nombre ?? ''}: ${detalle.length} renglón(es)${faltan ? ` (+${faltan} salteado)` : ''}${provNota}`);
         movimientos++;
         renglones += detalle.length;
         continue;
@@ -325,7 +351,7 @@ async function main(): Promise<void> {
         const mov = await registrarRecepcion(input, { usuarioId, reconciliar: true });
         movimientos++;
         renglones += detalle.length;
-        console.log(`    ✔ ${mov.nro} ← recep #${r.id} ${r.proveedor_nombre ?? ''} (${detalle.length} renglón/es)`);
+        console.log(`    ✔ ${mov.nro} ← recep #${r.id} ${r.proveedor_nombre ?? ''} (${detalle.length} renglón/es)${provNota}`);
       } catch (e) {
         errores++;
         const msg = e instanceof AppError ? `${e.code}: ${e.message}` : e instanceof Error ? e.message : String(e);
@@ -339,6 +365,7 @@ async function main(): Promise<void> {
       `${movimientos} recepción(es), ${renglones} renglón(es)` +
       `${saltadasSinBpm ? `, ${saltadasSinBpm} sin BPM/cantidad` : ''}` +
       `${prodSalteados ? `, ${prodSalteados} renglón(es) sin producto en maestro` : ''}` +
+      `${provNoResuelto ? `, ${provNoResuelto} sin proveedor en maestro` : ''}` +
       `${errores ? `, ${errores} con error` : ''}.`,
   );
 }

@@ -6,6 +6,7 @@ import {
   movimientosAuditoria,
   movimientosDetalle,
   productos,
+  proveedores,
   tiposMovimiento,
   ubicaciones,
 } from '../db/schema.js';
@@ -26,6 +27,7 @@ export interface CabeceraInput {
   usuarioId: number;
   observaciones?: string;
   idempotenciaKey?: string;
+  proveedorId?: number | null; // solo RECEPCION lo usa; el resto queda null
 }
 
 export interface RenglonInput {
@@ -100,6 +102,7 @@ export async function insertarCabecera(tx: Tx, data: CabeceraInput): Promise<num
       usuarioId: data.usuarioId,
       observaciones: data.observaciones,
       idempotenciaKey: data.idempotenciaKey,
+      proveedorId: data.proveedorId ?? null,
       confirmadoEn: sql`now()`,
     })
     .returning({ id: movimientos.id });
@@ -250,6 +253,9 @@ export async function actualizarCabecera(
     turno?: string;
     proyeccion?: string;
     observaciones?: string;
+    // Proveedor: undefined = NO tocar la columna (edición manual la preserva);
+    // number/null = fijarla (lo usa el reconciliar del sync de recepciones).
+    proveedorId?: number | null;
   },
 ): Promise<void> {
   // Reemplazo completo: lo no enviado vuelve a null (no es un PATCH parcial).
@@ -263,6 +269,9 @@ export async function actualizarCabecera(
       turno: data.turno ?? null,
       proyeccion: data.proyeccion ?? null,
       observaciones: data.observaciones ?? null,
+      // Excepción al "reemplazo completo": proveedor no es editable desde el front, así que
+      // si el caller no lo manda (undefined) se conserva; solo el sync lo fija explícitamente.
+      ...(data.proveedorId !== undefined ? { proveedorId: data.proveedorId } : {}),
     })
     .where(eq(movimientos.id, id));
 }
@@ -343,6 +352,9 @@ export interface MovimientoConDetalle {
   destino_id: number;
   destino_dep_id_3c: number;
   destino_nombre: string;
+  proveedor_id: number | null;
+  proveedor_nombre: string | null;
+  proveedor_numero_3c: number | null;
   confirmado_en: string | null;
   anulado_en: string | null;
   detalle: {
@@ -380,6 +392,9 @@ export async function obtenerMovimiento(
       destino_id: movimientos.destinoId,
       destino_dep_id_3c: destino.depId3c,
       destino_nombre: destino.nombre,
+      proveedor_id: movimientos.proveedorId,
+      proveedor_nombre: proveedores.nombre,
+      proveedor_numero_3c: proveedores.numero3c,
       confirmado_en: movimientos.confirmadoEn,
       anulado_en: movimientos.anuladoEn,
     })
@@ -387,6 +402,7 @@ export async function obtenerMovimiento(
     .innerJoin(tiposMovimiento, eq(tiposMovimiento.id, movimientos.tipoId))
     .innerJoin(origen, eq(origen.id, movimientos.origenId))
     .innerJoin(destino, eq(destino.id, movimientos.destinoId))
+    .leftJoin(proveedores, eq(proveedores.id, movimientos.proveedorId))
     .where(eq(movimientos.id, id))
     .limit(1);
   if (!cab) return undefined;
@@ -437,6 +453,7 @@ export interface MovimientoResumen {
   destino_id: number;
   destino_dep_id_3c: number;
   destino_nombre: string;
+  proveedor_nombre: string | null; // solo RECEPCION; null en el resto
   usuario_id: number;
   creado_en: string | null;
   confirmado_en: string | null;
@@ -478,6 +495,7 @@ export async function listarMovimientos(
       destino_id: movimientos.destinoId,
       destino_dep_id_3c: destino.depId3c,
       destino_nombre: destino.nombre,
+      proveedor_nombre: proveedores.nombre,
       usuario_id: movimientos.usuarioId,
       creado_en: movimientos.creadoEn,
       confirmado_en: movimientos.confirmadoEn,
@@ -487,6 +505,7 @@ export async function listarMovimientos(
     .innerJoin(tiposMovimiento, eq(tiposMovimiento.id, movimientos.tipoId))
     .innerJoin(origen, eq(origen.id, movimientos.origenId))
     .innerJoin(destino, eq(destino.id, movimientos.destinoId))
+    .leftJoin(proveedores, eq(proveedores.id, movimientos.proveedorId))
     .where(conds.length ? and(...conds) : undefined)
     .orderBy(desc(movimientos.fecha), desc(movimientos.id)) // recientes primero; id desempata
     .limit(limit)

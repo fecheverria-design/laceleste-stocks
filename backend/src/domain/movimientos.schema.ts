@@ -60,6 +60,10 @@ export const RecepcionSchema = z.object({
   idempotency_key: z.string().trim().min(1).max(100).optional(),
   origen_dep_id_3c: z.number().int().positive(), // proveedor que despacha (dep_id de 3c)
   destino_dep_id_3c: z.number().int().positive().optional(), // depósito que recibe; default FABRICA
+  // Proveedor real de la mercadería (id de nuestra tabla proveedores). El origen sigue
+  // siendo el balde 102 genérico para el stock; esto guarda DE QUIÉN vino la recepción.
+  // Nullable/opcional: si el sync no lo resuelve (proveedor no está en el maestro), null.
+  proveedor_id: z.number().int().positive().nullable().optional(),
   fecha: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, 'Formato esperado YYYY-MM-DD')
@@ -109,6 +113,9 @@ export const EditarMovimientoSchema = z.object({
   turno: z.enum(['MAÑANA', 'TARDE']).optional(),
   proyeccion: z.enum(['MIN', 'MED', 'MAX', 'ESP']).optional(),
   observaciones: z.string().trim().max(500).optional(),
+  // Proveedor: undefined = no tocar (edición manual no lo cambia); un id/null = fijarlo
+  // (lo usa el reconciliar del sync de recepciones). No entra en el diff de auditoría.
+  proveedor_id: z.number().int().positive().nullable().optional(),
   detalle: z.array(RenglonAbastecimientoSchema).min(1, 'El movimiento necesita al menos un renglón'),
 });
 
