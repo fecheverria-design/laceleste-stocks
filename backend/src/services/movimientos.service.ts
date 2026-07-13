@@ -28,6 +28,7 @@ import {
   obtenerMovimiento,
   productosExistentes,
   refrescarStock,
+  revivirMovimiento,
   sincronizadosEnFechas,
   tipoPorCodigo,
   type CambioAuditoria,
@@ -109,10 +110,20 @@ async function registrarAutoConfirmado(
           // app del compañero. Reusa aplicarEdicion con ESTE MISMO tx (sin transacción
           // anidada) → transaccional, auditado y con stock recalculado. Si nada cambió,
           // el diff da vacío y no escribe auditoría (no-op: los días sin novedad no
-          // ensucian el historial). Un movimiento ANULADO a mano NO se resucita: se
-          // respeta la anulación y se devuelve tal cual (el sync no lo cuenta como error).
-          if (reconciliar && existente.estado !== 'ANULADO') {
-            return aplicarEdicion(
+          // ensucian el historial).
+          //
+          // ANULADO: hay que distinguir QUIÉN anuló.
+          //  - Anulación HUMANA → se respeta y se devuelve tal cual (regla #4: la decisión
+          //    de una persona manda; el sync no la pisa ni la cuenta como error).
+          //  - Baja del PROPIO SYNC (anulado_por = el usuario de integración, ver
+          //    reconciliarBajas) → se REVIVE. Esa baja no fue una decisión humana sino un
+          //    reflejo del origen; si el dato volvió a aparecer allá, corresponde volver
+          //    atrás. Sin esto, un dato que desaparece y reaparece en la app del compañero
+          //    (un real que se borra y se vuelve a guardar) se perdería para siempre.
+          const bajaPropia = existente.estado === 'ANULADO' && existente.anulado_por === usuarioId;
+          if (reconciliar && (existente.estado !== 'ANULADO' || bajaPropia)) {
+            if (bajaPropia) await revivirMovimiento(tx, existente.id);
+            const editado = await aplicarEdicion(
               tx,
               existente.id,
               {
@@ -128,6 +139,11 @@ async function registrarAutoConfirmado(
               },
               usuarioId,
             );
+            // aplicarEdicion solo refresca el stock si el DIFF trajo cambios. Al revivir, el
+            // detalle puede volver idéntico (diff vacío) pero el movimiento pasó de ANULADO a
+            // CONFIRMADO → la matview SÍ tiene que recalcularse o el stock no vuelve.
+            if (bajaPropia) await refrescarStock(tx);
+            return editado;
           }
           // Modo "crear una vez" (POST M2M por defecto): devolver el existente sin tocar.
           return existente;
@@ -347,6 +363,42 @@ export async function reconciliarBajas(
   }
 
   return { anuladas, reprogramadas };
+}
+
+export interface BajaPorClave {
+  movimientoId: number;
+  nro: string;
+  fecha: string;
+  idempotenciaKey: string;
+}
+
+// Bajas para el sync cuya idempotency_key es determinística por (fecha, agrupador) — hoy el
+// abastecimiento: `abast:<fecha>:<área>`. No hay id externo que pueda mudarse de fecha (a
+// diferencia de la recepción): si el origen ya no lista esa (fecha, área) con real cargado,
+// es que la vaciaron allá → el RINT que teníamos ya no corresponde y se anula.
+//
+// `fechasConDatos` es el seguro contra un pull vacío: solo se evalúan los días en que la API
+// del compañero SÍ devolvió filas. Si un día falla la red, o vuelve vacío, ese día no se toca
+// — si no, un error de conexión anularía RINTs buenos y descuadraría el stock.
+//
+// La anulación NO es una calle de una sola mano: la hace el usuario de integración, y el modo
+// reconciliar sabe REVIVIR sus propias bajas si el dato reaparece (ver registrarAutoConfirmado).
+// Por eso es seguro automatizarla: un real que se borra y se vuelve a guardar se recupera solo.
+export async function reconciliarBajasPorClave(
+  prefijo: string,
+  fechasConDatos: string[],
+  clavesVistas: Set<string>,
+  opts: ReconciliarBajasOpts,
+): Promise<BajaPorClave[]> {
+  const materializados = await sincronizadosEnFechas(prefijo, fechasConDatos);
+  const bajas = materializados
+    .filter((m) => !clavesVistas.has(m.idempotenciaKey))
+    .map((m) => ({ movimientoId: m.id, nro: m.nro, fecha: m.fecha, idempotenciaKey: m.idempotenciaKey }));
+
+  if (!opts.dry) {
+    for (const b of bajas) await anularMovimiento(b.movimientoId, { usuarioId: opts.usuarioId });
+  }
+  return bajas;
 }
 
 export interface ListarMovimientosParams extends ListaFiltros {

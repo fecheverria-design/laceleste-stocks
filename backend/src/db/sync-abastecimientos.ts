@@ -1,6 +1,6 @@
 import { pool } from './client.js';
 import { resolverUsuarioIntegracion } from '../repositories/movimientos.repository.js';
-import { registrarAbastecimiento } from '../services/movimientos.service.js';
+import { reconciliarBajasPorClave, registrarAbastecimiento } from '../services/movimientos.service.js';
 import { AppError } from '../domain/errors.js';
 import type { AbastecimientoInput } from '../domain/movimientos.schema.js';
 
@@ -24,6 +24,16 @@ import type { AbastecimientoInput } from '../domain/movimientos.schema.js';
 // estado fresco de la app del compañero (si a la tarde corrigieron el real o cargaron más
 // renglones, se refleja) → auditado + stock recalculado. Sin cambios = no-op (no ensucia
 // el historial). Por eso ahora sí sirve correr cada ~1h.
+//
+// RECONCILIACIÓN DE BAJAS: reeditar alcanza mientras el área siga teniendo ALGÚN renglón con
+// real. Pero si vacían el área entera (borran todos los reales del día, o los ponen en cero),
+// no se arma ningún grupo → antes no había nada que reconciliar y el RINT viejo quedaba VIVO,
+// descontando stock que ya no corresponde. Ahora esos RINT se ANULAN (el stock se revierte).
+// Dos seguros para que sea reversible y no dispare por un error de red:
+//   - solo se evalúan los días en que la API SÍ devolvió filas (un pull vacío no anula nada);
+//   - la baja la hace el usuario de integración, y el modo reconciliar REVIVE sus propias
+//     bajas si el real reaparece → un real borrado y vuelto a guardar se recupera solo.
+// Una anulación hecha por una persona nunca se revive (regla #4).
 //
 // VENTANA MÓVIL: sin argumentos, sincroniza HOY + los VENTANA_DIAS_ATRAS días previos
 // (default 2). Así, si la PC estuvo apagada, al volver reconcilia sola los días que se
@@ -263,10 +273,16 @@ async function main(): Promise<void> {
   let movimientos = 0;
   let renglones = 0;
   let errores = 0;
+  // Días en que la API SÍ devolvió filas: son los únicos donde una (fecha, área) ausente
+  // significa "la vaciaron" y no "el pull falló". Y las claves que el origen sigue teniendo.
+  const fechasConDatos: string[] = [];
+  const clavesVistas = new Set<string>();
 
   for (const fecha of fechas) {
     const filas = await fetchTablaIntegral(baseUrl, token, fecha);
+    if (filas.length > 0) fechasConDatos.push(fecha);
     const { grupos, sinReal, sinArea, sinProd } = agrupar(fecha, filas);
+    for (const g of grupos) clavesVistas.add(`abast:${g.fecha}:${g.destino_dep_id_3c}`);
     if (grupos.length === 0) {
       console.log(`  ${fecha}: sin abastecimientos con real cargado (${filas.length} filas, ${sinReal} sin real).`);
       continue;
@@ -308,9 +324,19 @@ async function main(): Promise<void> {
     }
   }
 
+  // BAJAS: (fecha, área) que teníamos materializadas y el origen ya no lista con real.
+  // Solo en los días que devolvieron filas → un pull vacío o caído nunca anula nada.
+  const bajas = await reconciliarBajasPorClave('abast:', fechasConDatos, clavesVistas, { usuarioId, dry });
+  for (const b of bajas) {
+    console.log(
+      `    ⌫ ${b.nro} (${b.idempotenciaKey}) ya no tiene real en la app del compañero → ${dry ? '[dry] se ANULARÍA' : 'ANULADO'} (stock revertido; si el real vuelve, se recupera solo)`,
+    );
+  }
+
   console.log(
     `\n${dry ? 'DRY-RUN — nada se escribió. ' : ''}` +
       `${movimientos} movimiento(s), ${renglones} renglón(es)` +
+      `${bajas.length ? `, ${bajas.length} anulado(s) por baja en el origen` : ''}` +
       `${errores ? `, ${errores} con error` : ''}.`,
   );
 }

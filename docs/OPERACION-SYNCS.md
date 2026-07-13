@@ -16,8 +16,17 @@ Guía práctica para que el stock se mantenga sincronizado con la app del compa�
 - **Bajas (recepciones):** si una recepción que ya habíamos traído **desaparece** de la app
   del compañero (la borraron), la corrida la **anula sola** acá y el stock se revierte. Si en
   cambio solo la **movieron de fecha**, no se toca: se avisa en el log (`⚠ … se movió del …
-  al …`) y cuando esa fecha nueva entre en la ventana se corrige sola. Anular es irreversible
-  (un ANULADO no revive), por eso solo se anula lo que realmente ya no existe.
+  al …`) y cuando esa fecha nueva entre en la ventana se corrige sola. Una recepción borrada
+  no vuelve nunca (el id no se reusa), por eso ahí anular es definitivo.
+- **Bajas (abastecimientos):** si **vacían un área entera** (borran todos los reales de ese
+  día, o los ponen en cero), el RINT que teníamos se **anula** y el stock vuelve. Esto **sí es
+  reversible**: si más tarde vuelven a guardar el real, la próxima corrida **revive** ese mismo
+  movimiento y el stock se descuenta de nuevo. Dos seguros para que no dispare de más:
+  - un día en que la API no devuelve filas (falla de red, servidor caído) **no anula nada**;
+  - el sync solo revive **sus propias** bajas. Si vos anulaste un movimiento a mano desde el
+    front, el sync **jamás** lo resucita (regla #4: la decisión humana manda).
+- **Los movimientos importados de 3c no los toca ningún sync** (no tienen `idempotencia_key`).
+  O sea que un día cargado a mano con `import:movimientos` está a salvo.
 
 **Traducción a lo cotidiano:** vos no tenés que correr nada. Con la PC prendida y logueada,
 el stock se actualiza solo cada hora. Lo único que hace falta es que **el real esté cargado
@@ -88,9 +97,9 @@ npm -w backend run sync:recepciones -- --desde=2026-06-20 --hasta=2026-06-30
   - `Login … falló` → revisar credenciales del compañero en `.env` (`COMPANERO_API_*`).
   - `PRODUCTO_NO_ENCONTRADO` en abastecimientos → falta ese producto en nuestro maestro
     (importarlo). En recepciones ese renglón se saltea solo (no frena la recepción).
-- **El stock de un área quedó viejo tras borrar el real en su app:** la ventana móvil solo
-  pisa lo que sigue presente; si borraron/pusieron en 0 el real, corregilo a mano editando o
-  anulando el movimiento en el front. (Caso borde conocido, ver `docs/PROGRESO.md`.)
+- **El stock de un área quedó viejo tras borrar el real en su app:** ya no hace falta tocar
+  nada a mano — la reconciliación de bajas lo anula solo en la próxima corrida (y lo revive si
+  el real vuelve). Ver "Bajas (abastecimientos)" arriba.
 - **Sospecha de doble descuento:** no debería pasar (idempotencia por `(fecha,área)` /
   `recep:<id>`), pero se verifica con:
   ```sql
