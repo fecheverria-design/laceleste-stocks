@@ -94,7 +94,7 @@ async function main(archivo: string, dry: boolean): Promise<void> {
     throw new Error(`Falta la columna (${aliases.join(' / ')}). Encabezados: ${h.join(' | ')}`);
   };
   const col = {
-    FECHA: idx(['FECHA']),
+    FECHA: idx(['FECHA', 'FECHA_RECEPCION']),
     NUMERO: idx(['NUMERO']),
     TIPO_DOC: idx(['TIPO_DOC']),
     ORIGEN: idx(['ID ORIGEN', 'ORIGEN']),
