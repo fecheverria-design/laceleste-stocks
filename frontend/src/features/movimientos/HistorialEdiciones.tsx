@@ -10,6 +10,7 @@ const CAMPO_LABEL: Record<string, string> = {
   proyeccion: 'Proyección',
   observaciones: 'Observaciones',
   detalle: 'Renglones',
+  estado: 'Estado',
 };
 
 interface RenglonCambio {
@@ -25,6 +26,14 @@ interface Props {
   productos: Producto[];
   tipos: TipoMovimiento[];
 }
+
+// Cómo se anuncia cada evento del historial. La anulación y la reactivación no son
+// "ediciones": merecen su propio cartel (y color) para que salten a la vista.
+const EVENTO: Record<string, { etiqueta: (seq: number) => string; clase: string }> = {
+  EDICION: { etiqueta: (seq) => `edición ${seq}`, clase: 'text-slate-700' },
+  ANULACION: { etiqueta: () => 'ANULADO', clase: 'text-red-600' },
+  REACTIVACION: { etiqueta: () => 'REACTIVADO', clase: 'text-emerald-600' },
+};
 
 export function HistorialEdiciones({ nro, historial, ubicaciones, productos, tipos }: Props) {
   const [abierto, setAbierto] = useState<number | null>(historial[0]?.id ?? null);
@@ -49,15 +58,17 @@ export function HistorialEdiciones({ nro, historial, ubicaciones, productos, tip
   return (
     <div className="rounded-xl border border-slate-200 bg-white">
       <div className="border-b border-slate-200 px-5 py-3">
-        <h3 className="text-sm font-semibold">Historial de ediciones</h3>
+        <h3 className="text-sm font-semibold">Historial del movimiento</h3>
+        <p className="text-xs text-slate-500">Toda edición y anulación queda registrada: quién, cuándo y qué cambió.</p>
       </div>
 
       {historial.length === 0 ? (
-        <p className="px-5 py-4 text-sm text-slate-500">Sin ediciones registradas.</p>
+        <p className="px-5 py-4 text-sm text-slate-500">Sin cambios: el movimiento está como se cargó.</p>
       ) : (
         <ul className="divide-y divide-slate-100">
           {historial.map((h) => {
             const open = abierto === h.id;
+            const evento = EVENTO[h.accion] ?? { etiqueta: () => h.accion, clase: 'text-slate-700' };
             return (
               <Fragment key={h.id}>
                 <li>
@@ -68,11 +79,12 @@ export function HistorialEdiciones({ nro, historial, ubicaciones, productos, tip
                   >
                     <span className="flex items-center gap-2">
                       <span className="text-slate-400">{open ? '▾' : '▸'}</span>
-                      <span className="font-medium text-slate-700">
-                        {nro} · edición {h.secuencia}
+                      <span className={`font-medium ${evento.clase}`}>
+                        {nro} · {evento.etiqueta(h.secuencia)}
                       </span>
                       <span className="text-slate-500">
-                        {new Date(h.creado_en).toLocaleString('es-AR')} · usuario #{h.usuario_id}
+                        {new Date(h.creado_en).toLocaleString('es-AR')} · por{' '}
+                        <span className="font-medium text-slate-700">{h.usuario_nombre}</span>
                       </span>
                     </span>
                     <span className="text-xs text-slate-400">

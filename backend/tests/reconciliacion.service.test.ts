@@ -154,6 +154,10 @@ describe('reconciliar abastecimiento (sync en vivo)', () => {
     expect(reintento.estado).toBe('ANULADO'); // se devolvió tal cual
     expect(await contarMovimientos()).toBe(1);
     expect((await obtenerStock({ producto3c: '401' })).length).toBe(0); // sigue revertido
-    expect(await obtenerHistorial(primero.id)).toHaveLength(0); // no se editó
+    // El historial tiene la ANULACION (queda registrada, regla #7) pero NINGUNA edición:
+    // el sync no lo tocó.
+    const historial = await obtenerHistorial(primero.id);
+    expect(historial.filter((h) => h.accion === 'EDICION')).toHaveLength(0);
+    expect(historial.map((h) => h.accion)).toEqual(['ANULACION']);
   });
 });

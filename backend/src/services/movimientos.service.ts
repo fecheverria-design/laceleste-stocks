@@ -122,7 +122,17 @@ async function registrarAutoConfirmado(
           //    (un real que se borra y se vuelve a guardar) se perdería para siempre.
           const bajaPropia = existente.estado === 'ANULADO' && existente.anulado_por === usuarioId;
           if (reconciliar && (existente.estado !== 'ANULADO' || bajaPropia)) {
-            if (bajaPropia) await revivirMovimiento(tx, existente.id);
+            if (bajaPropia) {
+              await revivirMovimiento(tx, existente.id);
+              // La reactivación también deja rastro: el historial cuenta la vuelta completa
+              // (el sync lo anuló porque el dato desapareció, y lo revivió porque volvió).
+              await insertarAuditoria(tx, {
+                movimientoId: existente.id,
+                usuarioId,
+                accion: 'REACTIVACION',
+                cambios: [{ campo: 'estado', antes: 'ANULADO', despues: 'CONFIRMADO' }],
+              });
+            }
             const editado = await aplicarEdicion(
               tx,
               existente.id,
@@ -291,6 +301,14 @@ export async function anularMovimiento(
     }
 
     await marcarAnulado(tx, id, opts.usuarioId);
+    // La anulación entra al MISMO historial que las ediciones (regla #7): quién y cuándo.
+    // Antes solo quedaban los sellos anulado_por/anulado_en, que no se veían por ningún lado.
+    await insertarAuditoria(tx, {
+      movimientoId: id,
+      usuarioId: opts.usuarioId,
+      accion: 'ANULACION',
+      cambios: [{ campo: 'estado', antes: mov.estado, despues: 'ANULADO' }],
+    });
     // La matview deja de contar el movimiento anulado → revierte el stock, sin contramovimiento.
     await refrescarStock(tx);
 
