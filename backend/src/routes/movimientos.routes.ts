@@ -1,0 +1,40 @@
+import { Router } from 'express';
+import {
+  getHistorial,
+  getMovimiento,
+  getMovimientos,
+  getMovimientosCsv,
+  getMovimientosDeProducto,
+  getStock,
+  postAbastecimiento,
+  postMovimiento,
+  putAnularMovimiento,
+  putEditarMovimiento,
+} from '../controllers/movimientos.controller.js';
+import { requireApiKey, requireAuth, requireRole } from '../middleware/auth.js';
+
+export const movimientosRouter = Router();
+
+// Ingreso de abastecimiento (RINT auto-confirmado) desde la app del compañero.
+// M2M: lo invoca la app del compañero, no un humano. Protegido con API key
+// (header x-api-key) e idempotente (idempotency_key). Audita al usuario de integración.
+movimientosRouter.post('/abastecimientos', requireApiKey, postAbastecimiento);
+
+// Crear movimiento (auto-confirmado): cualquier usuario logueado.
+movimientosRouter.post('/movimientos', requireAuth, postMovimiento);
+
+// Lecturas: cualquier usuario logueado (ADMIN o DEPOSITO).
+movimientosRouter.get('/movimientos', requireAuth, getMovimientos);
+// export.csv ANTES de /:id para que no se matchee como id.
+movimientosRouter.get('/movimientos/export.csv', requireAuth, getMovimientosCsv);
+movimientosRouter.get('/movimientos/:id', requireAuth, getMovimiento);
+movimientosRouter.get('/movimientos/:id/historial', requireAuth, getHistorial);
+movimientosRouter.get('/stock', requireAuth, getStock);
+movimientosRouter.get('/stock/movimientos', requireAuth, getMovimientosDeProducto);
+
+// Edición: cualquier usuario logueado (decisión de J). Reemplazo completo +
+// recalculo de stock + historial. No editable si está ANULADO.
+movimientosRouter.put('/movimientos/:id', requireAuth, putEditarMovimiento);
+
+// Anulación: solo ADMIN (CLAUDE.md: DEPOSITO no anula). CONFIRMADO → ANULADO.
+movimientosRouter.put('/movimientos/:id/anular', requireAuth, requireRole('ADMIN'), putAnularMovimiento);

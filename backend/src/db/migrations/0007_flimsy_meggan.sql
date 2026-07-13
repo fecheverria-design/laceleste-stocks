@@ -1,0 +1,3 @@
+ALTER TABLE "precios" ADD COLUMN "proveedor_id" integer;--> statement-breakpoint
+ALTER TABLE "precios" ADD CONSTRAINT "precios_proveedor_id_proveedores_id_fk" FOREIGN KEY ("proveedor_id") REFERENCES "public"."proveedores"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE UNIQUE INDEX "uq_precio_prod_prov_fecha" ON "precios" USING btree ("producto_3c","proveedor_id","vigente_desde");

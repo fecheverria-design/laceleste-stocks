@@ -1,6 +1,99 @@
 # PROGRESO — laceleste-movimientos
 
-> Estado para retomar fácil. Última actualización: 2026-06-11.
+> Estado para retomar fácil. Última actualización: 2026-06-25.
+
+## 🚩 CIERRE FASE 1 — PR a `dev` (2026-06-25)
+Branch `feat/movimientos-fase1-backend` listo para PR a `dev`. **72 tests verdes**,
+typecheck/lint/build limpios (back y front). Lo construido en Fase 1 (además del backend
+de movimientos/auth/stock):
+- **Panel** (landing) con valorización del stock a precio vigente + gráficos (Recharts).
+- **Precios**: histórico con tipo COMPRA/ACTUALIZACION (vigente = última compra), gráfico
+  de compras, alta/edición; importer `import:precios`.
+- **Consumos por área**: cantidad + promedio semanal + **costo $ por área** (cantidad ×
+  precio vigente, comparable).
+- **Proveedores**: gasto real por familia (de compras reales), vista mensual + período,
+  alta de proveedor (numero_3c obligatorio); tabla `compras` + `import:compras`.
+- **Calidad de datos**: fix de fusión de movimientos por NUMERO, ajustes vía balde 101,
+  devoluciones invertidas, conteo autoritativo de acopios (`--exclusivo`). Ver
+  `docs/IMPORTACION-3C.md`.
+- Datos reales de J cargados: ~17.585 movimientos, 13.160 precios, 11.601 compras,
+  inventario anclado (0 negativos).
+- **Acción manual de J**: pushear branch (hecho por la sesión si hubo credenciales) y
+  crear el PR en GitHub (no hay `gh`). Pendientes menores: asegurar M2M `abastecimientos`
+  (API key + idempotencia), ~35 productos sin precio (one-off, cargar a mano si importan).
+
+### 🆕 Sesión 2026-06-25 — Calidad de datos de movimientos (importante)
+Se corrigieron varios temas de cómo se interpreta el histórico de 3c. **Todo documentado
+en `docs/IMPORTACION-3C.md`** (fuente única de las reglas de import — leer ahí si un
+movimiento/stock aparece mal).
+- **Bug de fusión**: el NUMERO de 3c es único por tipo de documento, no global → se
+  fusionaban ~484 movimientos. Fix: agrupar por (tipo+numero+dirección).
+- **Ajustes**: en 3c vienen como `Rint` desde el balde 101 → ahora se clasifican AJUSTE
+  (101→FABRICA suma, FABRICA→101 resta).
+- **Devoluciones**: cantidad negativa → se invierte la dirección (antes se descartaban).
+- **Acopios**: `import:inventario --exclusivo` (conteo autoritativo por depósito).
+- **Método de re-sync sin mover stock**: foto → wipe → reimport → re-anclar `--exclusivo`
+  (detallado en IMPORTACION-3C.md). El stock quedó idéntico (430 ítems, 0 negativos) y el
+  histórico completo: 15.849 movimientos → **17.585** (se recuperó lo fusionado + splits).
+- Backups: `backup_pre_resync_20260625.dump` (gitignored).
+
+## ⏱️ AL VOLVER — empezá por acá
+**Estado**: Fase 1 + import 3c + inventario + **módulo de PRECIOS (histórico con tipo COMPRA/ACTUALIZACION)** + **PANEL con valorización y gráficos (Recharts)**. Todo commiteado en `feat/movimientos-fase1-backend`. **70 tests verdes.**
+
+### 🆕 Sesión 2026-06-24 — Precios + Panel + limpieza de datos
+- **Módulo de precios** (migraciones `0006`–`0008`): tabla `precios` con `proveedor_id` + `tipo` (COMPRA|ACTUALIZACION) + fecha. **Vigente = última COMPRA** (lo que se pagó); si no hubo compra, cae a la última ACTUALIZACION (referencia). Endpoints `GET /api/precios`, `GET /api/productos/:cod/precios`, `POST/PUT/DELETE /api/precios`. Front: tab **Precios** (tabla + historial editable + gráfico de COMPRAS, Recharts lazy).
+- **Importer** `npm run import:precios -- <archivo> [--dry]`: formato histórico (`ID, PRECIO_UNITARIO, PERSONAS_ID, PROVEEDORES, FECHA, TIPO`). Idempotente (upsert por producto+proveedor+fecha+tipo). **Cargado el histórico real: 13.160 precios** (9.506 compras), 653 prod / 701 prov.
+- **Panel** (tab inicial, landing): `GET /api/valorizacion` = stock × precio vigente. KPIs + barras top productos + tabla por depósito. `$0 = sin precio`. **Total actual ~$577M**, 35 ítems con stock sin precio.
+- **Limpieza de datos ficticios**: se borraron 27 ajustes de prueba (AJU) + se recargó la foto de inventario desde archivo corregido (`Hoja de cálculo sin título - STOCKS.csv`) + correcciones manuales de escala (CAFE/BONDIOLA/PURE/PAPEL ALFAJOR en FABRICA). Backups: `backup_pre_limpieza.dump`, `backup_fin_dia_20260624.dump` (gitignored).
+- **⏳ Pendiente p/ mañana**: (a) ver los 35 productos con stock sin precio; (b) 5 negativos de packaging en acopios (CAJA TORTA, BOLSA DELIVERY… — poner en 0 o conteo real); (c) precio mayonesa $2.452 vs $3.028 si hace falta; (d) ¿productos solo-ACTUALIZACION muestran esa como referencia? (hoy: sí).
+
+1. **✅ INVENTARIO INICIAL — HECHO (2026-06-22)**. Se cargó la "foto" del inventario físico vía `import:inventario`. Quedó **0 negativos** en todo el sistema. **Decisión de J: stock real = solo FABRICA, pero los acopios se llevan EN PARALELO** (cada depósito de proveedor lleva su propio stock; ej. al recibir mercadería poniendo origen 210 Morrovalle en vez del 102 genérico, se descuenta del acopio del 210). El import enciende `lleva_stock` en todos los depósitos del archivo (15 hoy: FABRICA + 14 acopios). Cinco productos quedaron negativos en acopios (historial de 3c sin conteo) → **J decidió ponerlos en 0** (acopio agotado, un negativo es físicamente imposible). Detalle del importer en "FASE DE PRECISIÓN DE STOCK".
+2. **Estado de la importación de 3c** (corrida en el dev de J): productos, proveedores, ubicaciones y **15.849 movimientos** importados. Tipos mapeados: Rint→RINT, ReMe/Fcpr→RECEPCION, RINV→AJUSTE. **NCC queda afuera** (módulo facturas futuro). Solo FABRICA lleva stock (`npm run db:stock-en -- 1`). ⚠️ El dev tiene los datos REALES de J (no la demo).
+3. **🔴 ACCIÓN MANUAL DE J — cambiar default branch a `main` en GitHub**: `main` y `dev` ya están pusheados, pero `gh`/token no están. Settings → Branches → Default → `main`. Después borrar `feat/movimientos-fase0-setup`. PR de Fase 1: base `dev` ← `feat/movimientos-fase1-backend`.
+4. **Otros slices pendientes** (cuando se cierre el stock): idempotencia del POST de abastecimientos (+ API key M2M), export Excel / kardex, validación de form en el front, módulo de facturas (NCC).
+5. **Setup**: Docker desde `D:\DockerData` (`docker compose up -d`). Backend `npm -w backend run dev` (3000) + front `npm -w frontend run dev` (5173) → http://localhost:5173. Login: `admin@laceleste.local` / `laceleste123`. Para volver a datos demo: `npm -w backend run db:reset` + `db:seed:dev`. Comandos de import: `import:productos|proveedores|ubicaciones|movimientos` y `db:stock-en`.
+
+## 📥 Importación de Excel — productos (HECHO, falta proveedores y movimientos)
+Carga masiva por scripts CLI locales (decisión de J). Parser propio sin deps.
+- **`npm run import:productos -- <archivo.csv|tsv>`**: maestro de productos de 3c. Mapea `ID`→`codigo_3c` (PK, regla #1), `ARTICULO`→nombre, `UM`→`unidad_base`. Ignora FAMILIA/SUBFAMILIA (no modeladas). Idempotente (upsert por `codigo_3c`), dedup intra-archivo, saltea filas sin ID/nombre. Probado con muestra real de J.
+- **`csv.ts`**: parser de texto delimitado robusto (autodetecta tab/`;`/`,`, comillas, BOM) — lo reusan los próximos importers.
+- **`npm run import:proveedores -- <archivo>`**: maestro de proveedores de 3c. Mapea `NUMERO`→`numero_3c`, `NOMBRE`→nombre, `CUIT`→cuit (`-`/vacío→null). Resto de columnas (ingbruto, tipo_iva, teléfono, mail, categoría…) ignoradas. Idempotente (upsert por `numero_3c`). **Migración `0003`**: agrega `proveedores.numero_3c` (unique, regla #1). Probado con muestra real (dedup, skip, nombre con coma, CUIT con/sin guiones).
+- **`npm run import:ubicaciones -- <archivo>`**: `TIPO_DEPOSITO`(PROPIOS→DEPOSITO / EXTERNOS→AREA), `DENOMINACION`→nombre, `DEPOSITO_ID`→`dep_id_3c`. Idempotente (upsert por dep_id_3c, **migración `0004`** lo hace unique).
+- **`npm run import:movimientos -- <archivo>`**: una fila = un renglón, agrupa por `NUMERO` (→`nro_3c`). Mapea `TIPO_DOC`→tipo, `FECHA` dd/mm/yyyy→ISO, `ORIGEN`/`DESTINO`→dep_id_3c, `ARTICU_ID`→producto, `CANTIDAD` (coma decimal es-AR). **Auto-crea** ubicaciones (DEPOSITO si es origen, si no AREA) y productos (desde TEXTO/UNIMED) que falten. Entra CONFIRMADO con su fecha + nro propio (`generar_nro`, crea seq del año on-demand) + `nro_3c`. Idempotente (saltea NUMERO ya importado). REFRESH al final. Avisa TIPO_DOC no mapeados.
+- **Verificado e2e** con muestra real de J: 4 movimientos (RINT-2025-xxxxx + nro_3c), áreas 47/48/50 auto-creadas, 10 productos auto-creados, stock con decimales OK (-7.428), idempotencia OK.
+- **Pendiente / a definir**: la lista de ubicaciones de J no traía las áreas de producción (47/48/50) — se auto-crean como AREA; si querés tipos/nombres finos, pasá un export más completo. Otros `TIPO_DOC` además de "Rint" (Recepcion/Ajuste): confirmar los textos exactos. **Precios = fase futura** (columna nueva en productos).
+- ⚠️ **El dev DB se reseteó** (se borró la demo) y quedó con la muestra real de J. Para volver a la demo: `npm run db:seed:dev`. Para cargar todo lo real: correr los 4 imports + `db:reset` si te equivocás.
+
+## 🎯 FASE DE PRECISIÓN DE STOCK (pendiente, próximo bloque)
+Modelo de 3c confirmado por J (claves para que el stock dé bien):
+- **Baldes virtuales**: `dep_id_3c = 101` = **AJUSTES**, `dep_id_3c = 102` = **PROVEEDORES**. Su stock propio no importa; el efecto cae siempre en el otro lado (depósito real).
+- **Recepción** (`ReMe`/`Fcpr`): `102 → FABRICA`, suma al destino. ✅ ya funciona (RECEPCION).
+- **Rint**: `FABRICA → área`, resta del origen. ✅ ya funciona.
+- ✅ **HECHO — modelo de stock reescrito (migración `0005`)**: doble entrada restringida a `ubicaciones.lleva_stock`. La dirección define el signo (suma al destino, resta del origen, solo si lleva stock). Esto arregla de una los ajustes (101↔FABRICA), recepciones (102→FABRICA) y rint, sin importar el tipo. `npm run db:stock-en -- 1` define que **solo FABRICA** lleva stock. 50 tests verdes (2 nuevos del modelo).
+- ✅ **Inventario inicial — HECHO (2026-06-22)** vía `npm run import:inventario -- <archivo> [--dry]` (`import-inventario.ts`). Columnas: `DEPOSITO` (= dep_id_3c; 1=FABRICA, resto=acopios de proveedores), `3C` (producto), `STOCK` (contado); opcionales `FECHA`/`DENOMINACION`/`AÑO`/`MES`. Por cada (producto, depósito) genera un **AJUSTE = contado − sistema** contra el balde 101 (entrada 101→D si falta, salida D→101 si sobra; a lo sumo 2 movs por depósito). **Activa `lleva_stock` en todos los depósitos del archivo** (additivo) → multi-depósito vivo. Auto-crea productos/depósitos faltantes. `--dry` muestra el plan sin escribir. Idempotente si se re-corre sin movimientos intermedios (delta=0 no genera mov). Verificado e2e con datos reales: FABRICA de 393 neg → 0; 15 depósitos con stock; 0 negativos totales tras poner en 0 los 5 acopios sin conteo.
+
+## 🖥️ Front — crear movimiento (HECHO)
+- **`POST /api/movimientos`** (back): crea un movimiento de cualquier tipo, **auto-confirmado** y transaccional (correlativo según tipo + cabecera CONFIRMADO + detalle + refresh de stock). Cualquier usuario logueado. Hermano de `registrarAbastecimiento` (caso M2M de RINT). 4 tests nuevos (RINT descuenta, RECEPCION suma, tipo inválido, producto inexistente) = **48 verdes**.
+- **Front**: botón **+ Nuevo** en el listado → página `/movimientos/nuevo` con form vacío (defaults: RINT, depósito→área, hoy). Al crear, navega al detalle del nuevo movimiento.
+- **Refactor**: form extraído a `movimientoForm.ts` (estado/payload) + `MovimientoFormFields.tsx` (componente), compartido entre crear y editar (sin duplicar).
+- Verificado e2e: POST crea `REC-2026-00003`, stock 401 1380→1390; screenshot del form OK.
+
+## 🖥️ Front — edición de movimientos (HECHO)
+Adelanto de Fase 3 (UI). En branch `feat/movimientos-fase1-backend`.
+- **Página de detalle/edición** (`/movimientos/:id`): form prefilleado, **todo editable** (tipo/origen/destino con selects de catálogo, fecha, turno, observaciones, renglones dinámicos con agregar/quitar), botón Guardar → `PUT`. Invalida queries (detalle, listado, stock, historial) al guardar. Si el movimiento está ANULADO, el form se deshabilita.
+- **Historial de ediciones** visible abajo (quién/cuándo/qué cambió).
+- **Endpoints de catálogo** (back): `GET /api/ubicaciones`, `/api/productos`, `/api/tipos` (requireAuth) para poblar los selects. `GET /:id` enriquecido para round-trip (tipo, dep_id_3c, turno, etc.).
+- Las filas del listado son clickeables → llevan al detalle.
+- **Verificado e2e** (Edge headless por CDP, login real por formulario): la página renderiza con datos vivos, catálogos poblados, y **F5 mantiene la sesión** (sin bug de deslogueo). 44 tests back verdes, front typecheck/lint/build ok.
+
+## 🖥️ Front — preview read-only (HECHO, fuera de fase)
+Adelanto para "ver algo" (el front formal es Fase 3). En branch `feat/movimientos-fase1-backend`.
+- **Layout con nav** (Movimientos / Stock / Estado) + **`MovimientosPage`** (tabla con filtro por estado, consume `GET /api/movimientos`) + **`StockPage`** (consume `GET /api/stock`). TanStack Query, Tailwind v4.
+- **API mejorada (additivo)**: el listado ahora devuelve `origen_nombre`/`destino_nombre` y el stock `producto_nombre`/`ubicacion_nombre` (joins en el back) para no hacer joins en el front. Tests siguen verdes (26).
+- **Verificado end-to-end**: ambos servers levantados, proxy `/api` ok, screenshots de las dos páginas con datos reales.
+- **Tipos en `shared/api/types.ts`**: réplica de los DTOs. Pendiente real de regla #8: paquete compartido de schemas Zod back/front (hoy duplicados).
+
+---
 
 ## ✅ Fase 0 — CERRADA (2026-06-11)
 
@@ -25,15 +118,59 @@ npm test               # backend: test de conexión a DB de test ✅ (1 passed)
 ### Cambio de diseño aplicado en el cierre (11/06)
 - **Se descartó el flujo n8n y la tabla `sugeridos_dia`** (migración `0002` eliminada). Motivo: la app del compañero ya muestra el sugerido y depósito carga el real ahí; ese número final entra a nuestra app **por API REST** y se materializa como **RINT auto-confirmado**. Ver `ARCHITECTURE.md` §8/§15. Schema reverificado: `db:generate` → "No schema changes".
 
-## 🔜 Fase 1 — Backend de movimientos (PRÓXIMA)
+## 🚧 Fase 1 — Backend de movimientos (EN CURSO)
 
-Branch nueva (`feat/movimientos-fase1-...`). Lo central:
+Branch `feat/movimientos-fase1-backend`.
 
-1. **Endpoint de ingreso de abastecimiento** (`POST`): recibe de la app del compañero cabecera (área destino, fecha) + renglones (`producto_3c`, `cantidad_real`, `cantidad_sugerida`, unidad).
-2. **Crear RINT + auto-confirmar transaccional**: estado CONFIRMADO + correlativo `RINT-2026-xxxxx` (`generar_nro`) + descuento de stock por `cantidad_real` + `REFRESH ... CONCURRENTLY` de `stock_actual`, todo en una transacción (reglas inviolables #2, #6, #7).
-3. **Anulación por contramovimiento** (los confirmados son inmutables, regla #4).
-4. **Tests primero** en lógica de stock y transiciones, incluyendo transaccionalidad y concurrencia (regla #5).
-5. Validación con Zod, un schema compartido back/front (regla #8).
+### ✅ Increment 1 — Ingreso de abastecimiento (HECHO, 13 tests verdes)
+- **`POST /api/abastecimientos`**: recibe el abastecimiento de la app del compañero → crea **RINT** → **auto-confirma transaccional** (regla #6): correlativo `RINT-2026-xxxxx` (`generar_nro`) + cabecera CONFIRMADO + detalle + `REFRESH CONCURRENTLY stock_actual`, todo en una tx. Si algo falla → rollback total.
+- **Descuento por `cantidad_real`** del depósito origen (regla #2); `cantidad_sugerida`/`stock_contado` quedan como referencia.
+- **`GET /api/stock`**: stock actual (matview), filtrable por `ubicacion_id`/`producto_3c`.
+- **Validación Zod** (`domain/movimientos.schema.ts`, regla #8) — pensado para compartir con el front.
+- **Capas respetadas**: routes → controller → service (dueño de la tx) → repository.
+- **Tests (regla #5)**: stock correcto, real-no-sugerida, rollback de validación, transaccionalidad (rollback tras insertar cabecera), **concurrencia** (2 ingresos simultáneos → nros distintos, stock = suma). Infra: `tests/globalSetup.ts` migra la DB de test; `tests/helpers/db.ts` limpia+siembra.
+- **Verificado por HTTP** además de los tests: POST→201 (RINT-2026-00001), inválido→400, área inexistente→404, stock recalculado.
+- **Verificado técnico**: `REFRESH MATERIALIZED VIEW CONCURRENTLY` SÍ corre dentro de la tx en PG16 (regla #6 viable tal cual).
+
+### ✅ Increment 2 — Anulación (HECHO, 6 tests nuevos = 19 verdes)
+- **`PUT /api/movimientos/:id/anular`**: CONFIRMADO → ANULADO transaccional. **DECISIÓN 2026-06-19: flip de estado, NO contramovimiento** (J eligió). Como `stock_actual` filtra `estado='CONFIRMADO'`, voltear el original + `REFRESH` ya revierte el stock; un contramovimiento duplicaría la reversión. Sella `anulado_por`/`anulado_en` (regla #7). Doc actualizada: `CLAUDE.md` regla #4, `ARCHITECTURE.md` §8 (justificación) y §9 (endpoint).
+- **Guards**: inexistente → 404 `MOVIMIENTO_NO_ENCONTRADO`; ya anulado → 409 `YA_ANULADO`; estado ≠ CONFIRMADO → 409 `ESTADO_INVALIDO`. Lock `FOR UPDATE` serializa anulaciones simultáneas.
+- **Tests**: revierte stock + sella auditoría, doble anulación, inexistente, reversión puntual (no toca otros movimientos), transaccionalidad (rollback deja CONFIRMADO), concurrencia (2 anular del mismo mov → una gana, otra YA_ANULADO, stock revierte 1 sola vez).
+
+### ✅ Increment 3 — Listado + detalle (HECHO, 7 tests nuevos = 26 verdes)
+- **`GET /api/movimientos`**: listado con filtros `desde`/`hasta` (rango de fecha inclusive), `tipo` (codigo del catálogo, string libre — extensible), `estado` (set fijo), `ubicacion` (matchea origen O destino) + paginado `page`/`limit` (default 1/50, máx 200). Devuelve `{items, page, limit, total}`; orden recientes primero (fecha desc, id desempata).
+- **`GET /api/movimientos/:id`**: detalle (cabecera + renglones); 404 `MOVIMIENTO_NO_ENCONTRADO` si no existe.
+- **Schema en `domain/movimientos.schema.ts`** (`MovimientosQuerySchema`, regla #8): el front reusa los filtros. Valida `desde <= hasta`.
+- **Tests**: orden y total, filtro por estado, por ubicación (origen/destino), por rango de fechas, por tipo, paginado (total = del filtro completo), detalle + inexistente.
+- **🐛 Fix de concurrencia (latente desde inc. 1)**: dos confirmaciones simultáneas podían dejar la matview sin uno de los movimientos (REFRESH con snapshots que no veían el commit ajeno). Solución: `pg_advisory_xact_lock` antes del `REFRESH` en `refrescarStock` (serializa refresh+commit). El test de concurrencia de abastecimientos dejó de ser flaky (3/3 estable). Blinda también la anulación.
+
+### ✅ Increment 5 — Auth JWT (HECHO, 11 tests nuevos = 37 verdes)
+- **JWT propio** (Bearer + localStorage). `POST /api/auth/login` (bcrypt + token firmado, expira en 8h) y `GET /api/auth/me`. Secreto en `JWT_SECRET` (.env + CI). Roles v1: ADMIN, DEPOSITO (+ SISTEMA = integración M2M).
+- **Middleware** `requireAuth` (cuelga `req.user`) + `requireRole`. Protección: lecturas movimientos/stock = cualquier login; **anular = solo ADMIN** (audita al usuario del token, no al de integración); login público; `abastecimientos` M2M abierto (API key pendiente).
+- **Front**: `LoginPage`, `AuthProvider` + `useAuth`, guarda `RequireAuth`, Bearer automático en el cliente HTTP + manejo de 401 (cierra sesión), header con usuario/rol + botón Salir.
+- **Tests**: login OK/credenciales inválidas/usuario inactivo, firma+verificación de token, `requireAuth` (sin header / token malo / OK), `requireRole` (permite/deniega 403). Verificado end-to-end por HTTP: 401 sin token, 200 con token, 403 DEPOSITO→anular.
+- **Usuarios dev** en `db:seed:dev` (admin/deposito, pass `laceleste123`).
+
+### ✅ Increment 6 — Editar movimiento con historial (HECHO, 7 tests nuevos = 44 verdes)
+- **Regla #4 relajada (decisión de J 2026-06-19)**: auditabilidad sobre inmutabilidad. Los movimientos **se editan** (cualquier usuario logueado, sin restricción de rol), pero **toda edición deja historial**. Anular sigue siendo solo-ADMIN y de vez en cuando.
+- **`PUT /api/movimientos/:id`**: reemplazo completo (todo editable, incluido tipo/origen/destino). Transaccional (regla #6): valida refs → actualiza cabecera + renglones → registra diff en `movimientos_auditoria` → recalcula stock. 409 si el movimiento está ANULADO.
+- **`GET /api/movimientos/:id/historial`**: lista las ediciones (quién/cuándo/qué cambió, valor antes/después).
+- **Tabla nueva** `movimientos_auditoria` (migración `0002`): una fila por edición, `cambios` JSONB con el diff. Aplicada en dev; `globalSetup` la aplica en test.
+- **Tests**: editar cantidad recalcula stock + historial, cambio de producto mueve stock, edición descriptiva no toca stock, edición sin cambios no genera historial, 404 inexistente, 409 anulado, rollback transaccional. Verificado e2e por HTTP (1350→1380 + historial con diff).
+
+### ✅ Estructura git (HECHO)
+- Creadas y pusheadas `main` (desde scaffold Fase 0 = baseline desplegable) y `dev` (desde main). Falta el paso manual: setear `main` como default branch en GitHub (no hay `gh`/token). Las fases mergean por PR a `dev`; `dev`→`main` al liberar.
+
+### ⏳ Pendiente en Fase 1 (próximos increments)
+- **POST /api/movimientos** (crear BORRADOR) + **PUT /:id/confirmar**, export Excel, kardex, sincronizar-3c.
+- **Idempotencia** del POST de abastecimientos + **API key** para asegurar ese endpoint M2M.
+- **GET /api/movimientos** (listado con filtros + paginado), **GET /api/movimientos/:id**, export Excel, kardex, sincronizar-3c.
+
+### ❓ Supuestos del contrato del POST — VALIDAR con el compañero
+1. **Área destino** identificada por su `dep_id_3c` de 3c (campo `destino_dep_id_3c`).
+2. **Depósito origen**: `origen_dep_id_3c` opcional; si falta usa `DEPOSITO_PRINCIPAL_DEP_ID_3C` (.env). v1 = un solo depósito.
+3. **Renglón**: `producto_3c`, `cantidad_real` (oblig.), `cantidad_sugerida`/`stock_contado` (opc.), `unidad`.
+4. **Idempotencia**: NO implementada. Si la app del compañero re-empuja el mismo abastecimiento, se duplica. Falta acordar un id externo único para deduplicar (recomendado: que su app mande su propio id y lo guardemos para rechazar duplicados).
 
 ## 🧷 Recordatorios sueltos (cancha de J)
 - **C: del equipo de J está al límite (~99% usado).** Conviene una limpieza a fondo del disco del sistema (Docker Desktop, descargas) cuando haya un rato; el cierre de Fase 0 necesitó liberar npm-cache+Temp para tener aire.

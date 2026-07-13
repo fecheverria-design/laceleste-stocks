@@ -34,6 +34,9 @@ jobs:
       # El test de conexión lee esta variable. Apunta al service de arriba.
       DATABASE_URL_TEST: postgresql://laceleste:laceleste_dev@localhost:5432/laceleste_movimientos_test
       DATABASE_URL: postgresql://laceleste:laceleste_dev@localhost:5432/laceleste_movimientos_test
+      # Secreto de prueba para firmar/verificar JWT en los tests (no es secreto real).
+      JWT_SECRET: ci-test-secret-no-usar-en-produccion
+      JWT_EXPIRES_IN_SECONDS: "28800"
 
     steps:
       - uses: actions/checkout@v4
