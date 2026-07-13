@@ -28,6 +28,7 @@ import {
   obtenerMovimiento,
   productosExistentes,
   refrescarStock,
+  sincronizadosEnFechas,
   tipoPorCodigo,
   type CambioAuditoria,
   type FilaAuditoria,
@@ -281,6 +282,71 @@ export async function anularMovimiento(
     if (!anulado) throw new AppError('INTERNAL', 'No se pudo releer el movimiento anulado', 500);
     return anulado;
   });
+}
+
+export interface BajaDetectada {
+  movimientoId: number;
+  nro: string;
+  fecha: string; // la fecha con la que lo tenemos materializado
+  externoId: number; // id en la app de origen (ej. recepción #514 de la app del compañero)
+  fechaEnOrigen?: string; // solo si el origen TODAVÍA lo lista (reprogramado, no borrado)
+}
+
+export interface ReconciliarBajasOpts {
+  usuarioId: number; // a quién se audita la anulación (regla #7)
+  dry?: boolean; // true → detecta y reporta, no anula
+}
+
+// Reconciliación de BAJAS (contracara del modo reconciliar): lo que un sync materializó y
+// la app de origen ya NO lista en la ventana. Sin esto, una recepción BORRADA en la app del
+// compañero queda viva acá inflando el stock para siempre (fue el caso LOGINCOR del 04/07:
+// una entrada duplicada en su agenda, que ellos borraron, nos dejó la mercadería contada dos
+// veces).
+//
+// Dos casos distintos, y la diferencia importa:
+//   - BORRADA en el origen (el id no existe en ningún lado) → ANULAR: flip de estado, el
+//     stock se revierte solo porque stock_actual filtra por CONFIRMADO (regla #4).
+//   - REPROGRAMADA a otra fecha (el id existe, con otra fecha) → NO SE TOCA. Anular es
+//     irreversible (un ANULADO no revive, ni el sync lo resucita): si la anuláramos,
+//     cuando su nueva fecha entre en la ventana la recepción quedaría perdida para siempre.
+//     Se reporta y listo; al entrar la fecha nueva en la ventana, el modo reconciliar le
+//     corrige la fecha solo.
+//
+// `indiceOrigen` es lazy a propósito: pedir el índice completo del origen cuesta varias
+// llamadas HTTP, y en la corrida normal (nada huérfano) no hace falta ninguna.
+export async function reconciliarBajas(
+  prefijo: string,
+  fechas: string[],
+  vistas: Set<number>,
+  indiceOrigen: () => Promise<Map<number, string>>,
+  opts: ReconciliarBajasOpts,
+): Promise<{ anuladas: BajaDetectada[]; reprogramadas: BajaDetectada[] }> {
+  const materializados = await sincronizadosEnFechas(prefijo, fechas);
+
+  const huerfanos: BajaDetectada[] = [];
+  for (const m of materializados) {
+    const externoId = Number(m.idempotenciaKey.slice(prefijo.length));
+    // Claves cuyo sufijo no es un id numérico (ej. 'abast:<fecha>:<area>') no se reconcilian acá.
+    if (!Number.isInteger(externoId) || vistas.has(externoId)) continue;
+    huerfanos.push({ movimientoId: m.id, nro: m.nro, fecha: m.fecha, externoId });
+  }
+  if (huerfanos.length === 0) return { anuladas: [], reprogramadas: [] };
+
+  const indice = await indiceOrigen();
+  const anuladas: BajaDetectada[] = [];
+  const reprogramadas: BajaDetectada[] = [];
+
+  for (const h of huerfanos) {
+    const fechaEnOrigen = indice.get(h.externoId);
+    if (fechaEnOrigen !== undefined) {
+      reprogramadas.push({ ...h, fechaEnOrigen });
+      continue;
+    }
+    if (!opts.dry) await anularMovimiento(h.movimientoId, { usuarioId: opts.usuarioId });
+    anuladas.push(h);
+  }
+
+  return { anuladas, reprogramadas };
 }
 
 export interface ListarMovimientosParams extends ListaFiltros {

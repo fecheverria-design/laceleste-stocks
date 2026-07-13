@@ -2,7 +2,7 @@ import { eq, inArray } from 'drizzle-orm';
 import { db, pool } from './client.js';
 import { productos, proveedores } from './schema.js';
 import { resolverUsuarioIntegracion } from '../repositories/movimientos.repository.js';
-import { registrarRecepcion } from '../services/movimientos.service.js';
+import { reconciliarBajas, registrarRecepcion } from '../services/movimientos.service.js';
 import { AppError } from '../domain/errors.js';
 import type { RecepcionInput } from '../domain/movimientos.schema.js';
 
@@ -27,6 +27,17 @@ import type { RecepcionInput } from '../domain/movimientos.schema.js';
 // RECEPCION #id YA existe, en vez de dejarla como estaba la REEDITA con el estado fresco
 // (si después del primer pull pasaron más ítems por BPM o corrigieron una cantidad, se
 // refleja) → auditado + stock recalculado. Sin cambios = no-op. Por eso sirve correr cada ~1h.
+//
+// RECONCILIACIÓN DE BAJAS: además de altas y cambios, cada corrida chequea lo que
+// materializamos y la app del compañero YA NO lista en la ventana. Si la recepción fue
+// BORRADA allá (el id no existe en ninguna fecha) → la ANULAMOS acá (revierte stock). Si
+// solo la REPROGRAMARON → se avisa y no se toca (anular es irreversible; cuando su fecha
+// nueva entre en la ventana, el modo reconciliar la corrige sola). Sin esto, una entrada
+// duplicada que ellos borran nos deja la mercadería contada dos veces (caso LOGINCOR 04/07).
+//
+// RENGLONES SIN CANTIDAD: la cantidad recibida SOLO vive en el BPM. Un ítem de la agenda sin
+// BPM no tiene cantidad en ningún lado → es imposible materializarlo. No se inventa: se avisa
+// ítem por ítem (⚠ incompleta) para que ese día se cargue del export de 3c (import:movimientos).
 //
 // VENTANA MÓVIL: sin argumentos, sincroniza HOY + los VENTANA_DIAS_ATRAS días previos
 // (default 2). Autorrecupera días perdidos si la PC estuvo apagada; los días sin novedad
@@ -192,6 +203,34 @@ async function fetchRecepciones(baseUrl: string, token: string, fecha: string): 
   return out;
 }
 
+// Índice completo de recepciones del origen (id → fecha), sin filtrar por fecha. Se usa solo
+// cuando hay huérfanas, para distinguir BORRADA (no está en ninguna fecha) de REPROGRAMADA
+// (está, con otra fecha). Son ~500 filas → unas pocas páginas.
+async function fetchIndiceRecepciones(baseUrl: string, token: string): Promise<Map<number, string>> {
+  const indice = new Map<number, string>();
+  let offset = 0;
+  const limit = 100;
+  for (;;) {
+    const res = await fetch(`${baseUrl}/api/recepciones?limit=${limit}&offset=${offset}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const json = (await res.json().catch(() => ({}))) as {
+      success?: boolean;
+      data?: Recepcion[];
+      hayMas?: boolean;
+      message?: string;
+    };
+    if (!res.ok || !json.success) {
+      throw new Error(`índice de recepciones falló (${res.status}): ${json.message ?? 'sin detalle'}`);
+    }
+    const data = json.data ?? [];
+    for (const r of data) indice.set(r.id, (r.fecha ?? '').slice(0, 10));
+    if (!json.hayMas || data.length === 0) break;
+    offset += limit;
+  }
+  return indice;
+}
+
 async function fetchBpm(baseUrl: string, token: string, recepcionId: number): Promise<BpmItem[]> {
   const res = await fetch(`${baseUrl}/api/bpm/recepcion/${recepcionId}`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -277,6 +316,12 @@ async function main(): Promise<void> {
   let prodSalteados = 0;
   let provNoResuelto = 0;
   let errores = 0;
+  let incompletas = 0;
+  let itemsSinCantidad = 0;
+  // Ids de recepción que la app del compañero SÍ listó en la ventana (aunque no se
+  // materialicen: sin BPM, sin producto en el maestro, etc.). Lo que tenemos nosotros y no
+  // está acá es una baja → reconciliarBajas() decide si anular.
+  const vistas = new Set<number>();
 
   for (const fecha of fechas) {
     const recepciones = await fetchRecepciones(baseUrl, token, fecha);
@@ -286,6 +331,7 @@ async function main(): Promise<void> {
     }
 
     for (const r of recepciones) {
+      vistas.add(r.id);
       // Solo tiene sentido pedir el BPM si algún ítem pasó por control (tiene cantidad).
       const conBpm = r.items?.some((i) => i.tiene_bpm) ?? false;
       if (!conBpm) {
@@ -309,6 +355,24 @@ async function main(): Promise<void> {
       if (candidatos.length === 0) {
         saltadasSinBpm++;
         continue;
+      }
+
+      // Ítems de la agenda que NO aportan cantidad (sin BPM, o BPM en 0). La cantidad solo
+      // vive en el BPM, así que estos renglones son imposibles de materializar: la recepción
+      // entra INCOMPLETA. Se avisan uno por uno en vez de desaparecer en silencio — así se
+      // ve que ese día hay que completarlo con el export de 3c (import:movimientos).
+      const conCantidad = new Set(candidatos.map((c) => c.producto_3c));
+      const sinCantidad = (r.items ?? []).filter((i) => {
+        const cod = i.articulo_codigo === null || i.articulo_codigo === undefined ? '' : String(i.articulo_codigo).trim();
+        return cod !== '' && !conCantidad.has(cod);
+      });
+      if (sinCantidad.length > 0) {
+        incompletas++;
+        itemsSinCantidad += sinCantidad.length;
+        const lista = sinCantidad.map((i) => `${i.articulo_codigo} ${i.articulo_nombre ?? ''}`.trim()).join(', ');
+        console.log(
+          `    ⚠ recep #${r.id} ${r.proveedor_nombre ?? ''}: ${sinCantidad.length} ítem(s) SIN cantidad (sin BPM) → ${lista}`,
+        );
       }
 
       // Pre-filtra productos inexistentes en nuestro maestro: así una recepción no se
@@ -360,12 +424,35 @@ async function main(): Promise<void> {
     }
   }
 
+  // BAJAS: lo que tenemos materializado y la app del compañero ya no lista en estas fechas.
+  // Borrada allá → anular acá (revierte stock). Reprogramada → avisar, no tocar.
+  const { anuladas, reprogramadas } = await reconciliarBajas(
+    'recep:',
+    fechas,
+    vistas,
+    () => fetchIndiceRecepciones(baseUrl, token),
+    { usuarioId, dry },
+  );
+  for (const a of anuladas) {
+    console.log(
+      `    ⌫ ${a.nro} (recep #${a.externoId}, ${a.fecha}) ya no existe en la app del compañero → ${dry ? '[dry] se ANULARÍA' : 'ANULADO'} (stock revertido)`,
+    );
+  }
+  for (const r of reprogramadas) {
+    console.log(
+      `    ⚠ ${r.nro} (recep #${r.externoId}) se movió del ${r.fecha} al ${r.fechaEnOrigen} en la app del compañero → NO se anula; revisá la fecha.`,
+    );
+  }
+
   console.log(
     `\n${dry ? 'DRY-RUN — nada se escribió. ' : ''}` +
       `${movimientos} recepción(es), ${renglones} renglón(es)` +
       `${saltadasSinBpm ? `, ${saltadasSinBpm} sin BPM/cantidad` : ''}` +
+      `${incompletas ? `, ${incompletas} INCOMPLETA(s) (${itemsSinCantidad} ítem(s) sin cantidad → completar con el export de 3c)` : ''}` +
       `${prodSalteados ? `, ${prodSalteados} renglón(es) sin producto en maestro` : ''}` +
       `${provNoResuelto ? `, ${provNoResuelto} sin proveedor en maestro` : ''}` +
+      `${anuladas.length ? `, ${anuladas.length} anulada(s) por baja en el origen` : ''}` +
+      `${reprogramadas.length ? `, ${reprogramadas.length} reprogramada(s)` : ''}` +
       `${errores ? `, ${errores} con error` : ''}.`,
   );
 }

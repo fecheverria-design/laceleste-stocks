@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, lte, or, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, like, lte, or, sql, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { db, type Tx } from '../db/client.js';
 import {
@@ -30,14 +30,14 @@ export interface CabeceraInput {
   proveedorId?: number | null; // solo RECEPCION lo usa; el resto queda null
 }
 
-export interface RenglonInput {
-  producto3c: string;
-  cantidadReal: string;
-  cantidadSugerida?: string;
-  stockContado?: string;
-  unidad: string;
-  observaciones?: string;
-}
+// Renglón a insertar en `movimientos_detalle`. Derivado del schema (insert) menos las
+// columnas que pone el repo/service: id (serial), movimiento_id (lo asigna insertarDetalle)
+// y lote_id (puerta abierta, no se carga en v1). Si la tabla suma una columna NOT NULL,
+// TypeScript lo marca acá.
+export type RenglonInput = Omit<
+  typeof movimientosDetalle.$inferInsert,
+  'id' | 'movimientoId' | 'loteId'
+>;
 
 // ── Resolución de catálogos (corren dentro de la tx) ─────────────────────────
 
@@ -119,6 +119,41 @@ export async function buscarPorIdempotencia(tx: Tx, key: string): Promise<number
     .where(eq(movimientos.idempotenciaKey, key))
     .limit(1);
   return row?.id;
+}
+
+export interface MovimientoSincronizado {
+  id: number;
+  nro: string;
+  fecha: string;
+  idempotenciaKey: string;
+}
+
+// Movimientos CONFIRMADOS que materializó un sync (idempotencia_key con el prefijo dado,
+// ej. 'recep:') dentro de una lista de fechas. Es el insumo de la reconciliación de BAJAS:
+// lo que nosotros tenemos vivo y el origen ya no lista. Solo CONFIRMADO: un ANULADO ya no
+// pesa en el stock y no se resucita.
+export async function sincronizadosEnFechas(
+  prefijo: string,
+  fechas: string[],
+): Promise<MovimientoSincronizado[]> {
+  if (fechas.length === 0) return [];
+  const rows = await db
+    .select({
+      id: movimientos.id,
+      nro: movimientos.nro,
+      fecha: movimientos.fecha,
+      idempotenciaKey: movimientos.idempotenciaKey,
+    })
+    .from(movimientos)
+    .where(
+      and(
+        eq(movimientos.estado, 'CONFIRMADO'),
+        inArray(movimientos.fecha, fechas),
+        like(movimientos.idempotenciaKey, `${prefijo}%`),
+      ),
+    );
+  // El where ya garantiza que idempotencia_key no es null (LIKE nunca matchea NULL).
+  return rows.map((r) => ({ ...r, idempotenciaKey: r.idempotenciaKey! }));
 }
 
 export async function insertarDetalle(tx: Tx, movimientoId: number, renglones: RenglonInput[]): Promise<void> {

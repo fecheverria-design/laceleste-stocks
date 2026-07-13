@@ -13,6 +13,11 @@ Guía práctica para que el stock se mantenga sincronizado con la app del compa�
 - Modo **reconciliar** + **ventana móvil**: cada corrida re-lee **hoy + los 2 días
   anteriores** y actualiza lo que haya cambiado (real corregido, renglones nuevos). Si algo
   ya estaba igual, no hace nada (no duplica, no ensucia el historial).
+- **Bajas (recepciones):** si una recepción que ya habíamos traído **desaparece** de la app
+  del compañero (la borraron), la corrida la **anula sola** acá y el stock se revierte. Si en
+  cambio solo la **movieron de fecha**, no se toca: se avisa en el log (`⚠ … se movió del …
+  al …`) y cuando esa fecha nueva entre en la ventana se corrige sola. Anular es irreversible
+  (un ANULADO no revive), por eso solo se anula lo que realmente ya no existe.
 
 **Traducción a lo cotidiano:** vos no tenés que correr nada. Con la PC prendida y logueada,
 el stock se actualiza solo cada hora. Lo único que hace falta es que **el real esté cargado
@@ -93,6 +98,13 @@ npm -w backend run sync:recepciones -- --desde=2026-06-20 --hasta=2026-06-30
   WHERE idempotencia_key IS NOT NULL GROUP BY 1 HAVING count(*) > 1;
   ```
   (0 filas = sin duplicados.)
+- **`⚠ recep #N: X ítem(s) SIN cantidad (sin BPM)` en el log → la recepción entró INCOMPLETA.**
+  La cantidad recibida **solo** vive en el BPM de su app: un ítem que no pasó por control BPM
+  no tiene cantidad en ningún lado, así que es imposible traerlo (no se inventa). Esos
+  renglones hay que cargarlos del **export de 3c**: `npm run import:movimientos -- <archivo.tsv>`
+  (probá primero con `--dry`, que ahora sí no escribe nada). **Ojo:** el import de 3c dedup por
+  `nro_3c`, y lo que trajo el sync tiene `nro_3c` nulo → **anulá primero la recepción del sync**
+  o vas a duplicar.
 
 ## Backups y recuperación
 
