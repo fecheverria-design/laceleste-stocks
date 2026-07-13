@@ -1,20 +1,54 @@
 # PROGRESO — laceleste-movimientos
 
-> Estado para retomar fácil. Última actualización: 2026-07-01.
+> Estado para retomar fácil. Última actualización: 2026-07-13.
 
-## ⏭️ PRÓXIMO PASO (retomar acá — 2026-07-01) — PASO 2: registrar la tarea
-El **PASO 1 (modo reconciliar + ventana móvil) y los artefactos del scheduler están
-HECHOS** (ver abajo). Lo único que falta es la **acción manual de J: registrar la tarea**
-en su PC (un comando) y confirmar que corre.
+## ⏭️ PRÓXIMO PASO (retomar acá — 2026-07-13): EL SERVIDOR
 
-**Registrar (una vez, en PowerShell como el usuario que queda logueado):**
-```
-cd D:\Bibliotecas\Desktop\Appstocks
-powershell -ExecutionPolicy Bypass -File scripts\register-sync-task.ps1
-```
-Probar a mano: `Start-ScheduledTask -TaskName "LaCeleste Sync en vivo"` y mirar
-`logs\sync-live.log`. Ajustar frecuencia (ej. cada 30 min) editando el `<Interval>` del
-XML y re-registrando.
+La **prueba de fuego pasó**: J comparó stock app vs 3c a mano y da bien (los ítems que no
+cuadran son los que nunca pasan por la app de Tincho: envíos a Locales y abastecimientos
+fuera de hora). Los **dos agujeros conocidos del sync están cerrados** (bajas de recepciones
+y de abastecimientos). Ya no hay nada funcional bloqueando el deploy.
+
+**Lo que falta para el servidor** (nada de esto está hecho):
+1. **Decidir dónde vive** (VPS / máquina en la panadería). La app de Tincho es accesible por
+   internet (`https://produccion.laceleste.com.ar`), así que el sync puede correr desde
+   cualquier lado → se deja de depender de la PC de J prendida.
+2. Postgres + build del front servido estático + backend detrás de HTTPS.
+3. Los dos syncs pasan de la Tarea Programada de Windows a cron del server. Idem el backup.
+4. **Seguridad al publicar (obligatorio, no antes):** `JWT_SECRET` nuevo (random, lo genera
+   la máquina) y **cambiar las contraseñas** de `admin@` y `deposito@` — hoy son las de demo
+   (`laceleste123`, está escrita en `seed-dev.ts`, o sea en el repo). Se hace con
+   `npm run usuarios -- pass --email … --pass …`. Mientras sea todo localhost NO es un riesgo.
+
+**Acción manual pendiente de J:** mergear los 2 commits que quedaron fuera del último PR
+(`12a2144` auditoría + `c6aa5c1` bajas de abastecimientos): PR `feat/inventarios` → `dev`, y
+después `dev` → `main`. (`main` ya dejó de estar vacío: PR #3 y #5 metieron los 31 commits.)
+
+## ✅ HECHO el 2026-07-13 (branch feat/inventarios)
+- **Bajas del sync (los dos lados).** El sync sabía dar de alta y editar, no dar de BAJA.
+  - *Recepciones:* si la borran en la app de Tincho, se **anula** acá y el stock se revierte.
+    Si solo la reprogramaron, NO se toca (se avisa; la corrige sola al entrar en la ventana).
+    Diagnóstico del caso LOGINCOR 04/07: no era "el sync duplica", era una recepción **borrada
+    allá** que quedaba viva acá.
+  - *Abastecimientos:* si vacían un área entera (borran todos los reales), se **anula**. Y es
+    **reversible**: si el real vuelve, el sync **revive** su propia baja (un ANULADO por una
+    persona NO se revive nunca, regla #4). Seguro extra: un día en que la API no devuelve
+    filas no anula nada.
+  - Los movimientos importados de 3c no tienen `idempotencia_key` → ningún sync los toca.
+- **Renglones sin cantidad:** un ítem sin BPM no tiene cantidad en NINGÚN lado (imposible de
+  traer). Antes desaparecía en silencio; ahora se avisa ítem por ítem (⚠ INCOMPLETA) → ese día
+  se completa con `import:movimientos`.
+- **`import:movimientos --dry` ahora existe de verdad** (antes el flag se tomaba como nombre de
+  archivo y escribía igual). Alias `FECHA_RECEPCION` para el export de Rint de 3c.
+- **Sábado 11/07 cargado a mano** desde el export de 3c (172 renglones → 14 RINT + 4 AJUSTE):
+  ese día depósito nunca guardó el real en la app de Tincho (185 filas, 185 sin real).
+- **ABM de usuarios por consola:** `npm run usuarios -- listar|crear|pass|baja|alta`. La baja es
+  lógica (no se borra: los movimientos que auditó lo apuntan).
+- **Auditoría visible (pedido de J):** el historial dice QUIÉN editó y QUIÉN anuló, **con
+  nombre** (antes decía "usuario #7", y la anulación ni siquiera entraba al historial). El
+  detalle muestra "Cargado por X" / "Anulado por Y". La reactivación del sync también deja
+  rastro. 143 tests verdes.
+- Movimiento `AJU-2026-00247` = prueba e2e de la auditoría, quedó **ANULADO** (no afecta stock).
 
 ## ✅ PASO 2 — Scheduler de Windows (artefactos) — HECHO (2026-07-01), falta registrar
 Todo en `scripts/` (versionado):
