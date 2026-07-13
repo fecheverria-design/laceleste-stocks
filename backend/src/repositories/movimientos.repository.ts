@@ -214,6 +214,17 @@ export async function marcarAnulado(tx: Tx, id: number, usuarioId: number): Prom
     .where(eq(movimientos.id, id));
 }
 
+// Deshace una anulación: ANULADO → CONFIRMADO y borra los sellos. SOLO lo usa el sync para
+// revertir SUS PROPIAS bajas (ver reconciliarBajas): si el dato reapareció en la app del
+// compañero, la baja fue un reflejo del origen, no una decisión humana. Una anulación hecha
+// por una persona NUNCA se revive (regla #4: la anulación humana manda).
+export async function revivirMovimiento(tx: Tx, id: number): Promise<void> {
+  await tx
+    .update(movimientos)
+    .set({ estado: 'CONFIRMADO', anuladoPor: null, anuladoEn: null })
+    .where(eq(movimientos.id, id));
+}
+
 // ── Edición (dentro de la tx) ────────────────────────────────────────────────
 
 export interface RenglonSnapshot {
@@ -392,6 +403,7 @@ export interface MovimientoConDetalle {
   proveedor_numero_3c: number | null;
   confirmado_en: string | null;
   anulado_en: string | null;
+  anulado_por: number | null; // quién anuló: distingue una baja del sync de una anulación humana
   detalle: {
     producto_3c: string;
     producto_nombre: string;
@@ -432,6 +444,7 @@ export async function obtenerMovimiento(
       proveedor_numero_3c: proveedores.numero3c,
       confirmado_en: movimientos.confirmadoEn,
       anulado_en: movimientos.anuladoEn,
+      anulado_por: movimientos.anuladoPor,
     })
     .from(movimientos)
     .innerJoin(tiposMovimiento, eq(tiposMovimiento.id, movimientos.tipoId))

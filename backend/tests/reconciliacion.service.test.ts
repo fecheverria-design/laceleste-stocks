@@ -7,7 +7,7 @@ import {
   obtenerStock,
   registrarAbastecimiento,
 } from '../src/services/movimientos.service.js';
-import { cerrarPool, limpiar, sembrarEscenario } from './helpers/db.js';
+import { cerrarPool, limpiar, sembrarEscenario, sembrarUsuario } from './helpers/db.js';
 
 // Modo RECONCILIAR (sync "en vivo"): al re-sincronizar la misma (fecha, área), el
 // movimiento existente se REEDITA con el estado fresco de la app del compañero en vez de
@@ -139,7 +139,10 @@ describe('reconciliar abastecimiento (sync en vivo)', () => {
       { ...base, detalle: [{ producto_3c: '401', cantidad_real: 100, unidad: 'KG' }] },
       { usuarioId: fx.usuarioId, reconciliar: true },
     );
-    await anularMovimiento(primero.id, { usuarioId: fx.usuarioId });
+    // Lo anula una PERSONA (no el usuario con el que corre el sync): esa decisión no se pisa.
+    // El sync sí revive sus propias bajas, pero eso es otra cosa (ver reconciliacion-bajas-*).
+    const humano = await sembrarUsuario('admin.humano@laceleste.local');
+    await anularMovimiento(primero.id, { usuarioId: humano });
     expect((await obtenerStock({ producto3c: '401' })).length).toBe(0); // anulado → stock revertido
 
     // El sync vuelve a pasar por esa fecha: no debe reeditar ni fallar.

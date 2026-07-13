@@ -21,6 +21,17 @@ export interface Fixtures {
   area: { id: number; depId3c: number };
 }
 
+// Un usuario extra. Sirve para distinguir a una PERSONA del usuario con el que corre el sync:
+// el sync revive sus propias bajas, pero una anulación humana no se resucita nunca (regla #4).
+export async function sembrarUsuario(email: string, nombre = 'Admin Humano'): Promise<number> {
+  const [u] = await db
+    .insert(usuarios)
+    .values({ nombre, email, passHash: 'x', rol: 'ADMIN' })
+    .returning({ id: usuarios.id });
+  if (!u) throw new Error('No se pudo sembrar el usuario');
+  return u.id;
+}
+
 // Escenario base: un usuario, un depósito (origen) y un área (destino), más los
 // productos pedidos. Devuelve ids/códigos para armar los casos.
 export async function sembrarEscenario(opts: {
