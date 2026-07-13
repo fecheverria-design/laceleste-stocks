@@ -174,7 +174,10 @@ export function MovimientosPage() {
                   </td>
                   <td className="px-4 py-3 text-slate-600">{m.fecha}</td>
                   <td className="px-4 py-3 text-slate-600">
-                    <span className="text-slate-400">{m.origen_dep_id_3c} —</span> {m.origen_nombre}{' '}
+                    <span className="text-slate-400">{m.origen_dep_id_3c} —</span> {m.origen_nombre}
+                    {m.proveedor_nombre && (
+                      <span className="ml-1 font-medium text-slate-700">({m.proveedor_nombre})</span>
+                    )}{' '}
                     <span className="text-slate-400">→ {m.destino_dep_id_3c} —</span> {m.destino_nombre}
                   </td>
                 </tr>

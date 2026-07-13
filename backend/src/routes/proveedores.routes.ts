@@ -3,6 +3,7 @@ import {
   getFamilias,
   getGastoMensual,
   getGastoProveedores,
+  getProductosProveedor,
   getProveedores,
   postProveedor,
 } from '../controllers/proveedores.controller.js';
@@ -14,5 +15,6 @@ export const proveedoresRouter = Router();
 proveedoresRouter.get('/proveedores', requireAuth, getProveedores);
 proveedoresRouter.get('/proveedores/gasto', requireAuth, getGastoProveedores);
 proveedoresRouter.get('/proveedores/gasto-mensual', requireAuth, getGastoMensual);
+proveedoresRouter.get('/proveedores/:id/productos', requireAuth, getProductosProveedor);
 proveedoresRouter.get('/familias', requireAuth, getFamilias);
 proveedoresRouter.post('/proveedores', requireAuth, postProveedor);

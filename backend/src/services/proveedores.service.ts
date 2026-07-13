@@ -7,13 +7,20 @@ import {
   insertarProveedor,
   listarFamilias,
   listarProveedores,
+  productosPorProveedor,
   type FilaProveedor,
+  type FiltrosGasto,
   type GastoMes,
   type GastoProveedor,
+  type ProductoDeProveedor,
 } from '../repositories/proveedores.repository.js';
 
-export const obtenerProveedores = (): Promise<FilaProveedor[]> => listarProveedores();
+export const obtenerProveedores = (filtros?: FiltrosGasto): Promise<FilaProveedor[]> =>
+  listarProveedores(filtros);
 export const obtenerFamilias = (): Promise<string[]> => listarFamilias();
+
+export const obtenerProductosProveedor = (id: number, filtros?: FiltrosGasto): Promise<ProductoDeProveedor[]> =>
+  productosPorProveedor(id, filtros);
 
 export const obtenerGastoProveedores = (filtros: {
   familia?: string;

@@ -1,7 +1,12 @@
 import { env } from '../config/env.js';
-import { db } from '../db/client.js';
+import { db, type Tx } from '../db/client.js';
 import { AppError, badRequest, conflict, notFound } from '../domain/errors.js';
-import type { AbastecimientoInput, CrearMovimientoInput, EditarMovimientoInput } from '../domain/movimientos.schema.js';
+import type {
+  AbastecimientoInput,
+  CrearMovimientoInput,
+  EditarMovimientoInput,
+  RecepcionInput,
+} from '../domain/movimientos.schema.js';
 import {
   actualizarCabecera,
   bloquearMovimiento,
@@ -23,6 +28,7 @@ import {
   obtenerMovimiento,
   productosExistentes,
   refrescarStock,
+  sincronizadosEnFechas,
   tipoPorCodigo,
   type CambioAuditoria,
   type FilaAuditoria,
@@ -38,7 +44,16 @@ import {
 
 export interface RegistrarAbastecimientoOpts {
   usuarioId: number; // a quién se audita el movimiento (regla #7)
+  // Modo RECONCILIAR (sync "en vivo", opt-in): si ya existe un movimiento con la misma
+  // idempotency_key, en vez de devolverlo tal cual (foto de la 1ª corrida), reeditarlo
+  // con el estado fresco de la app del compañero → auditado + stock recalculado. Sin
+  // cambios = no-op (no ensucia el historial). Default (false / undefined) → el POST M2M
+  // sigue siendo "crear una vez". Detalle en registrarAutoConfirmado.
+  reconciliar?: boolean;
 }
+
+// Recepción comparte la misma forma de opts (a quién se audita).
+export type RegistrarRecepcionOpts = RegistrarAbastecimientoOpts;
 
 // Fecha local YYYY-MM-DD y hora HH:MM:SS para las columnas date/time.
 function partesFechaHora(): { fecha: string; hora: string; anio: number } {
@@ -52,35 +67,71 @@ function partesFechaHora(): { fecha: string; hora: string; anio: number } {
   return { fecha: `${yyyy}-${mm}-${dd}`, hora: `${hh}:${mi}:${ss}`, anio: yyyy };
 }
 
-// Ingreso de abastecimiento de la app del compañero → RINT auto-confirmado.
-// TODO transaccional (regla #6): correlativo + cabecera CONFIRMADO + detalle +
-// refresh de stock_actual. El stock se descuenta del DEPÓSITO (origen) por
-// cantidad_real (regla #2). Si algo falla, la tx entera hace rollback (regla #5).
-export async function registrarAbastecimiento(
-  input: AbastecimientoInput,
-  opts: RegistrarAbastecimientoOpts,
-): Promise<MovimientoConDetalle> {
-  const origenDep = input.origen_dep_id_3c ?? env.DEPOSITO_PRINCIPAL_DEP_ID_3C;
-  if (origenDep === undefined) {
-    throw badRequest(
-      'ORIGEN_REQUERIDO',
-      'Falta origen_dep_id_3c y no hay DEPOSITO_PRINCIPAL_DEP_ID_3C configurado',
-    );
-  }
+// Campos de cabecera/renglones comunes a abastecimiento y recepción (lo que el helper
+// auto-confirmado necesita además del tipo + origen/destino ya resueltos).
+type AutoConfirmadoInput = Pick<
+  AbastecimientoInput,
+  'fecha' | 'turno' | 'proyeccion' | 'observaciones' | 'idempotency_key' | 'detalle'
+> & {
+  proveedor_id?: number | null; // solo lo manda la recepción; el abastecimiento lo deja undefined
+};
 
+// Núcleo transaccional compartido (regla #6): idempotencia + correlativo + cabecera
+// CONFIRMADO + detalle + refresh de stock_actual. El stock se mueve por DIRECCIÓN
+// (origen resta, destino suma; cada punta solo si lleva_stock) usando cantidad_real
+// (regla #2). Si algo falla, la tx entera hace rollback (regla #5). Lo comparten
+// registrarAbastecimiento (RINT, descuenta del origen) y registrarRecepcion
+// (RECEPCION, suma al destino): la única diferencia es el tipo y qué punta es el
+// depósito real.
+async function registrarAutoConfirmado(
+  tipoCodigo: string,
+  origenDep: number,
+  destinoDep: number,
+  input: AutoConfirmadoInput,
+  usuarioId: number,
+  reconciliar: boolean,
+): Promise<MovimientoConDetalle> {
   const { anio, ...defaultFechaHora } = partesFechaHora();
   const fecha = input.fecha ?? defaultFechaHora.fecha;
   // El correlativo usa el año de la fecha del movimiento, no el del reloj.
   const anioNro = input.fecha ? Number(input.fecha.slice(0, 4)) : anio;
 
   return db.transaction(async (tx) => {
-    // Idempotencia M2M: si ya entró un abastecimiento con esta key, devolver ese mismo
-    // (no duplicar). El índice único uq_mov_idempotencia blinda también las concurrentes.
+    // Idempotencia: si ya entró un movimiento con esta key, no se duplica. El índice
+    // único uq_mov_idempotencia blinda también las concurrentes.
     if (input.idempotency_key) {
       const existenteId = await buscarPorIdempotencia(tx, input.idempotency_key);
       if (existenteId !== undefined) {
         const existente = await obtenerMovimiento(tx, existenteId);
-        if (existente) return existente;
+        if (existente) {
+          // Modo RECONCILIAR (sync en vivo, opt-in): en vez de devolver la foto de la
+          // 1ª corrida, reeditar el movimiento con el estado fresco que trae ahora la
+          // app del compañero. Reusa aplicarEdicion con ESTE MISMO tx (sin transacción
+          // anidada) → transaccional, auditado y con stock recalculado. Si nada cambió,
+          // el diff da vacío y no escribe auditoría (no-op: los días sin novedad no
+          // ensucian el historial). Un movimiento ANULADO a mano NO se resucita: se
+          // respeta la anulación y se devuelve tal cual (el sync no lo cuenta como error).
+          if (reconciliar && existente.estado !== 'ANULADO') {
+            return aplicarEdicion(
+              tx,
+              existente.id,
+              {
+                tipo: tipoCodigo,
+                origen_dep_id_3c: origenDep,
+                destino_dep_id_3c: destinoDep,
+                fecha,
+                turno: input.turno,
+                proyeccion: input.proyeccion,
+                observaciones: input.observaciones,
+                proveedor_id: input.proveedor_id, // undefined en abastecimiento → no toca la columna
+                detalle: input.detalle,
+              },
+              usuarioId,
+            );
+          }
+          // Modo "crear una vez" (POST M2M por defecto): devolver el existente sin tocar.
+          return existente;
+        }
       }
     }
 
@@ -89,12 +140,9 @@ export async function registrarAbastecimiento(
       throw notFound('UBICACION_NO_ENCONTRADA', `No existe ubicación con dep_id_3c=${origenDep} (origen)`);
     }
 
-    const destino = await buscarUbicacionPorDep3c(tx, input.destino_dep_id_3c);
+    const destino = await buscarUbicacionPorDep3c(tx, destinoDep);
     if (!destino) {
-      throw notFound(
-        'UBICACION_NO_ENCONTRADA',
-        `No existe ubicación con dep_id_3c=${input.destino_dep_id_3c} (destino)`,
-      );
+      throw notFound('UBICACION_NO_ENCONTRADA', `No existe ubicación con dep_id_3c=${destinoDep} (destino)`);
     }
 
     const codigos = input.detalle.map((r) => r.producto_3c);
@@ -104,12 +152,12 @@ export async function registrarAbastecimiento(
       throw notFound('PRODUCTO_NO_ENCONTRADO', `Productos inexistentes en el maestro: ${faltan.join(', ')}`);
     }
 
-    const tipo = await tipoPorCodigo(tx, 'RINT');
+    const tipo = await tipoPorCodigo(tx, tipoCodigo);
     if (!tipo) {
-      throw new AppError('TIPO_NO_ENCONTRADO', 'Falta el tipo RINT en tipos_movimiento (corré el seed)', 500);
+      throw new AppError('TIPO_NO_ENCONTRADO', `Falta el tipo ${tipoCodigo} en tipos_movimiento (corré el seed)`, 500);
     }
 
-    const nro = await generarNro(tx, 'RINT', anioNro);
+    const nro = await generarNro(tx, tipoCodigo, anioNro);
 
     const movimientoId = await insertarCabecera(tx, {
       nro,
@@ -120,9 +168,10 @@ export async function registrarAbastecimiento(
       proyeccion: input.proyeccion,
       origenId: origen.id,
       destinoId: destino.id,
-      usuarioId: opts.usuarioId,
+      usuarioId,
       observaciones: input.observaciones,
       idempotenciaKey: input.idempotency_key,
+      proveedorId: input.proveedor_id ?? null,
     });
 
     await insertarDetalle(
@@ -138,13 +187,62 @@ export async function registrarAbastecimiento(
       })),
     );
 
-    // Descuenta stock del depósito recalculando la matview, dentro de la misma tx.
+    // Recalcula la matview dentro de la misma tx → mueve el stock.
     await refrescarStock(tx);
 
     const creado = await obtenerMovimiento(tx, movimientoId);
     if (!creado) throw new AppError('INTERNAL', 'No se pudo releer el movimiento recién creado', 500);
     return creado;
   });
+}
+
+// Ingreso de abastecimiento de la app del compañero → RINT auto-confirmado.
+// El stock se descuenta del DEPÓSITO (origen) por cantidad_real (regla #2). Origen
+// opcional: si falta, despacha el DEPOSITO_PRINCIPAL (FABRICA).
+export async function registrarAbastecimiento(
+  input: AbastecimientoInput,
+  opts: RegistrarAbastecimientoOpts,
+): Promise<MovimientoConDetalle> {
+  const origenDep = input.origen_dep_id_3c ?? env.DEPOSITO_PRINCIPAL_DEP_ID_3C;
+  if (origenDep === undefined) {
+    throw badRequest(
+      'ORIGEN_REQUERIDO',
+      'Falta origen_dep_id_3c y no hay DEPOSITO_PRINCIPAL_DEP_ID_3C configurado',
+    );
+  }
+  return registrarAutoConfirmado(
+    'RINT',
+    origenDep,
+    input.destino_dep_id_3c,
+    input,
+    opts.usuarioId,
+    opts.reconciliar ?? false,
+  );
+}
+
+// Recepción de mercadería de la app del compañero → RECEPCION auto-confirmada.
+// Suma stock al DEPÓSITO que recibe (destino) por cantidad_real (regla #2). El origen
+// es el proveedor (requerido por el schema); el destino opcional cae a DEPOSITO_PRINCIPAL
+// (FABRICA). Mismo núcleo transaccional/idempotente que el abastecimiento.
+export async function registrarRecepcion(
+  input: RecepcionInput,
+  opts: RegistrarRecepcionOpts,
+): Promise<MovimientoConDetalle> {
+  const destinoDep = input.destino_dep_id_3c ?? env.DEPOSITO_PRINCIPAL_DEP_ID_3C;
+  if (destinoDep === undefined) {
+    throw badRequest(
+      'DESTINO_REQUERIDO',
+      'Falta destino_dep_id_3c y no hay DEPOSITO_PRINCIPAL_DEP_ID_3C configurado',
+    );
+  }
+  return registrarAutoConfirmado(
+    'RECEPCION',
+    input.origen_dep_id_3c,
+    destinoDep,
+    input,
+    opts.usuarioId,
+    opts.reconciliar ?? false,
+  );
 }
 
 export interface AnularMovimientoOpts {
@@ -184,6 +282,71 @@ export async function anularMovimiento(
     if (!anulado) throw new AppError('INTERNAL', 'No se pudo releer el movimiento anulado', 500);
     return anulado;
   });
+}
+
+export interface BajaDetectada {
+  movimientoId: number;
+  nro: string;
+  fecha: string; // la fecha con la que lo tenemos materializado
+  externoId: number; // id en la app de origen (ej. recepción #514 de la app del compañero)
+  fechaEnOrigen?: string; // solo si el origen TODAVÍA lo lista (reprogramado, no borrado)
+}
+
+export interface ReconciliarBajasOpts {
+  usuarioId: number; // a quién se audita la anulación (regla #7)
+  dry?: boolean; // true → detecta y reporta, no anula
+}
+
+// Reconciliación de BAJAS (contracara del modo reconciliar): lo que un sync materializó y
+// la app de origen ya NO lista en la ventana. Sin esto, una recepción BORRADA en la app del
+// compañero queda viva acá inflando el stock para siempre (fue el caso LOGINCOR del 04/07:
+// una entrada duplicada en su agenda, que ellos borraron, nos dejó la mercadería contada dos
+// veces).
+//
+// Dos casos distintos, y la diferencia importa:
+//   - BORRADA en el origen (el id no existe en ningún lado) → ANULAR: flip de estado, el
+//     stock se revierte solo porque stock_actual filtra por CONFIRMADO (regla #4).
+//   - REPROGRAMADA a otra fecha (el id existe, con otra fecha) → NO SE TOCA. Anular es
+//     irreversible (un ANULADO no revive, ni el sync lo resucita): si la anuláramos,
+//     cuando su nueva fecha entre en la ventana la recepción quedaría perdida para siempre.
+//     Se reporta y listo; al entrar la fecha nueva en la ventana, el modo reconciliar le
+//     corrige la fecha solo.
+//
+// `indiceOrigen` es lazy a propósito: pedir el índice completo del origen cuesta varias
+// llamadas HTTP, y en la corrida normal (nada huérfano) no hace falta ninguna.
+export async function reconciliarBajas(
+  prefijo: string,
+  fechas: string[],
+  vistas: Set<number>,
+  indiceOrigen: () => Promise<Map<number, string>>,
+  opts: ReconciliarBajasOpts,
+): Promise<{ anuladas: BajaDetectada[]; reprogramadas: BajaDetectada[] }> {
+  const materializados = await sincronizadosEnFechas(prefijo, fechas);
+
+  const huerfanos: BajaDetectada[] = [];
+  for (const m of materializados) {
+    const externoId = Number(m.idempotenciaKey.slice(prefijo.length));
+    // Claves cuyo sufijo no es un id numérico (ej. 'abast:<fecha>:<area>') no se reconcilian acá.
+    if (!Number.isInteger(externoId) || vistas.has(externoId)) continue;
+    huerfanos.push({ movimientoId: m.id, nro: m.nro, fecha: m.fecha, externoId });
+  }
+  if (huerfanos.length === 0) return { anuladas: [], reprogramadas: [] };
+
+  const indice = await indiceOrigen();
+  const anuladas: BajaDetectada[] = [];
+  const reprogramadas: BajaDetectada[] = [];
+
+  for (const h of huerfanos) {
+    const fechaEnOrigen = indice.get(h.externoId);
+    if (fechaEnOrigen !== undefined) {
+      reprogramadas.push({ ...h, fechaEnOrigen });
+      continue;
+    }
+    if (!opts.dry) await anularMovimiento(h.movimientoId, { usuarioId: opts.usuarioId });
+    anuladas.push(h);
+  }
+
+  return { anuladas, reprogramadas };
 }
 
 export interface ListarMovimientosParams extends ListaFiltros {
@@ -275,82 +438,100 @@ function diffSnapshots(antes: SnapshotMovimiento, despues: Omit<SnapshotMovimien
   return cambios;
 }
 
-// Edición de un movimiento (regla #4 relajada: editable con historial). Reemplazo
-// completo en una tx (regla #6): valida referencias, actualiza cabecera + renglones,
-// registra el diff en movimientos_auditoria (regla #7) y recalcula el stock.
-// Cualquier usuario logueado puede editar; un ANULADO no se edita.
+// Aplica una edición DENTRO de una tx YA ABIERTA (no abre transacción propia). Es el
+// núcleo compartido de la edición: valida referencias, reemplaza cabecera + renglones,
+// audita el diff (regla #7) y recalcula el stock. Lo usan dos caminos:
+//   1) editarMovimiento (edición manual desde el front) → abre la tx y delega acá.
+//   2) el modo reconciliar de registrarAutoConfirmado (sync en vivo) → ya está dentro de
+//      su propia tx y llama a este helper con ese mismo tx.
+// Así se reusa toda la lógica auditada/transaccional SIN anidar transacciones (llamar a
+// editarMovimiento desde adentro de otra tx abriría una tx separada en otra conexión,
+// que no vería lo no-commiteado y podría trabarse). Un movimiento ANULADO no se edita.
+async function aplicarEdicion(
+  tx: Tx,
+  id: number,
+  input: EditarMovimientoInput,
+  usuarioId: number,
+): Promise<MovimientoConDetalle> {
+  const antes = await leerSnapshotMovimiento(tx, id);
+  if (!antes) {
+    throw notFound('MOVIMIENTO_NO_ENCONTRADO', `No existe el movimiento id=${id}`);
+  }
+  if (antes.estado === 'ANULADO') {
+    throw conflict('MOVIMIENTO_ANULADO', 'No se puede editar un movimiento anulado');
+  }
+
+  const origen = await buscarUbicacionPorDep3c(tx, input.origen_dep_id_3c);
+  if (!origen) {
+    throw notFound('UBICACION_NO_ENCONTRADA', `No existe ubicación con dep_id_3c=${input.origen_dep_id_3c} (origen)`);
+  }
+  const destino = await buscarUbicacionPorDep3c(tx, input.destino_dep_id_3c);
+  if (!destino) {
+    throw notFound(
+      'UBICACION_NO_ENCONTRADA',
+      `No existe ubicación con dep_id_3c=${input.destino_dep_id_3c} (destino)`,
+    );
+  }
+  const tipo = await tipoPorCodigo(tx, input.tipo);
+  if (!tipo) {
+    throw badRequest('TIPO_INVALIDO', `Tipo de movimiento desconocido: ${input.tipo}`);
+  }
+
+  const codigos = input.detalle.map((r) => r.producto_3c);
+  const existentes = await productosExistentes(tx, codigos);
+  const faltan = [...new Set(codigos)].filter((c) => !existentes.has(c));
+  if (faltan.length > 0) {
+    throw notFound('PRODUCTO_NO_ENCONTRADO', `Productos inexistentes en el maestro: ${faltan.join(', ')}`);
+  }
+
+  await actualizarCabecera(tx, id, {
+    tipoId: tipo.id,
+    origenId: origen.id,
+    destinoId: destino.id,
+    fecha: input.fecha,
+    turno: input.turno,
+    proyeccion: input.proyeccion,
+    observaciones: input.observaciones,
+    proveedorId: input.proveedor_id, // undefined en edición manual → preserva el proveedor
+  });
+  await borrarDetalle(tx, id);
+  await insertarDetalle(
+    tx,
+    id,
+    input.detalle.map((r) => ({
+      producto3c: r.producto_3c,
+      cantidadReal: r.cantidad_real.toString(),
+      cantidadSugerida: r.cantidad_sugerida?.toString(),
+      stockContado: r.stock_contado?.toString(),
+      unidad: r.unidad,
+      observaciones: r.observaciones,
+    })),
+  );
+
+  const cambios = diffSnapshots(antes, snapshotDesdeInput(input));
+  if (cambios.length > 0) {
+    await insertarAuditoria(tx, { movimientoId: id, usuarioId, accion: 'EDICION', cambios });
+    // El stock SOLO puede cambiar si cambió tipo/origen/destino/detalle, y todo eso está
+    // capturado en el diff. Sin cambios, la matview ya está correcta → evitamos el REFRESH
+    // (que escanea todo el histórico). Clave para el sync horario reconciliar: cuando un día
+    // no tuvo novedad, la reconciliación es un no-op barato (no refresca stock por gusto).
+    await refrescarStock(tx);
+  }
+
+  const actualizado = await obtenerMovimiento(tx, id);
+  if (!actualizado) throw new AppError('INTERNAL', 'No se pudo releer el movimiento editado', 500);
+  return actualizado;
+}
+
+// Edición de un movimiento (regla #4 relajada: editable con historial). Abre la tx
+// (regla #6) y delega en aplicarEdicion. Cualquier usuario logueado puede editar; un
+// ANULADO no se edita.
 export async function editarMovimiento(
   id: number,
   input: EditarMovimientoInput,
   opts: EditarMovimientoOpts,
 ): Promise<MovimientoConDetalle> {
-  return db.transaction(async (tx) => {
-    const antes = await leerSnapshotMovimiento(tx, id);
-    if (!antes) {
-      throw notFound('MOVIMIENTO_NO_ENCONTRADO', `No existe el movimiento id=${id}`);
-    }
-    if (antes.estado === 'ANULADO') {
-      throw conflict('MOVIMIENTO_ANULADO', 'No se puede editar un movimiento anulado');
-    }
-
-    const origen = await buscarUbicacionPorDep3c(tx, input.origen_dep_id_3c);
-    if (!origen) {
-      throw notFound('UBICACION_NO_ENCONTRADA', `No existe ubicación con dep_id_3c=${input.origen_dep_id_3c} (origen)`);
-    }
-    const destino = await buscarUbicacionPorDep3c(tx, input.destino_dep_id_3c);
-    if (!destino) {
-      throw notFound(
-        'UBICACION_NO_ENCONTRADA',
-        `No existe ubicación con dep_id_3c=${input.destino_dep_id_3c} (destino)`,
-      );
-    }
-    const tipo = await tipoPorCodigo(tx, input.tipo);
-    if (!tipo) {
-      throw badRequest('TIPO_INVALIDO', `Tipo de movimiento desconocido: ${input.tipo}`);
-    }
-
-    const codigos = input.detalle.map((r) => r.producto_3c);
-    const existentes = await productosExistentes(tx, codigos);
-    const faltan = [...new Set(codigos)].filter((c) => !existentes.has(c));
-    if (faltan.length > 0) {
-      throw notFound('PRODUCTO_NO_ENCONTRADO', `Productos inexistentes en el maestro: ${faltan.join(', ')}`);
-    }
-
-    await actualizarCabecera(tx, id, {
-      tipoId: tipo.id,
-      origenId: origen.id,
-      destinoId: destino.id,
-      fecha: input.fecha,
-      turno: input.turno,
-      proyeccion: input.proyeccion,
-      observaciones: input.observaciones,
-    });
-    await borrarDetalle(tx, id);
-    await insertarDetalle(
-      tx,
-      id,
-      input.detalle.map((r) => ({
-        producto3c: r.producto_3c,
-        cantidadReal: r.cantidad_real.toString(),
-        cantidadSugerida: r.cantidad_sugerida?.toString(),
-        stockContado: r.stock_contado?.toString(),
-        unidad: r.unidad,
-        observaciones: r.observaciones,
-      })),
-    );
-
-    const cambios = diffSnapshots(antes, snapshotDesdeInput(input));
-    if (cambios.length > 0) {
-      await insertarAuditoria(tx, { movimientoId: id, usuarioId: opts.usuarioId, accion: 'EDICION', cambios });
-    }
-
-    // El stock puede cambiar (cantidad, tipo, origen/destino): recalcular en la misma tx.
-    await refrescarStock(tx);
-
-    const actualizado = await obtenerMovimiento(tx, id);
-    if (!actualizado) throw new AppError('INTERNAL', 'No se pudo releer el movimiento editado', 500);
-    return actualizado;
-  });
+  return db.transaction((tx) => aplicarEdicion(tx, id, input, opts.usuarioId));
 }
 
 export async function obtenerHistorial(id: number): Promise<FilaAuditoria[]> {
