@@ -48,6 +48,33 @@ export type AbastecimientoInput = z.infer<typeof AbastecimientoSchema>;
 export type RenglonAbastecimiento = z.infer<typeof RenglonAbastecimientoSchema>;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Recepción de mercadería (sync de la app del compañero) → RECEPCION auto-confirmada.
+// Espejo del abastecimiento pero SUMA stock (regla del modelo: la dirección define el
+// signo, no el tipo). Diferencias de cabecera respecto del abastecimiento:
+//   - origen = depósito/balde del PROVEEDOR (de dónde entra la mercadería). Requerido.
+//     Por defecto el balde genérico 102 (DEPOSITO DE PROVEEDORES, sin stock propio).
+//   - destino = depósito que recibe; opcional, default DEPOSITO_PRINCIPAL (FABRICA).
+//   - cantidad_real = lo efectivamente recibido (regla #2). Reusa el renglón de abast.
+// ─────────────────────────────────────────────────────────────────────────────
+export const RecepcionSchema = z.object({
+  idempotency_key: z.string().trim().min(1).max(100).optional(),
+  origen_dep_id_3c: z.number().int().positive(), // proveedor que despacha (dep_id de 3c)
+  destino_dep_id_3c: z.number().int().positive().optional(), // depósito que recibe; default FABRICA
+  // Proveedor real de la mercadería (id de nuestra tabla proveedores). El origen sigue
+  // siendo el balde 102 genérico para el stock; esto guarda DE QUIÉN vino la recepción.
+  // Nullable/opcional: si el sync no lo resuelve (proveedor no está en el maestro), null.
+  proveedor_id: z.number().int().positive().nullable().optional(),
+  fecha: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Formato esperado YYYY-MM-DD')
+    .optional(),
+  observaciones: z.string().trim().max(500).optional(),
+  detalle: z.array(RenglonAbastecimientoSchema).min(1, 'La recepción necesita al menos un renglón'),
+});
+
+export type RecepcionInput = z.infer<typeof RecepcionSchema>;
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Filtros + paginado del listado GET /api/movimientos (regla #8: compartido front).
 // `tipo` se valida como string libre (no enum): tipos_movimiento es catálogo
 // extensible (regla del modelo). `estado` sí es un set fijo del ciclo de vida v1.
@@ -86,6 +113,9 @@ export const EditarMovimientoSchema = z.object({
   turno: z.enum(['MAÑANA', 'TARDE']).optional(),
   proyeccion: z.enum(['MIN', 'MED', 'MAX', 'ESP']).optional(),
   observaciones: z.string().trim().max(500).optional(),
+  // Proveedor: undefined = no tocar (edición manual no lo cambia); un id/null = fijarlo
+  // (lo usa el reconciliar del sync de recepciones). No entra en el diff de auditoría.
+  proveedor_id: z.number().int().positive().nullable().optional(),
   detalle: z.array(RenglonAbastecimientoSchema).min(1, 'El movimiento necesita al menos un renglón'),
 });
 

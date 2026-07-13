@@ -132,6 +132,22 @@ export function MovimientoDetallePage() {
         </div>
       </div>
 
+      {mov.tipo === 'RECEPCION' && (
+        <p className="rounded-lg bg-slate-50 px-4 py-3 text-sm text-slate-600 ring-1 ring-inset ring-slate-200">
+          Proveedor:{' '}
+          {mov.proveedor_nombre ? (
+            <span className="font-medium text-slate-800">
+              {mov.proveedor_nombre}
+              {mov.proveedor_numero_3c != null && (
+                <span className="ml-1 font-normal text-slate-400">(#{mov.proveedor_numero_3c})</span>
+              )}
+            </span>
+          ) : (
+            <span className="italic text-slate-400">sin asociar</span>
+          )}
+        </p>
+      )}
+
       {anulado && (
         <p className="rounded-lg bg-rose-50 px-4 py-3 text-sm text-rose-700">
           Este movimiento está anulado: no se puede editar.

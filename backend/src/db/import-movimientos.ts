@@ -16,7 +16,10 @@ import {
 // - Auto-crea ubicaciones y productos faltantes (desde las denominaciones / TEXTO).
 // - Entra CONFIRMADO con su fecha; nro propio vía generar_nro; nro_3c = NUMERO.
 // - Idempotente: saltea movimientos cuyo NUMERO ya esté importado.
-// Uso: npm run import:movimientos -- <archivo.csv|tsv>
+// Uso: npm run import:movimientos -- <archivo.csv|tsv> [--dry]
+//
+// --dry: NO escribe nada (ni movimientos, ni las ubicaciones/productos que auto-crearía) y
+// reporta qué haría. El flag puede ir antes o después del archivo.
 
 // Normaliza para mapear el TIPO_DOC de 3c sin depender de mayúsculas ni tildes.
 function normalizarTipo(s: string): string {
@@ -75,7 +78,7 @@ interface MovGrupo {
   renglones: Renglon[];
 }
 
-async function main(archivo: string): Promise<void> {
+async function main(archivo: string, dry: boolean): Promise<void> {
   const filas = parseDelimited(readFileSync(archivo, 'utf8'));
   if (filas.length < 2) throw new Error('El archivo no tiene filas de datos.');
 
@@ -91,7 +94,7 @@ async function main(archivo: string): Promise<void> {
     throw new Error(`Falta la columna (${aliases.join(' / ')}). Encabezados: ${h.join(' | ')}`);
   };
   const col = {
-    FECHA: idx(['FECHA']),
+    FECHA: idx(['FECHA', 'FECHA_RECEPCION']),
     NUMERO: idx(['NUMERO']),
     TIPO_DOC: idx(['TIPO_DOC']),
     ORIGEN: idx(['ID ORIGEN', 'ORIGEN']),
@@ -159,14 +162,22 @@ async function main(archivo: string): Promise<void> {
     ubics.set(g.origen, { nombre: g.origenDenom || o?.nombre || `Dep ${g.origen}`, esOrigen: true });
     if (!ubics.has(g.destino)) ubics.set(g.destino, { nombre: g.destinoDenom || `Dep ${g.destino}`, esOrigen: false });
   }
+  // En --dry no se crea nada: se cuenta cuántas FALTAN (las que se crearían).
   let ubicsCreadas = 0;
-  for (const [depId3c, u] of ubics) {
-    const res = await db
-      .insert(ubicaciones)
-      .values({ nombre: u.nombre.slice(0, 100), tipo: u.esOrigen ? 'DEPOSITO' : 'AREA', depId3c })
-      .onConflictDoNothing({ target: ubicaciones.depId3c })
-      .returning({ id: ubicaciones.id });
-    if (res.length > 0) ubicsCreadas++;
+  if (dry) {
+    const existentes = new Set(
+      (await db.select({ depId3c: ubicaciones.depId3c }).from(ubicaciones)).map((u) => u.depId3c),
+    );
+    ubicsCreadas = [...ubics.keys()].filter((d) => !existentes.has(d)).length;
+  } else {
+    for (const [depId3c, u] of ubics) {
+      const res = await db
+        .insert(ubicaciones)
+        .values({ nombre: u.nombre.slice(0, 100), tipo: u.esOrigen ? 'DEPOSITO' : 'AREA', depId3c })
+        .onConflictDoNothing({ target: ubicaciones.depId3c })
+        .returning({ id: ubicaciones.id });
+      if (res.length > 0) ubicsCreadas++;
+    }
   }
 
   // 3) Auto-crear productos faltantes (desde ARTICU_ID + TEXTO + UNIMED).
@@ -178,9 +189,16 @@ async function main(archivo: string): Promise<void> {
   }
   let prodsCreados = 0;
   const prodList = [...prods.entries()].map(([codigo3c, p]) => ({ codigo3c, nombre: p.nombre.slice(0, 200), unidadBase: p.unidad.slice(0, 16) }));
-  for (let i = 0; i < prodList.length; i += 500) {
-    const res = await db.insert(productos).values(prodList.slice(i, i + 500)).onConflictDoNothing({ target: productos.codigo3c }).returning({ codigo: productos.codigo3c });
-    prodsCreados += res.length;
+  if (dry) {
+    const existentes = new Set(
+      (await db.select({ codigo3c: productos.codigo3c }).from(productos)).map((p) => p.codigo3c),
+    );
+    prodsCreados = prodList.filter((p) => !existentes.has(p.codigo3c)).length;
+  } else {
+    for (let i = 0; i < prodList.length; i += 500) {
+      const res = await db.insert(productos).values(prodList.slice(i, i + 500)).onConflictDoNothing({ target: productos.codigo3c }).returning({ codigo: productos.codigo3c });
+      prodsCreados += res.length;
+    }
   }
 
   // 4) Mapas de resolución + idempotencia.
@@ -188,6 +206,10 @@ async function main(archivo: string): Promise<void> {
   const tipoId = new Map(tiposRows.map((t) => [t.codigo, t.id]));
   const ubicRows = await db.select({ id: ubicaciones.id, depId3c: ubicaciones.depId3c }).from(ubicaciones);
   const ubicId = new Map(ubicRows.map((u) => [u.depId3c, u.id]));
+  // En --dry las ubicaciones nuevas no se insertaron, así que no tienen id: se mapean a un
+  // id ficticio para que el conteo no las tome por "descartadas" (nunca llega a la DB: el
+  // insert de movimientos está salteado en dry).
+  if (dry) for (const depId3c of ubics.keys()) if (!ubicId.has(depId3c)) ubicId.set(depId3c, -1);
   // Idempotencia por (codigo + nro_3c + dirección): el número es único por tipo, y un
   // mismo número puede tener movimientos en direcciones distintas (ajustes mixtos).
   const origenU = alias(ubicaciones, 'origen_u');
@@ -226,43 +248,54 @@ async function main(archivo: string): Promise<void> {
       descartados += g.renglones.length;
       continue;
     }
-    await db.transaction(async (tx) => {
-      const nro = await generarNro(tx, g.tipo, Number(g.fecha.slice(0, 4)));
-      const [cab] = await tx
-        .insert(movimientos)
-        .values({
-          nro, tipoId: tId, fecha: g.fecha, hora: '00:00:00', origenId: oId, destinoId: dId,
-          estado: 'CONFIRMADO', usuarioId, nro3c: g.numero, confirmadoEn: sql`now()`,
-        })
-        .returning({ id: movimientos.id });
-      await insertarDetalle(
-        tx,
-        cab!.id,
-        g.renglones.map((r) => ({ producto3c: r.producto_3c, cantidadReal: String(r.cantidad), unidad: r.unidad })),
-      );
-    });
+    if (!dry) {
+      await db.transaction(async (tx) => {
+        const nro = await generarNro(tx, g.tipo, Number(g.fecha.slice(0, 4)));
+        const [cab] = await tx
+          .insert(movimientos)
+          .values({
+            nro, tipoId: tId, fecha: g.fecha, hora: '00:00:00', origenId: oId, destinoId: dId,
+            estado: 'CONFIRMADO', usuarioId, nro3c: g.numero, confirmadoEn: sql`now()`,
+          })
+          .returning({ id: movimientos.id });
+        await insertarDetalle(
+          tx,
+          cab!.id,
+          g.renglones.map((r) => ({ producto3c: r.producto_3c, cantidadReal: String(r.cantidad), unidad: r.unidad })),
+        );
+      });
+    }
     creados++;
-    if (creados % 200 === 0) console.log(`  … ${creados} movimientos`);
+    if (!dry && creados % 200 === 0) console.log(`  … ${creados} movimientos`);
   }
 
   // 6) Recalcular stock una sola vez.
-  if (creados > 0) await db.execute(sql`REFRESH MATERIALIZED VIEW stock_actual`);
+  if (creados > 0 && !dry) await db.execute(sql`REFRESH MATERIALIZED VIEW stock_actual`);
 
-  console.log(`✔ Movimientos: ${creados} creados, ${saltadosExistentes} ya estaban, ${descartados} renglones descartados.`);
-  console.log(`  Ubicaciones auto-creadas: ${ubicsCreadas}. Productos auto-creados: ${prodsCreados}.`);
+  const verbo = dry ? 'se crearían' : 'creados';
+  console.log(
+    `${dry ? '🔍 DRY-RUN — no se escribió NADA.\n' : ''}` +
+      `✔ Movimientos: ${creados} ${verbo}, ${saltadosExistentes} ya estaban, ${descartados} renglones descartados.`,
+  );
+  console.log(`  Ubicaciones auto-creadas: ${ubicsCreadas}. Productos auto-creados: ${prodsCreados}. ${dry ? '(se crearían)' : ''}`);
   if (tiposDesconocidos.size > 0) {
     console.log(`  ⚠ TIPO_DOC no mapeados (avisame para agregarlos): ${[...tiposDesconocidos].join(', ')}`);
   }
   await pool.end();
 }
 
-const archivo = process.argv[2];
+// El archivo es el primer argumento que NO es un flag: así `--dry` puede ir de cualquier
+// lado sin que se lo confunda con el nombre del archivo (antes, `--dry` se tomaba como
+// filename y el import escribía igual).
+const args = process.argv.slice(2);
+const dry = args.includes('--dry');
+const archivo = args.find((a) => !a.startsWith('--'));
 if (!archivo) {
-  console.error('Uso: npm run import:movimientos -- <archivo.csv|tsv>');
+  console.error('Uso: npm run import:movimientos -- <archivo.csv|tsv> [--dry]');
   process.exit(1);
 }
 
-main(archivo).catch((err: unknown) => {
+main(archivo, dry).catch((err: unknown) => {
   console.error('❌ Error importando movimientos:', err);
   process.exit(1);
 });

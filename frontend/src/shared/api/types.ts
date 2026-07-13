@@ -15,6 +15,82 @@ export interface SesionResult {
   user: AuthUser;
 }
 
+// Maestro de artículos (productos).
+export interface Articulo {
+  codigo_3c: string;
+  nombre: string;
+  unidad_base: string;
+  familia: string | null;
+  subfamilia: string | null;
+  presentacion_compra: string | null;
+  unidades_por_bulto: string | null; // numeric → string
+  clasificacion_abc: string | null;
+  informacion: string | null;
+  activo: boolean;
+  creado_local: boolean;
+}
+
+export interface ListaArticulos {
+  items: Articulo[];
+  page: number;
+  limit: number;
+  total: number;
+}
+
+// Inventarios (conteo físico → AJUSTE).
+export interface InventarioResumen {
+  id: number;
+  ubicacion_id: number;
+  ubicacion_nombre: string;
+  fecha: string;
+  estado: string;
+  lineas: number;
+  contadas: number;
+  creado_en: string | null;
+  confirmado_en: string | null;
+}
+
+export interface LineaInventario {
+  producto_3c: string;
+  nombre: string;
+  familia: string | null;
+  subfamilia: string | null;
+  unidad: string;
+  presentacion_compra: string | null;
+  unidades_por_bulto: number | null;
+  stock_sistema: number;
+  cantidad_contada: number | null;
+  diferencia: number | null;
+  porcentaje: number | null;
+}
+
+export interface InventarioDetalle {
+  id: number;
+  ubicacion_id: number;
+  ubicacion_nombre: string;
+  ubicacion_dep_id_3c: number;
+  fecha: string;
+  estado: string;
+  familias: string[] | null;
+  observaciones: string | null;
+  confirmado_en: string | null;
+  movimiento_entrada_id: number | null;
+  movimiento_salida_id: number | null;
+  lineas: LineaInventario[];
+}
+
+export interface ResultadoConfirmacion {
+  inventario: InventarioDetalle;
+  resumen: {
+    entrada_nro: string | null;
+    salida_nro: string | null;
+    renglones_entrada: number;
+    renglones_salida: number;
+    sin_cambio: number;
+    sin_contar: number;
+  };
+}
+
 export type EstadoMovimiento = 'BORRADOR' | 'CONFIRMADO' | 'ANULADO';
 
 export interface MovimientoResumen {
@@ -30,6 +106,7 @@ export interface MovimientoResumen {
   destino_id: number;
   destino_dep_id_3c: number;
   destino_nombre: string;
+  proveedor_nombre: string | null; // solo RECEPCION; null en el resto
   usuario_id: number;
   creado_en: string | null;
   confirmado_en: string | null;
@@ -114,6 +191,9 @@ export interface MovimientoDetalle {
   destino_id: number;
   destino_dep_id_3c: number;
   destino_nombre: string;
+  proveedor_id: number | null;
+  proveedor_nombre: string | null;
+  proveedor_numero_3c: number | null;
   confirmado_en: string | null;
   anulado_en: string | null;
   detalle: RenglonDetalle[];
@@ -205,6 +285,14 @@ export interface Proveedor {
 export interface GastoProveedor {
   proveedor_id: number;
   nombre: string;
+  familia: string | null;
+  compras: number;
+  gasto_neto: string;
+}
+// Detalle de un proveedor: productos que le compramos (de qué es su gasto).
+export interface ProductoDeProveedor {
+  producto_3c: string;
+  producto_nombre: string;
   familia: string | null;
   compras: number;
   gasto_neto: string;

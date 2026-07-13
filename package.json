@@ -20,6 +20,7 @@
     "test": "npm run test --workspaces --if-present",
     "db:generate": "npm run db:generate -w backend",
     "db:migrate": "npm run db:migrate -w backend",
-    "db:seed": "npm run db:seed -w backend"
+    "db:seed": "npm run db:seed -w backend",
+    "usuarios": "npm run usuarios -w backend --"
   }
 }

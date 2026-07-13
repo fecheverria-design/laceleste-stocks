@@ -18,13 +18,16 @@
     "db:seed:dev": "tsx src/db/seed-dev.ts",
     "db:reset": "tsx src/db/reset.ts",
     "db:stock-en": "tsx src/db/stock-en.ts",
+    "usuarios": "tsx src/db/usuarios.ts",
     "import:productos": "tsx src/db/import-productos.ts",
     "import:proveedores": "tsx src/db/import-proveedores.ts",
     "import:ubicaciones": "tsx src/db/import-ubicaciones.ts",
     "import:movimientos": "tsx src/db/import-movimientos.ts",
     "import:inventario": "tsx src/db/import-inventario.ts",
     "import:precios": "tsx src/db/import-precios.ts",
-    "import:compras": "tsx src/db/import-compras.ts"
+    "import:compras": "tsx src/db/import-compras.ts",
+    "sync:abastecimientos": "tsx src/db/sync-abastecimientos.ts",
+    "sync:recepciones": "tsx src/db/sync-recepciones.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

@@ -54,8 +54,20 @@ export const productos = pgTable('productos', {
   nombre: varchar('nombre', { length: 200 }).notNull(),
   unidadBase: varchar('unidad_base', { length: 16 }).notNull(), // 'KG' | 'UN' | 'LT'
   familia: varchar('familia', { length: 64 }), // nullable; viene de 3c (PACKAGING, MATERIAS PRIMAS…)
-  presentacion: jsonb('presentacion'), // {"bulto":"bolsa","equivale":25,"unidad":"KG"} — puerta abierta
+  subfamilia: varchar('subfamilia', { length: 64 }), // nullable; subrubro de 3c (sub-agrupa el conteo)
+  // Presentación / unidad mínima de compra (texto descriptivo del bulto: "1 Caja = 36 ud.").
+  presentacionCompra: varchar('presentacion_compra', { length: 100 }),
+  // Factor: cuántas UNIDADES BASE trae un bulto (36, 80, 300…). 1 = se cuenta suelto.
+  // Habilita contar en bultos en el inventario: base = bultos * unidades_por_bulto.
+  unidadesPorBulto: numeric('unidades_por_bulto', { precision: 12, scale: 3 }),
+  clasificacionAbc: varchar('clasificacion_abc', { length: 4 }), // A | B | C (importancia)
+  informacion: text('informacion'), // notas libres (ej. medidas)
+  presentacion: jsonb('presentacion'), // {"bulto":"bolsa","equivale":25,"unidad":"KG"} — puerta abierta (legacy)
   activo: boolean('activo').notNull().default(true),
+  // true = artículo creado en NUESTRA app (no vino de 3c). Su codigo_3c es propio (continúa
+  // la numeración) y NO es un ID oficial de 3c → trazabilidad para mapear/corregir si 3c
+  // luego usa ese mismo número (matiz de la Regla #1, decisión de J).
+  creadoLocal: boolean('creado_local').notNull().default(false),
 });
 
 export const usuarios = pgTable('usuarios', {
@@ -233,5 +245,51 @@ export const compras = pgTable(
     index('idx_compras_proveedor').on(t.proveedorId),
     index('idx_compras_fecha').on(t.fecha.desc()),
     uniqueIndex('uq_compras_numero_producto').on(t.numero, t.producto3c),
+  ],
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Inventarios (conteo físico / stock-take). Una "hoja" por depósito y fecha que se
+// llena con lo contado; al confirmar genera los AJUSTE (contra el balde 101) para
+// dejar el stock exacto en lo contado. Reusa la misma lógica que import:inventario.
+// ─────────────────────────────────────────────────────────────────────────────
+export const inventarios = pgTable('inventarios', {
+  id: serial('id').primaryKey(),
+  ubicacionId: integer('ubicacion_id')
+    .notNull()
+    .references(() => ubicaciones.id), // depósito que se cuenta
+  fecha: date('fecha').notNull(),
+  estado: varchar('estado', { length: 16 }).notNull().default('BORRADOR'), // 'BORRADOR'|'CONFIRMADO'|'ANULADO'
+  familias: jsonb('familias'), // string[] de familias incluidas al armar la hoja (referencia)
+  observaciones: text('observaciones'),
+  usuarioId: integer('usuario_id')
+    .notNull()
+    .references(() => usuarios.id),
+  creadoEn: timestamp('creado_en', { withTimezone: true }).notNull().defaultNow(),
+  confirmadoEn: timestamp('confirmado_en', { withTimezone: true }),
+  confirmadoPor: integer('confirmado_por').references(() => usuarios.id),
+  // AJUSTE(s) generados al confirmar (para trazar el efecto del inventario en el stock).
+  movimientoEntradaId: bigint('movimiento_entrada_id', { mode: 'number' }).references(() => movimientos.id),
+  movimientoSalidaId: bigint('movimiento_salida_id', { mode: 'number' }).references(() => movimientos.id),
+});
+
+// Renglón de la hoja: un producto a contar. cantidad_contada NULL = todavía no contado
+// (al confirmar se saltea, NO se toma como 0 → un olvido no borra stock).
+export const inventarioLineas = pgTable(
+  'inventario_lineas',
+  {
+    id: serial('id').primaryKey(),
+    inventarioId: integer('inventario_id')
+      .notNull()
+      .references(() => inventarios.id, { onDelete: 'cascade' }),
+    producto3c: varchar('producto_3c', { length: 32 })
+      .notNull()
+      .references(() => productos.codigo3c),
+    unidad: varchar('unidad', { length: 16 }).notNull(),
+    cantidadContada: numeric('cantidad_contada', { precision: 12, scale: 3 }), // NULL = sin contar
+  },
+  (t) => [
+    index('idx_inv_linea_inv').on(t.inventarioId),
+    uniqueIndex('uq_inv_linea').on(t.inventarioId, t.producto3c),
   ],
 );

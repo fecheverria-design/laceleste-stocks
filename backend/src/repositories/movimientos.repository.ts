@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, lte, or, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, like, lte, or, sql, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { db, type Tx } from '../db/client.js';
 import {
@@ -6,6 +6,7 @@ import {
   movimientosAuditoria,
   movimientosDetalle,
   productos,
+  proveedores,
   tiposMovimiento,
   ubicaciones,
 } from '../db/schema.js';
@@ -26,16 +27,17 @@ export interface CabeceraInput {
   usuarioId: number;
   observaciones?: string;
   idempotenciaKey?: string;
+  proveedorId?: number | null; // solo RECEPCION lo usa; el resto queda null
 }
 
-export interface RenglonInput {
-  producto3c: string;
-  cantidadReal: string;
-  cantidadSugerida?: string;
-  stockContado?: string;
-  unidad: string;
-  observaciones?: string;
-}
+// Renglón a insertar en `movimientos_detalle`. Derivado del schema (insert) menos las
+// columnas que pone el repo/service: id (serial), movimiento_id (lo asigna insertarDetalle)
+// y lote_id (puerta abierta, no se carga en v1). Si la tabla suma una columna NOT NULL,
+// TypeScript lo marca acá.
+export type RenglonInput = Omit<
+  typeof movimientosDetalle.$inferInsert,
+  'id' | 'movimientoId' | 'loteId'
+>;
 
 // ── Resolución de catálogos (corren dentro de la tx) ─────────────────────────
 
@@ -100,6 +102,7 @@ export async function insertarCabecera(tx: Tx, data: CabeceraInput): Promise<num
       usuarioId: data.usuarioId,
       observaciones: data.observaciones,
       idempotenciaKey: data.idempotenciaKey,
+      proveedorId: data.proveedorId ?? null,
       confirmadoEn: sql`now()`,
     })
     .returning({ id: movimientos.id });
@@ -116,6 +119,41 @@ export async function buscarPorIdempotencia(tx: Tx, key: string): Promise<number
     .where(eq(movimientos.idempotenciaKey, key))
     .limit(1);
   return row?.id;
+}
+
+export interface MovimientoSincronizado {
+  id: number;
+  nro: string;
+  fecha: string;
+  idempotenciaKey: string;
+}
+
+// Movimientos CONFIRMADOS que materializó un sync (idempotencia_key con el prefijo dado,
+// ej. 'recep:') dentro de una lista de fechas. Es el insumo de la reconciliación de BAJAS:
+// lo que nosotros tenemos vivo y el origen ya no lista. Solo CONFIRMADO: un ANULADO ya no
+// pesa en el stock y no se resucita.
+export async function sincronizadosEnFechas(
+  prefijo: string,
+  fechas: string[],
+): Promise<MovimientoSincronizado[]> {
+  if (fechas.length === 0) return [];
+  const rows = await db
+    .select({
+      id: movimientos.id,
+      nro: movimientos.nro,
+      fecha: movimientos.fecha,
+      idempotenciaKey: movimientos.idempotenciaKey,
+    })
+    .from(movimientos)
+    .where(
+      and(
+        eq(movimientos.estado, 'CONFIRMADO'),
+        inArray(movimientos.fecha, fechas),
+        like(movimientos.idempotenciaKey, `${prefijo}%`),
+      ),
+    );
+  // El where ya garantiza que idempotencia_key no es null (LIKE nunca matchea NULL).
+  return rows.map((r) => ({ ...r, idempotenciaKey: r.idempotenciaKey! }));
 }
 
 export async function insertarDetalle(tx: Tx, movimientoId: number, renglones: RenglonInput[]): Promise<void> {
@@ -250,6 +288,9 @@ export async function actualizarCabecera(
     turno?: string;
     proyeccion?: string;
     observaciones?: string;
+    // Proveedor: undefined = NO tocar la columna (edición manual la preserva);
+    // number/null = fijarla (lo usa el reconciliar del sync de recepciones).
+    proveedorId?: number | null;
   },
 ): Promise<void> {
   // Reemplazo completo: lo no enviado vuelve a null (no es un PATCH parcial).
@@ -263,6 +304,9 @@ export async function actualizarCabecera(
       turno: data.turno ?? null,
       proyeccion: data.proyeccion ?? null,
       observaciones: data.observaciones ?? null,
+      // Excepción al "reemplazo completo": proveedor no es editable desde el front, así que
+      // si el caller no lo manda (undefined) se conserva; solo el sync lo fija explícitamente.
+      ...(data.proveedorId !== undefined ? { proveedorId: data.proveedorId } : {}),
     })
     .where(eq(movimientos.id, id));
 }
@@ -343,6 +387,9 @@ export interface MovimientoConDetalle {
   destino_id: number;
   destino_dep_id_3c: number;
   destino_nombre: string;
+  proveedor_id: number | null;
+  proveedor_nombre: string | null;
+  proveedor_numero_3c: number | null;
   confirmado_en: string | null;
   anulado_en: string | null;
   detalle: {
@@ -380,6 +427,9 @@ export async function obtenerMovimiento(
       destino_id: movimientos.destinoId,
       destino_dep_id_3c: destino.depId3c,
       destino_nombre: destino.nombre,
+      proveedor_id: movimientos.proveedorId,
+      proveedor_nombre: proveedores.nombre,
+      proveedor_numero_3c: proveedores.numero3c,
       confirmado_en: movimientos.confirmadoEn,
       anulado_en: movimientos.anuladoEn,
     })
@@ -387,6 +437,7 @@ export async function obtenerMovimiento(
     .innerJoin(tiposMovimiento, eq(tiposMovimiento.id, movimientos.tipoId))
     .innerJoin(origen, eq(origen.id, movimientos.origenId))
     .innerJoin(destino, eq(destino.id, movimientos.destinoId))
+    .leftJoin(proveedores, eq(proveedores.id, movimientos.proveedorId))
     .where(eq(movimientos.id, id))
     .limit(1);
   if (!cab) return undefined;
@@ -437,6 +488,7 @@ export interface MovimientoResumen {
   destino_id: number;
   destino_dep_id_3c: number;
   destino_nombre: string;
+  proveedor_nombre: string | null; // solo RECEPCION; null en el resto
   usuario_id: number;
   creado_en: string | null;
   confirmado_en: string | null;
@@ -478,6 +530,7 @@ export async function listarMovimientos(
       destino_id: movimientos.destinoId,
       destino_dep_id_3c: destino.depId3c,
       destino_nombre: destino.nombre,
+      proveedor_nombre: proveedores.nombre,
       usuario_id: movimientos.usuarioId,
       creado_en: movimientos.creadoEn,
       confirmado_en: movimientos.confirmadoEn,
@@ -487,6 +540,7 @@ export async function listarMovimientos(
     .innerJoin(tiposMovimiento, eq(tiposMovimiento.id, movimientos.tipoId))
     .innerJoin(origen, eq(origen.id, movimientos.origenId))
     .innerJoin(destino, eq(destino.id, movimientos.destinoId))
+    .leftJoin(proveedores, eq(proveedores.id, movimientos.proveedorId))
     .where(conds.length ? and(...conds) : undefined)
     .orderBy(desc(movimientos.fecha), desc(movimientos.id)) // recientes primero; id desempata
     .limit(limit)

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { apiGet, apiPost } from '../../shared/api/client';
-import type { GastoMes, GastoProveedor, Proveedor } from '../../shared/api/types';
+import type { GastoMes, GastoProveedor, ProductoDeProveedor, Proveedor } from '../../shared/api/types';
 
 const ars0 = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 });
 function arsCorto(n: number): string {
@@ -15,6 +15,16 @@ const COLORS = ['#0284c7', '#0ea5e9', '#06b6d4', '#14b8a6', '#22c55e', '#84cc16'
 const inputCls =
   'rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500';
 
+// Querystring de filtros (familia + período), compartido por la lista, los gráficos y el detalle.
+function buildQs(familia: string, desde: string, hasta: string): string {
+  const p = new URLSearchParams();
+  if (familia) p.set('familia', familia);
+  if (desde) p.set('desde', desde);
+  if (hasta) p.set('hasta', hasta);
+  const s = p.toString();
+  return s ? `?${s}` : '';
+}
+
 export function ProveedoresPage() {
   const queryClient = useQueryClient();
   const [familia, setFamilia] = useState(''); // '' = todas
@@ -23,21 +33,17 @@ export function ProveedoresPage() {
   const [texto, setTexto] = useState('');
 
   // Querystring de filtros del gasto (familia + período).
-  const gastoQs = () => {
-    const p = new URLSearchParams();
-    if (familia) p.set('familia', familia);
-    if (desde) p.set('desde', desde);
-    if (hasta) p.set('hasta', hasta);
-    const s = p.toString();
-    return s ? `?${s}` : '';
-  };
+  const gastoQs = () => buildQs(familia, desde, hasta);
   // Alta
   const [nuevoNum, setNuevoNum] = useState('');
   const [nuevoNombre, setNuevoNombre] = useState('');
   const [nuevoCuit, setNuevoCuit] = useState('');
   const [mostrarAlta, setMostrarAlta] = useState(false);
 
-  const proveedores = useQuery({ queryKey: ['proveedores'], queryFn: () => apiGet<Proveedor[]>('/api/proveedores') });
+  const proveedores = useQuery({
+    queryKey: ['proveedores', familia, desde, hasta],
+    queryFn: () => apiGet<Proveedor[]>(`/api/proveedores${gastoQs()}`),
+  });
   const familias = useQuery({ queryKey: ['familias'], queryFn: () => apiGet<string[]>('/api/familias') });
   const gasto = useQuery({
     queryKey: ['gasto-proveedores', familia, desde, hasta],
@@ -270,20 +276,86 @@ export function ProveedoresPage() {
               </tr>
             )}
             {filas.map((p) => (
-              <tr key={p.id} className="border-b border-slate-100 last:border-0">
-                <td className="px-4 py-2 font-mono text-xs text-slate-500">{p.numero_3c ?? '—'}</td>
-                <td className="px-4 py-2 text-slate-700">{p.nombre}</td>
-                <td className="px-4 py-2 text-slate-500">{p.cuit ?? '—'}</td>
-                <td className="px-4 py-2 text-right tabular-nums text-slate-600">{p.compras}</td>
-                <td className="px-4 py-2 text-right font-medium tabular-nums text-slate-900">
-                  {Number(p.gasto_neto) > 0 ? ars0.format(Number(p.gasto_neto)) : '—'}
-                </td>
-                <td className="px-4 py-2 text-xs text-slate-500">{(p.familias ?? []).join(', ') || '—'}</td>
-              </tr>
+              <FilaProveedor key={p.id} p={p} familia={familia} desde={desde} hasta={hasta} />
             ))}
           </tbody>
         </table>
       </div>
     </section>
+  );
+}
+
+// Fila de proveedor expandible: al clickearla despliega los productos que le compramos
+// (de qué es su gasto). La query del detalle se dispara solo al abrir (enabled) y respeta
+// los filtros de familia/período de la barra (queryKey incluye los filtros → refetch al cambiarlos).
+function FilaProveedor({ p, familia, desde, hasta }: { p: Proveedor; familia: string; desde: string; hasta: string }) {
+  const [abierto, setAbierto] = useState(false);
+  const productos = useQuery({
+    queryKey: ['proveedor-productos', p.id, familia, desde, hasta],
+    queryFn: () => apiGet<ProductoDeProveedor[]>(`/api/proveedores/${p.id}/productos${buildQs(familia, desde, hasta)}`),
+    enabled: abierto,
+  });
+  const items = productos.data ?? [];
+
+  return (
+    <>
+      <tr
+        onClick={() => setAbierto((v) => !v)}
+        className="cursor-pointer border-b border-slate-100 last:border-0 hover:bg-slate-50"
+      >
+        <td className="px-4 py-2 font-mono text-xs text-slate-500">
+          <span className="mr-1 inline-block w-3 text-slate-400">{abierto ? '▾' : '▸'}</span>
+          {p.numero_3c ?? '—'}
+        </td>
+        <td className="px-4 py-2 text-slate-700">{p.nombre}</td>
+        <td className="px-4 py-2 text-slate-500">{p.cuit ?? '—'}</td>
+        <td className="px-4 py-2 text-right tabular-nums text-slate-600">{p.compras}</td>
+        <td className="px-4 py-2 text-right font-medium tabular-nums text-slate-900">
+          {Number(p.gasto_neto) > 0 ? ars0.format(Number(p.gasto_neto)) : '—'}
+        </td>
+        <td className="px-4 py-2 text-xs text-slate-500">{(p.familias ?? []).join(', ') || '—'}</td>
+      </tr>
+      {abierto && (
+        <tr className="border-b border-slate-100 bg-slate-50/60">
+          <td colSpan={6} className="px-4 py-3">
+            {productos.isLoading ? (
+              <p className="text-xs text-slate-500">Cargando productos…</p>
+            ) : productos.isError ? (
+              <p className="text-xs text-rose-600">No se pudo cargar el detalle.</p>
+            ) : items.length === 0 ? (
+              <p className="text-xs text-slate-500">
+                Sin compras de insumos reales para este proveedor{familia || desde || hasta ? ' en el filtro elegido' : ''}.
+              </p>
+            ) : (
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left uppercase tracking-wide text-slate-400">
+                    <th className="py-1 pr-4 font-medium">Producto</th>
+                    <th className="py-1 pr-4 font-medium">Familia</th>
+                    <th className="py-1 pr-4 text-right font-medium">Compras</th>
+                    <th className="py-1 text-right font-medium">Gasto neto</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((it) => (
+                    <tr key={it.producto_3c} className="border-t border-slate-200/70">
+                      <td className="py-1 pr-4 text-slate-700">
+                        {it.producto_nombre}
+                        <span className="ml-1 font-mono text-slate-400">#{it.producto_3c}</span>
+                      </td>
+                      <td className="py-1 pr-4 text-slate-500">{it.familia ?? '—'}</td>
+                      <td className="py-1 pr-4 text-right tabular-nums text-slate-600">{it.compras}</td>
+                      <td className="py-1 text-right font-medium tabular-nums text-slate-900">
+                        {ars0.format(Number(it.gasto_neto))}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </td>
+        </tr>
+      )}
+    </>
   );
 }

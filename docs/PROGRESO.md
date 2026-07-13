@@ -1,6 +1,144 @@
 # PROGRESO — laceleste-movimientos
 
-> Estado para retomar fácil. Última actualización: 2026-06-25.
+> Estado para retomar fácil. Última actualización: 2026-07-01.
+
+## ⏭️ PRÓXIMO PASO (retomar acá — 2026-07-01) — PASO 2: registrar la tarea
+El **PASO 1 (modo reconciliar + ventana móvil) y los artefactos del scheduler están
+HECHOS** (ver abajo). Lo único que falta es la **acción manual de J: registrar la tarea**
+en su PC (un comando) y confirmar que corre.
+
+**Registrar (una vez, en PowerShell como el usuario que queda logueado):**
+```
+cd D:\Bibliotecas\Desktop\Appstocks
+powershell -ExecutionPolicy Bypass -File scripts\register-sync-task.ps1
+```
+Probar a mano: `Start-ScheduledTask -TaskName "LaCeleste Sync en vivo"` y mirar
+`logs\sync-live.log`. Ajustar frecuencia (ej. cada 30 min) editando el `<Interval>` del
+XML y re-registrando.
+
+## ✅ PASO 2 — Scheduler de Windows (artefactos) — HECHO (2026-07-01), falta registrar
+Todo en `scripts/` (versionado):
+- **`sync-live.cmd`**: wrapper que corre los DOS syncs en orden (abastecimientos +
+  recepciones), asegura el Postgres de Docker (`docker compose up -d db`, best-effort) y
+  loguea con timestamp en `logs/sync-live.log` (gitignored: `*.log`). **Reenvía argumentos**
+  → probar sin escribir: `scripts\sync-live.cmd --dry`. Corre los syncs **sin `--fecha`** →
+  usan la **ventana móvil** (hoy + `VENTANA_DIAS_ATRAS`, default 2).
+- **`laceleste-sync.xml`**: definición de la tarea. Cada **1h** (`<Interval>PT1H</Interval>`
+  sin Duration = indefinido), **`StartWhenAvailable=true`** (= "run ASAP after a missed
+  start": si la PC estuvo apagada, corre apenas puede), `MultipleInstancesPolicy=IgnoreNew`
+  (no se apilan si una corrida se demora), `LogonType=InteractiveToken` (corre con la
+  sesión del usuario → ve Docker Desktop; NO guarda contraseña), `RunOnlyIfNetworkAvailable`.
+  La ruta del `<Command>` es la de la PC de J (`D:\Bibliotecas\...`); si el repo se mueve,
+  actualizarla.
+- **`register-sync-task.ps1`**: importa el XML a nombre del usuario actual (`-Force` para
+  actualizar; sin password). Imprime la próxima corrida y los comandos útiles.
+- **Smoke-test OK (2026-07-01)**: `sync-live.cmd --dry` corrió end-to-end → Docker up,
+  ventana móvil (2026-06-29…07-01), login OK a `produccion.laceleste.com.ar`, 8 abast /
+  123 renglones + 14 recep / 44 renglones en dry (nada escrito), exit 0.
+
+Apagar la PC ≠ perder datos: la fuente de verdad es SU server (siempre on); al volver, la
+ventana móvil re-lee y reconcilia. Solo se pierde *frescura* mientras está apagada. A
+futuro: mover esto a un server propio (`stock.laceleste.com.ar`) con cron real, al lado de
+la app del compañero (`produccion.laceleste.com.ar`).
+
+## ✅ PASO 1 — Syncs "en vivo" (modo RECONCILIAR + ventana móvil) — HECHO (2026-07-01)
+El bloqueo era que los syncs eran **"crear una vez"** (idempotencia: abast por
+`(fecha,área)`, recep por `recep:<id>`) → re-correr el mismo día NO incorporaba lo cargado
+después de la 1ª corrida. Resuelto:
+- **Modo RECONCILIAR (opt-in) en `registrarAutoConfirmado`** (`movimientos.service.ts`):
+  en el hit de idempotencia, si viene `{ reconciliar: true }` y el movimiento **no** está
+  ANULADO, en vez de devolverlo tal cual lo **reedita** con el estado fresco de su app
+  (real corregido / renglones nuevos). Sin cambios = **no-op** (el diff da vacío, no
+  escribe auditoría). Un ANULADO a mano **no se resucita** (se devuelve tal cual, el sync
+  no lo cuenta como error). El POST M2M sigue en "crear una vez" (default `reconciliar:false`).
+- **Transacción anidada resuelta por refactor (no savepoints):** se extrajo el cuerpo de
+  `editarMovimiento` a un helper **`aplicarEdicion(tx, …)`** que opera dentro de una tx ya
+  abierta. `editarMovimiento` quedó como wrapper que abre la tx y delega; el modo
+  reconciliar llama a `aplicarEdicion` con **el mismo `tx`** del registro → una sola
+  transacción, sin anidar. (Llamar a `editarMovimiento` desde otra tx habría abierto una
+  tx separada en otra conexión: no vería lo no-commiteado y podría trabarse.)
+- **Ventana móvil en los scripts** (`sync-abastecimientos.ts` / `sync-recepciones.ts`):
+  sin argumentos, barren **hoy + `VENTANA_DIAS_ATRAS` días atrás** (default 2, configurable
+  por `.env`) → autorrecuperan días perdidos si la PC estuvo apagada; días sin novedad =
+  no-op. `--fecha` y `--desde/--hasta` siguen funcionando igual. Ambos scripts llaman al
+  service con `{ reconciliar: true }`.
+- **Tests (regla #5):** `tests/reconciliacion.service.test.ts` — real corregido reedita +
+  ajusta stock + 1 fila de auditoría; sin cambios = no-op (0 auditoría); renglón nuevo
+  aparece en detalle+stock sin tocar el existente; sin `reconciliar` = idempotencia clásica
+  (no reedita); ANULADO respetado (no resucita, no error). **89 tests verdes** (+5).
+- **Caso borde NO cubierto (a propósito):** si el compañero **borra/pone en 0** el real de
+  un área ya sincronizada, esa área desaparece de su tabla → el sync no la ve → **no la
+  reconcilia** (queda el valor viejo). Reconciliar solo pisa lo que sigue presente. Cubrirlo
+  exige comparar contra lo ya materializado del día (bastante más laburo). Anotado; fuera de
+  este paso. Se corrige a mano editando/anulando el movimiento en el front si pasa.
+
+## 🆕 Sesión 2026-07-01 (tarde) — Artículos + Inventarios (branch `feat/inventarios`)
+Feature nueva en su propia branch (aparte del PR de sync, que quedó en `feat/movimientos-fase1-backend`).
+
+### Fase A — Rubros en el maestro de productos (HECHO)
+- `productos` ahora tiene **`familia`** (ya existía, 0009) + **`subfamilia`** (migración `0011`).
+  `import:productos` captura FAMILIA/SUBFAMILIA (antes las ignoraba; si el archivo no trae la
+  columna, COALESCE conserva lo cargado). **Pendiente de J: re-correr `import:productos` con su
+  archivo** para completar rubros (hoy 469/1185 con familia). Familias reales: MATERIAS PRIMAS,
+  PACKAGING, LIMPIEZA, DESCARTABLES, MERCHANDISING (las 5 de insumos) + otras.
+
+### Increment B — Maestro de Artículos (HECHO)
+- Módulo `articulos`: `GET /api/articulos` (q/familia/activo + paginado), `/articulos/familias`,
+  `POST` (alta), `PUT /:codigo` (editar). Front: tab **Artículos** (buscar, filtrar por familia,
+  alta, edición, baja lógica). **Alta con código propio**: se autogenera continuando la numeración
+  de 3c (max(codigo_3c numérico)+1) con advisory lock; marca **`creado_local`** (migración `0012`).
+  **Decisión de J** (matiz Regla #1): 3c manda para los existentes; los nuevos siguen la numeración.
+  ⚠️ Riesgo residual: si 3c luego asigna ese mismo número a otro producto, el import lo pisaría; el
+  flag `creado_local` permite detectarlo. Mitigación futura: que el import avise/saltee esos.
+
+### Increment C — Inventarios (conteo físico → AJUSTE) (HECHO)
+- Tablas `inventarios` + `inventario_lineas` (migración `0013`). Endpoints: crear hoja (por depósito
+  + familias, default las 5 de insumos), listar, detalle (con stock vivo + diferencia + %), guardar
+  avances, agregar producto, descartar, **confirmar**. Front: tab **Inventarios** (lista + alta) y
+  hoja de conteo (input por producto, diferencia/% en vivo, Guardar/Confirmar).
+- **Confirmar** (reglas #5/#6, transaccional): por línea contada con diferencia genera un **AJUSTE
+  contra el balde 101** (delta>0 entrada 101→dep, delta<0 salida dep→101), deja el stock **exacto en
+  lo contado**, refresca, marca CONFIRMADO y linkea los movimientos. **Líneas sin contar se saltean**
+  (no se ponen en 0). Reusa la lógica de `import:inventario`. 9 tests (105 verdes en total).
+- ⚠️ Nota: el delta se calcula contra el stock **vivo al confirmar** → confirmar apenas se termina de
+  contar (si un sync entró mercadería en el medio, el conteo podría quedar viejo). Es el mismo modelo
+  que el conteo manual en 3c.
+
+## 🔌 INTEGRACIÓN PULL app del compañero — PROBADA E2E (2026-06-30)
+Script `npm run sync:abastecimientos -- --fecha=YYYY-MM-DD [--dry]` (o `--desde/--hasta`)
+en `backend/src/db/sync-abastecimientos.ts` (commit `e2ae994`). Lee SU API REST
+(`app_ordenes_produccion`) y materializa los abastecimientos como **RINT auto-confirmados**
+que descuentan stock de FABRICA por `cantidad_real`. PULL puro: su app es read-only, no se toca.
+- **Config (.env, no commiteado):** `COMPANERO_API_URL=https://produccion.laceleste.com.ar`
+  (host base **sin** `/api` — el script le pega `/api` solo), usuario de servicio `compras`,
+  y **`DEPOSITO_PRINCIPAL_DEP_ID_3C=1`** (FABRICA = origen; sin esto el run real tira
+  `ORIGEN_REQUERIDO`, el dry no lo detecta).
+- **Corrida real semana 06-23 a 06-29:** 25 RINTs (`RINT-2026-03783`…`03807`), 430 renglones,
+  0 errores. Áreas destino 47 Panadería / 48 Pastelería / 49 Recetas / 50 Sandwichería
+  (`codigo_3c_area` == dep_id_3c confirmado). Backup previo `backup_pre_sync_abast_20260630.dump`.
+  Sin doble descuento (0 RINTs previos en esas fechas; el export 3c era anterior).
+- **Operación diaria:** correr con `--fecha=<hoy>` cuando el real ya esté cargado en su app
+  (idempotente: re-correr no duplica). Pendiente: J contrasta totales por área/día contra 3c.
+
+### Recepciones (la otra pata) — PROBADA E2E (2026-06-30)
+Script `npm run sync:recepciones -- --fecha=YYYY-MM-DD [--dry]` (commit `feat(sync): PULL de
+recepciones`). Materializa **RECEPCION auto-confirmada** que **suma** stock a FABRICA.
+- **Su modelo es distinto al de abastecimiento:** la recepción es agenda + checklist de estados;
+  la CANTIDAD solo vive en la tabla `bpm` (`cantidad_total`, unidades base), y solo para ítems
+  que pasaron por control BPM/pesado. Por eso el sync hace 2 pasos: `GET /api/recepciones?fecha=`
+  (agenda) + `GET /api/bpm/recepcion/:id` (cantidades). Solo materializa ítems con BPM y
+  cantidad>0; pre-filtra productos que no estén en nuestro maestro (saltea ese renglón, no pierde
+  la recepción). Origen = `RECEPCION_ORIGEN_DEP_ID_3C` (default 102, balde proveedores sin stock),
+  destino = FABRICA. Idempotente por `recep:<id>`.
+- **Refactor del service:** se extrajo `registrarAutoConfirmado` (núcleo tx/idempotencia/stock
+  compartido) y se sumó `registrarRecepcion` + `RecepcionSchema`, espejo de abastecimiento. El
+  stock se mueve por DIRECCIÓN (la matview `stock_actual` ignora `signo_stock`): recepción suma
+  al destino, abastecimiento resta del origen.
+- **Corrida real semana 06-23 a 06-29:** 43 RECEPCION (`REC-2026-00578`…`00620`), 95 renglones,
+  0 errores, 5 recepciones sin BPM/cantidad (salteadas). Backup `backup_pre_sync_recep_20260630.dump`.
+  Sin doble conteo (0 RECEPCION previas en el rango). **84 tests verdes** (+6 de recepción).
+- **Pendiente:** J contrasta totales por proveedor/día contra 3c. A futuro: ¿mapear
+  `cod_proveedor` → acopio puntual (dep_id_3c) en vez del balde 102 genérico?
 
 ## 🚩 CIERRE FASE 1 — PR a `dev` (2026-06-25)
 Branch `feat/movimientos-fase1-backend` listo para PR a `dev`. **72 tests verdes**,
@@ -50,7 +188,18 @@ movimiento/stock aparece mal).
 1. **✅ INVENTARIO INICIAL — HECHO (2026-06-22)**. Se cargó la "foto" del inventario físico vía `import:inventario`. Quedó **0 negativos** en todo el sistema. **Decisión de J: stock real = solo FABRICA, pero los acopios se llevan EN PARALELO** (cada depósito de proveedor lleva su propio stock; ej. al recibir mercadería poniendo origen 210 Morrovalle en vez del 102 genérico, se descuenta del acopio del 210). El import enciende `lleva_stock` en todos los depósitos del archivo (15 hoy: FABRICA + 14 acopios). Cinco productos quedaron negativos en acopios (historial de 3c sin conteo) → **J decidió ponerlos en 0** (acopio agotado, un negativo es físicamente imposible). Detalle del importer en "FASE DE PRECISIÓN DE STOCK".
 2. **Estado de la importación de 3c** (corrida en el dev de J): productos, proveedores, ubicaciones y **15.849 movimientos** importados. Tipos mapeados: Rint→RINT, ReMe/Fcpr→RECEPCION, RINV→AJUSTE. **NCC queda afuera** (módulo facturas futuro). Solo FABRICA lleva stock (`npm run db:stock-en -- 1`). ⚠️ El dev tiene los datos REALES de J (no la demo).
 3. **🔴 ACCIÓN MANUAL DE J — cambiar default branch a `main` en GitHub**: `main` y `dev` ya están pusheados, pero `gh`/token no están. Settings → Branches → Default → `main`. Después borrar `feat/movimientos-fase0-setup`. PR de Fase 1: base `dev` ← `feat/movimientos-fase1-backend`.
-4. **Otros slices pendientes** (cuando se cierre el stock): idempotencia del POST de abastecimientos (+ API key M2M), export Excel / kardex, validación de form en el front, módulo de facturas (NCC).
+4. **Otros slices pendientes** (cuando se cierre el stock): módulo de facturas (NCC).
+   - ✅ **Idempotencia + API key M2M del POST de abastecimientos — HECHO** (commit `6505622`).
+   - ✅ **Export de listado a CSV/Excel — HECHO**: `GET /api/movimientos/export.csv` (mismos
+     filtros del listado) + botón "Exportar Excel" en el front. CSV afinado para Excel es-AR
+     (BOM UTF-8, separador `;`, coma decimal). **Decisión de J (2026-07-01): dejarlo así**
+     (no pasar a `.xlsx` nativo por ahora).
+   - ✅ **Validación del form (crear/editar) — HECHA y cableada**: `validar()`/`tieneErrores()`
+     en `movimientoForm.ts`, usada en `NuevoMovimientoPage` y `MovimientoDetallePage`; bloquea
+     el submit y muestra errores por campo (`MovimientoFormFields`). Refleja el schema Zod
+     (regla #8). **Decisión de J (2026-07-01): dejarla así** (no sumar chequeos finos).
+   - ⏳ **Kardex por producto** (libro mayor con saldo corriendo) — **el único real pendiente**
+     de este bloque; no pedido aún.
 5. **Setup**: Docker desde `D:\DockerData` (`docker compose up -d`). Backend `npm -w backend run dev` (3000) + front `npm -w frontend run dev` (5173) → http://localhost:5173. Login: `admin@laceleste.local` / `laceleste123`. Para volver a datos demo: `npm -w backend run db:reset` + `db:seed:dev`. Comandos de import: `import:productos|proveedores|ubicaciones|movimientos` y `db:stock-en`.
 
 ## 📥 Importación de Excel — productos (HECHO, falta proveedores y movimientos)
@@ -162,15 +311,24 @@ Branch `feat/movimientos-fase1-backend`.
 - Creadas y pusheadas `main` (desde scaffold Fase 0 = baseline desplegable) y `dev` (desde main). Falta el paso manual: setear `main` como default branch en GitHub (no hay `gh`/token). Las fases mergean por PR a `dev`; `dev`→`main` al liberar.
 
 ### ⏳ Pendiente en Fase 1 (próximos increments)
-- **POST /api/movimientos** (crear BORRADOR) + **PUT /:id/confirmar**, export Excel, kardex, sincronizar-3c.
-- **Idempotencia** del POST de abastecimientos + **API key** para asegurar ese endpoint M2M.
-- **GET /api/movimientos** (listado con filtros + paginado), **GET /api/movimientos/:id**, export Excel, kardex, sincronizar-3c.
+- **Kardex por producto** (libro mayor con saldo corriendo) — único real pendiente del bloque export.
+- **Sincronizar-3c** (empujar de vuelta a 3c / mapear `nro_3c`), si se decide hacerlo.
+- (Ya HECHO: listado con filtros+paginado, detalle, export CSV/Excel, idempotencia + API key M2M,
+  crear/editar/anular auto-confirmado. Ver arriba.)
 
 ### ❓ Supuestos del contrato del POST — VALIDAR con el compañero
 1. **Área destino** identificada por su `dep_id_3c` de 3c (campo `destino_dep_id_3c`).
 2. **Depósito origen**: `origen_dep_id_3c` opcional; si falta usa `DEPOSITO_PRINCIPAL_DEP_ID_3C` (.env). v1 = un solo depósito.
 3. **Renglón**: `producto_3c`, `cantidad_real` (oblig.), `cantidad_sugerida`/`stock_contado` (opc.), `unidad`.
 4. **Idempotencia**: NO implementada. Si la app del compañero re-empuja el mismo abastecimiento, se duplica. Falta acordar un id externo único para deduplicar (recomendado: que su app mande su propio id y lo guardemos para rechazar duplicados).
+
+## 📥 Carga de datos reales de 3c + tipo INVENTARIO (2026-07-01)
+- **Maestro de productos** re-importado (`import:productos`): 1187 productos, 1186 con familia (antes 469), 201 con bulto (U>1), 360 ABC, 272 presentación. 999 filas plantilla vacías saltadas.
+- **Precios** cargados (`import:precios`, archivo COMPRAS+VARIACIONES): 13.288 (9.506 compras + 3.782 variaciones), 658 productos con precio, 702 proveedores, rango 02/2024–06/2026.
+- **Exclusión de familias que NO son compra real** (`domain/familias.ts` → `FAMILIAS_NO_COMPRA`): SERVICIOS, TRANSPORTE TERCERIZADO, AJUSTE DE SALDO, GASTOS SOCIOS, IMPUESTOS, GASTOS BANCARIOS. `import:compras` las excluye del gasto por proveedor. 5 tests. Decisión de J.
+- **Stock al día** cargado (`import:inventario --exclusivo`, STOCKSDEFINITIVO al 01/07): 15 depósitos (FABRICA + acopios), 577 productos contados. Con `--exclusivo`, 5 frescos no listados (BANANA/GRANOLA/MANDARINA/MANZANA/esporádico obras) → 0. `import:inventario` ahora acepta alias `ARTICULO` para el código.
+- **Tipo de movimiento `INVENTARIO`** (mig. `0015`, catálogo, `signo_stock` 0, correlativo `INV-`): el recuento/carga de foto queda **separado** del AJUSTE operativo (no se mezclan en reportes/kardex). Lo usan `import:inventario` y el módulo Inventarios (confirmar conteo). El efecto en stock es el mismo (dirección contra balde 101; la vista `stock_actual` no mira el tipo). Decisión de J.
+- **Pendiente**: `PAPEL MANTECA 36X40` (dep 1) quedó en **-0,004** porque el archivo lo trae así (única fila negativa del archivo); corregir a 0 en el origen o con un recuento puntual → dejar 0 negativos.
 
 ## 🧷 Recordatorios sueltos (cancha de J)
 - **C: del equipo de J está al límite (~99% usado).** Conviene una limpieza a fondo del disco del sistema (Docker Desktop, descargas) cuando haya un rato; el cierre de Fase 0 necesitó liberar npm-cache+Temp para tener aire.

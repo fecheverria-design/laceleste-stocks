@@ -25,6 +25,7 @@ const TIPOS = [
   { codigo: 'RECEPCION', nombre: 'Recepción de mercadería', signoStock: 1 },
   { codigo: 'RINT', nombre: 'Remito interno a área', signoStock: -1 },
   { codigo: 'AJUSTE', nombre: 'Ajuste de stock', signoStock: 0 },
+  { codigo: 'INVENTARIO', nombre: 'Recuento de inventario', signoStock: 0 },
 ];
 
 const DEPOSITO_DEP3C = 1;

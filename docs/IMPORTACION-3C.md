@@ -65,12 +65,14 @@ no finita. (NCC se cuenta aparte.) Los descartes se reportan al final.
 
 ## `import:inventario -- <archivo> [--dry] [--exclusivo]`
 
-Carga la "foto" del stock físico contado. Columnas: `DEPOSITO (= dep_id_3c), 3C, STOCK`
-(+ opcionales `FECHA, DENOMINACION, AÑO, MES`).
+Carga la "foto" del stock físico contado. Columnas: `DEPOSITO (= dep_id_3c)`, código de
+producto (`3C` / `ARTICULO` / `ARTICU_ID`), `STOCK` (+ opcionales `FECHA, DENOMINACION,
+UNIMED, AÑO, MES`). El separador (`,` `;` `tab`) se autodetecta.
 
-- Por cada `(producto, depósito)` genera un **AJUSTE = contado − sistema** contra el balde
-  101. Esto **neutraliza el histórico**: deja el stock parado exacto en lo contado, sin
-  importar qué netaba el historial.
+- Por cada `(producto, depósito)` genera un movimiento **INVENTARIO = contado − sistema**
+  contra el balde 101 (tipo `INVENTARIO`, correlativo `INV-2026-…`; es un **recuento**, NO un
+  AJUSTE operativo — decisión de J 2026-07-01). Esto **neutraliza el histórico**: deja el
+  stock parado exacto en lo contado, sin importar qué netaba el historial.
 - Activa `lleva_stock` en todos los depósitos del archivo (additivo).
 - **`--exclusivo`**: el conteo es **autoritativo por depósito** → todo producto con stock
   en un depósito del archivo que NO esté listado se pone en **0**. Sin el flag, solo
@@ -102,6 +104,12 @@ PROVEEDORES (nombre)`. Ignora DOC_ID/ID/PRECIO_LISTA/MES/AÑO.
 - El **gasto** se mide por `precio_total` (neto, sin IVA); `total_con_iva` es lo pagado.
 - Auto-crea productos (y **setea su `familia`**) y proveedores (numero_3c = PERSONAS_ID).
 - Idempotente por `(numero, producto_3c)`.
+- **Excluye familias que no son compras reales**: `SERVICIOS`, `TRANSPORTE TERCERIZADO`,
+  `AJUSTE DE SALDO`, `GASTOS SOCIOS`, `IMPUESTOS`, `GASTOS BANCARIOS` (honorarios/servicios,
+  flete tercerizado, ajuste de saldo contable, gastos de socios, impuestos y gastos
+  bancarios). No entran al gasto por proveedor. La lista vive en
+  `backend/src/domain/familias.ts` (`FAMILIAS_NO_COMPRA` / `esCompraReal`). *(Decisión de J,
+  2026-07-01.)* El importer las reporta aparte como "excluidas por familia".
 - La hoja **Proveedores** del front usa esto: lista con gasto total + ranking por familia
   (`GET /api/proveedores`, `/api/proveedores/gasto?familia=`). Alta de proveedor exige
   `numero_3c` (regla #1).
@@ -130,6 +138,8 @@ y `count(*) WHERE cantidad < 0` = 0. **Hacer `pg_dump` antes.**
 
 | Fecha | Cambio | Commit |
 |---|---|---|
+| 2026-07-01 | Recuento de stock = tipo `INVENTARIO` (mig. 0015), separado del AJUSTE operativo; lo usan `import:inventario` y el módulo Inventarios. `import:inventario` acepta alias `ARTICULO` para el código | (este commit) |
+| 2026-07-01 | Compras: excluir familias que no son compras reales (SERVICIOS, TRANSPORTE TERCERIZADO, AJUSTE DE SALDO, GASTOS SOCIOS, IMPUESTOS, GASTOS BANCARIOS) del gasto | (este commit) |
 | 2026-06-25 | Compras reales (`import:compras`) + hoja Proveedores con gasto por familia; `familia` en productos | (este commit) |
 | 2026-06-25 | Consumos por área (lo que sale de FABRICA a las áreas) + promedio semanal | `a3ef321` |
 | 2026-06-25 | Movimientos: agrupar por (tipo+numero+dirección); ajustes vía balde 101; devoluciones (cantidad negativa) se invierten | `5ab66f4` |

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { eq, inArray, sql } from 'drizzle-orm';
 import { db, pool } from './client.js';
 import { movimientos, productos, tiposMovimiento, ubicaciones } from './schema.js';
-import { indexarColumnas, parseDelimited } from './csv.js';
+import { parseDelimited } from './csv.js';
 import { generarNro, insertarDetalle, resolverUsuarioIntegracion } from '../repositories/movimientos.repository.js';
 
 // Carga el INVENTARIO INICIAL: la "foto" del stock físico contado, por depósito.
@@ -83,9 +83,22 @@ async function main(archivo: string, dry: boolean, exclusivo: boolean): Promise<
   const filas = parseDelimited(readFileSync(archivo, 'utf8'));
   if (filas.length < 2) throw new Error('El archivo no tiene filas de datos (¿solo encabezado?).');
 
-  const col = indexarColumnas(filas[0]!, ['DEPOSITO', '3C', 'STOCK']);
-  // DENOMINACION/FECHA/UNIMED son opcionales: los busco sin exigirlos.
+  // Resuelve columnas por nombre, tolerando alias (3c cambia el encabezado del código
+  // de producto entre exports: "3C" vs "ARTICULO" vs "ARTICU_ID"…).
   const norm = filas[0]!.map((h) => h.trim().toUpperCase());
+  const req = (aliases: string[]): number => {
+    for (const a of aliases) {
+      const i = norm.indexOf(a.toUpperCase());
+      if (i !== -1) return i;
+    }
+    throw new Error(`Falta la columna (${aliases.join(' / ')}). Encabezados: ${filas[0]!.join(' | ')}`);
+  };
+  const col = {
+    DEPOSITO: req(['DEPOSITO', 'DEP_ID_3C', 'DEP']),
+    '3C': req(['3C', 'ARTICULO', 'ARTICU_ID', 'ID ARTICULO', 'CODIGO']),
+    STOCK: req(['STOCK', 'CANTIDAD']),
+  };
+  // DENOMINACION/FECHA/UNIMED son opcionales: los busco sin exigirlos.
   const opt = (name: string): number => norm.indexOf(name);
   const iDenom = opt('DENOMINACION');
   const iFecha = opt('FECHA');
@@ -166,7 +179,7 @@ async function main(archivo: string, dry: boolean, exclusivo: boolean): Promise<
     console.log(`  · se crearían (DEPOSITO): ${depsFaltantes.length}${depsFaltantes.length ? ' → ' + depsFaltantes.join(', ') : ''}`);
     console.log(`Productos contados: ${items.length} (faltan crear ${prodFaltantes.length})`);
     if (exclusivo) console.log(`Modo --exclusivo: ${extras.length} producto(s) no listados se pondrían en 0.`);
-    console.log(`Renglones de ajuste: +${entradas} entradas / −${salidas} salidas / ${sinCambio} ya en su valor`);
+    console.log(`Renglones de inventario: +${entradas} entradas / −${salidas} salidas / ${sinCambio} ya en su valor`);
     console.log(`Balde AJUSTES (dep ${DEP_AJUSTES}) existe: ${balde101Existe ? 'sí' : 'no (se crearía)'}`);
     if (baldesEnArchivo) console.log(`⚠ ${baldesEnArchivo} fila(s) de baldes virtuales (101/102) ignoradas.`);
     if (descartadas) console.log(`⚠ ${descartadas} fila(s) descartadas (sin depósito/producto/stock válido).`);
@@ -223,12 +236,12 @@ async function main(archivo: string, dry: boolean, exclusivo: boolean): Promise<
       }
     }
     if (entradas.length > 0) {
-      await crearAjuste(usuarioId, fecha, anio, aIdAjustes, uid, entradas, `Inventario inicial ${fecha} (entrada dep ${dep})`);
+      await crearRecuento(usuarioId, fecha, anio, aIdAjustes, uid, entradas, `Inventario ${fecha} (entrada dep ${dep})`);
       movsCreados++;
       renglonesEntrada += entradas.length;
     }
     if (salidas.length > 0) {
-      await crearAjuste(usuarioId, fecha, anio, uid, aIdAjustes, salidas, `Inventario inicial ${fecha} (salida dep ${dep})`);
+      await crearRecuento(usuarioId, fecha, anio, uid, aIdAjustes, salidas, `Inventario ${fecha} (salida dep ${dep})`);
       movsCreados++;
       renglonesSalida += salidas.length;
     }
@@ -240,7 +253,7 @@ async function main(archivo: string, dry: boolean, exclusivo: boolean): Promise<
   console.log(`✔ Inventario inicial cargado (fecha ${fecha}).`);
   console.log(`  Depósitos con stock activado: ${depsArchivo.length} (${depsArchivo.join(', ')}).`);
   console.log(`  Productos creados: ${prodFaltantes.length}. Ubicaciones creadas: ${depsFaltantes.length}${!balde101Existe ? ' (+ balde AJUSTES)' : ''}.`);
-  console.log(`  Movimientos de ajuste: ${movsCreados} (+${renglonesEntrada} renglones entrada / −${renglonesSalida} salida / ${sinCambio} ya estaban en su valor).`);
+  console.log(`  Movimientos de inventario (recuento): ${movsCreados} (+${renglonesEntrada} renglones entrada / −${renglonesSalida} salida / ${sinCambio} ya estaban en su valor).`);
   if (descartadas) console.log(`  ⚠ ${descartadas} fila(s) descartadas (sin depósito/producto/stock válido).`);
   if (baldesEnArchivo) console.log(`  ⚠ ${baldesEnArchivo} fila(s) de baldes virtuales (101/102) ignoradas.`);
   await pool.end();
@@ -257,8 +270,10 @@ async function leerStock(ubicIds: number[]): Promise<Map<string, number>> {
   return m;
 }
 
-// Un AJUSTE confirmado (cabecera + detalle) en su tx: correlativo propio + sellos.
-async function crearAjuste(
+// Un movimiento de INVENTARIO confirmado (cabecera + detalle) en su tx: correlativo
+// propio + sellos. La carga de la foto es un RECUENTO, no un ajuste operativo: va con
+// tipo INVENTARIO (decisión de J, 2026-07-01) aunque el efecto en stock sea el mismo.
+async function crearRecuento(
   usuarioId: number,
   fecha: string,
   anio: number,
@@ -268,11 +283,11 @@ async function crearAjuste(
   observaciones: string,
 ): Promise<void> {
   await db.transaction(async (tx) => {
-    const nro = await generarNro(tx, 'AJUSTE', anio);
+    const nro = await generarNro(tx, 'INVENTARIO', anio);
     const [cab] = await tx
       .insert(movimientos)
       .values({
-        nro, tipoId: await tipoAjusteId(), fecha, hora: '00:00:00', origenId, destinoId,
+        nro, tipoId: await tipoInventarioId(), fecha, hora: '00:00:00', origenId, destinoId,
         estado: 'CONFIRMADO', usuarioId, observaciones, confirmadoEn: sql`now()`,
       })
       .returning({ id: movimientos.id });
@@ -280,14 +295,14 @@ async function crearAjuste(
   });
 }
 
-// Cachea el id del tipo AJUSTE (no cambia durante la corrida).
-let _ajusteId: number | undefined;
-async function tipoAjusteId(): Promise<number> {
-  if (_ajusteId !== undefined) return _ajusteId;
-  const [row] = await db.select({ id: tiposMovimiento.id }).from(tiposMovimiento).where(eq(tiposMovimiento.codigo, 'AJUSTE')).limit(1);
-  if (!row) throw new Error('No existe el tipo de movimiento AJUSTE (corré db:seed).');
-  _ajusteId = row.id;
-  return _ajusteId;
+// Cachea el id del tipo INVENTARIO (no cambia durante la corrida).
+let _inventarioId: number | undefined;
+async function tipoInventarioId(): Promise<number> {
+  if (_inventarioId !== undefined) return _inventarioId;
+  const [row] = await db.select({ id: tiposMovimiento.id }).from(tiposMovimiento).where(eq(tiposMovimiento.codigo, 'INVENTARIO')).limit(1);
+  if (!row) throw new Error('No existe el tipo de movimiento INVENTARIO (corré db:migrate y db:seed).');
+  _inventarioId = row.id;
+  return _inventarioId;
 }
 
 const argv = process.argv.slice(2);
