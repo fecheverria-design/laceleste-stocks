@@ -1,0 +1,58 @@
+# Producción: corre en el LXC del Proxmox. NO es el compose de desarrollo.
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Traefik (10.10.10.10) apunta stocks.plataformaceleste.com → IP_DEL_LXC:${WEB_PORT}.
+# El único servicio que publica un puerto es `web`; db y backend viven en la red interna.
+
+services:
+  db:
+    image: postgres:16
+    container_name: laceleste_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      TZ: America/Argentina/Buenos_Aires
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Sin `ports`: la DB NO se publica al host ni a la red. Solo la ven backend y los
+    # scripts vía `docker compose exec`. Es la diferencia clave con el compose de dev.
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: laceleste-backend:latest
+    container_name: laceleste_backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      # Pisa lo que venga del .env: adentro de compose la DB es `db:5432`, no localhost:5433.
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    image: laceleste-web:latest
+    container_name: laceleste_web
+    restart: unless-stopped
+    ports:
+      - '${WEB_PORT:-8080}:80'
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+    name: laceleste_pgdata
