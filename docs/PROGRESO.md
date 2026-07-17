@@ -1,20 +1,82 @@
 # PROGRESO — laceleste-movimientos
 
-> Estado para retomar fácil. Última actualización: 2026-07-01.
+> Estado para retomar fácil. Última actualización: 2026-07-16.
 
-## ⏭️ PRÓXIMO PASO (retomar acá — 2026-07-01) — PASO 2: registrar la tarea
-El **PASO 1 (modo reconciliar + ventana móvil) y los artefactos del scheduler están
-HECHOS** (ver abajo). Lo único que falta es la **acción manual de J: registrar la tarea**
-en su PC (un comando) y confirmar que corre.
+## ⏭️ PRÓXIMO PASO (retomar acá — 2026-07-16): EL SERVIDOR — falta CT ID + IP
 
-**Registrar (una vez, en PowerShell como el usuario que queda logueado):**
-```
-cd D:\Bibliotecas\Desktop\Appstocks
-powershell -ExecutionPolicy Bypass -File scripts\register-sync-task.ps1
-```
-Probar a mano: `Start-ScheduledTask -TaskName "LaCeleste Sync en vivo"` y mirar
-`logs\sync-live.log`. Ajustar frecuencia (ej. cada 30 min) editando el `<Interval>` del
-XML y re-registrando.
+**Dónde vive ya está decidido y el empaquetado ya está hecho.** El runbook completo, paso por
+paso, está en **`docs/DEPLOY.md`**. Esto es solo el resumen.
+
+El servidor es un **LXC del Proxmox propio**, publicado como `stocks.plataformaceleste.com`.
+Todo el camino a internet ya existía y no se toca: Cloudflare Tunnel → Traefik (10.10.10.10)
+→ IP interna:puerto. Los scripts de infra (`deploy_lxc`, `manejar_links`, `abrir_proxmox`)
+viven fuera de este repo, en `scripts_servidor`: **ahí hay apps productivas de la empresa, se
+miran y no se tocan**, y los corre J.
+
+**Lo único que frena el arranque:** J tiene que elegir un **CT ID libre** y una **IP libre**
+de `10.10.10.0/24` (se ven en la web de Proxmox o con `pct list`).
+
+**Lo que falta, en orden** (detalle en `DEPLOY.md`):
+1. Crear el LXC (lo corre J, con el menú de `scripts_servidor`).
+2. Clonar el repo, `.env` desde `.env.prod.example`, `up -d --build`. Las migraciones corren
+   solas al arrancar.
+3. **Mudar los datos: la base arranca VACÍA.** Las migraciones crean el esquema, no los datos
+   (productos, precios, inventario, movimientos, usuarios están en la Postgres de la PC de J).
+   Es `pg_dump`/`pg_restore`, con los syncs de la PC **ya apagados**.
+4. **Seguridad, antes de publicar el link y no después:** `JWT_SECRET` nuevo (sale del paso 2)
+   y **cambiar las contraseñas** de `admin@` y `deposito@` — hoy son las de demo
+   (`laceleste123`, está escrita en `seed-dev.ts`, o sea en el repo). Se hace con
+   `npm run usuarios -- pass --email … --pass …`. Mientras sea todo localhost NO es un riesgo.
+5. Publicar el link con `manejar_links` (lo corre J).
+6. Syncs → cron del LXC. **El backup a Dropbox NO tiene reemplazo todavía** (en el LXC no hay
+   cliente de Dropbox): decidir rclone vs dejarlo en la PC de J. **No apagar el backup viejo
+   hasta resolverlo.**
+
+**Acción manual pendiente de J:** mergear los 2 commits que quedaron fuera del PR #6
+(`12a2144` auditoría + `d7ba61d` docs). `main` (`b4be20f`) ya tiene todo lo demás, vía PR #6
+(`feat/inventarios`→`dev`) y #7 (`dev`→`main`).
+
+## ✅ HECHO el 2026-07-16 (branch feat/inventarios)
+
+- **Empaquetado para el servidor** (commit `3813fc2`): Dockerfiles de back y front,
+  `docker-compose.prod.yml`, nginx (sirve el estático y proxea `/api` al backend en el mismo
+  origen → un solo puerto sale del LXC, un solo link en Traefik y cero CORS), `.gitattributes`
+  y `docs/DEPLOY.md`. **No hizo falta tocar código de la app**: el proxy de Vite ya replicaba
+  este deploy y el cliente HTTP ya usaba rutas relativas.
+  - Probado levantando el stack entero en la PC de J, con volumen y nombres propios, sin tocar
+    la DB de dev: migraciones solas al arrancar, `/api/health` ok **a través de nginx**,
+    fallback SPA ok (un F5 no da 404), `usuarios listar` adentro del contenedor, TZ `-03`.
+  - La imagen del backend conserva `src/` y las devDependencies **a propósito**: los scripts de
+    operación (`sync:*`, `import:*`, `usuarios`) corren con `tsx` sobre el fuente. Achicarla
+    rompe la operación diaria.
+  - No manejamos certificados: el TLS lo termina Cloudflare (el entrypoint de Traefik es `web`,
+    plano `:80`).
+
+## ✅ HECHO el 2026-07-13 (branch feat/inventarios)
+- **Bajas del sync (los dos lados).** El sync sabía dar de alta y editar, no dar de BAJA.
+  - *Recepciones:* si la borran en la app de Tincho, se **anula** acá y el stock se revierte.
+    Si solo la reprogramaron, NO se toca (se avisa; la corrige sola al entrar en la ventana).
+    Diagnóstico del caso LOGINCOR 04/07: no era "el sync duplica", era una recepción **borrada
+    allá** que quedaba viva acá.
+  - *Abastecimientos:* si vacían un área entera (borran todos los reales), se **anula**. Y es
+    **reversible**: si el real vuelve, el sync **revive** su propia baja (un ANULADO por una
+    persona NO se revive nunca, regla #4). Seguro extra: un día en que la API no devuelve
+    filas no anula nada.
+  - Los movimientos importados de 3c no tienen `idempotencia_key` → ningún sync los toca.
+- **Renglones sin cantidad:** un ítem sin BPM no tiene cantidad en NINGÚN lado (imposible de
+  traer). Antes desaparecía en silencio; ahora se avisa ítem por ítem (⚠ INCOMPLETA) → ese día
+  se completa con `import:movimientos`.
+- **`import:movimientos --dry` ahora existe de verdad** (antes el flag se tomaba como nombre de
+  archivo y escribía igual). Alias `FECHA_RECEPCION` para el export de Rint de 3c.
+- **Sábado 11/07 cargado a mano** desde el export de 3c (172 renglones → 14 RINT + 4 AJUSTE):
+  ese día depósito nunca guardó el real en la app de Tincho (185 filas, 185 sin real).
+- **ABM de usuarios por consola:** `npm run usuarios -- listar|crear|pass|baja|alta`. La baja es
+  lógica (no se borra: los movimientos que auditó lo apuntan).
+- **Auditoría visible (pedido de J):** el historial dice QUIÉN editó y QUIÉN anuló, **con
+  nombre** (antes decía "usuario #7", y la anulación ni siquiera entraba al historial). El
+  detalle muestra "Cargado por X" / "Anulado por Y". La reactivación del sync también deja
+  rastro. 143 tests verdes.
+- Movimiento `AJU-2026-00247` = prueba e2e de la auditoría, quedó **ANULADO** (no afecta stock).
 
 ## ✅ PASO 2 — Scheduler de Windows (artefactos) — HECHO (2026-07-01), falta registrar
 Todo en `scripts/` (versionado):

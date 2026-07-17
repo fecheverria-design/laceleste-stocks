@@ -90,6 +90,18 @@ export function MovimientoDetallePage() {
             ← Movimientos
           </Link>
           <h2 className="mt-1 font-mono text-xl font-semibold">{mov.nro}</h2>
+          {/* Quién lo cargó y, si corresponde, quién lo anuló: la pregunta que se hace
+              cualquiera al abrir un movimiento raro. El detalle fino está en el historial. */}
+          <p className="mt-0.5 text-sm text-slate-500">
+            Cargado por <span className="font-medium text-slate-700">{mov.creado_por_nombre}</span>
+            {mov.confirmado_en && ` · ${new Date(mov.confirmado_en).toLocaleString('es-AR')}`}
+          </p>
+          {anulado && mov.anulado_por_nombre && (
+            <p className="mt-0.5 text-sm text-rose-600">
+              Anulado por <span className="font-medium">{mov.anulado_por_nombre}</span>
+              {mov.anulado_en && ` · ${new Date(mov.anulado_en).toLocaleString('es-AR')}`}
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-3">
           {puedeAnular &&

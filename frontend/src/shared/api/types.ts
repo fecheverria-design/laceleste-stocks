@@ -196,6 +196,10 @@ export interface MovimientoDetalle {
   proveedor_numero_3c: number | null;
   confirmado_en: string | null;
   anulado_en: string | null;
+  anulado_por: number | null;
+  anulado_por_nombre: string | null; // quién lo anuló (null si sigue vivo)
+  creado_por: number;
+  creado_por_nombre: string; // quién lo cargó
   detalle: RenglonDetalle[];
 }
 
@@ -311,9 +315,10 @@ export interface CambioAuditoria {
 }
 export interface FilaHistorial {
   id: number;
-  secuencia: number; // nro de edición dentro del movimiento (1 = la más vieja)
+  secuencia: number; // nro de evento dentro del movimiento (1 = el más viejo)
   usuario_id: number;
-  accion: string;
+  usuario_nombre: string;
+  accion: 'EDICION' | 'ANULACION' | 'REACTIVACION' | string;
   cambios: CambioAuditoria[];
   creado_en: string;
 }
