@@ -1,0 +1,14 @@
+# core.autocrlf=true convierte a CRLF al hacer checkout en Windows. Para los scripts que
+# corren DENTRO de un contenedor Linux eso es fatal: el shebang se rompe y Docker falla con
+# "no such file or directory", que no dice una palabra del problema real. Se fuerzan a LF.
+*.sh text eol=lf
+
+# Idem todo lo que consume el contenedor Linux (Dockerfiles, nginx.conf): así lo que se
+# commitea es lo mismo que se probó, y no una versión con CRLF que nadie buildeó nunca.
+Dockerfile text eol=lf
+docker/* text eol=lf
+
+# Los de Windows, al revés: se quedan en CRLF.
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf

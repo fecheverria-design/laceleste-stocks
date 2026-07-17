@@ -9,6 +9,7 @@ import {
   proveedores,
   tiposMovimiento,
   ubicaciones,
+  usuarios,
 } from '../db/schema.js';
 
 // Email del usuario de integración: a quién se le atribuyen los movimientos que
@@ -346,9 +347,10 @@ export async function insertarAuditoria(
 
 export interface FilaAuditoria {
   id: number;
-  secuencia: number; // nro de edición DENTRO del movimiento (1 = la más vieja), estable
+  secuencia: number; // nro de evento DENTRO del movimiento (1 = el más viejo), estable
   usuario_id: number;
-  accion: string;
+  usuario_nombre: string;
+  accion: string; // 'EDICION' | 'ANULACION' | 'REACTIVACION'
   cambios: CambioAuditoria[];
   creado_en: string;
 }
@@ -361,11 +363,14 @@ export async function obtenerAuditoria(movimientoId: number): Promise<FilaAudito
     .select({
       id: movimientosAuditoria.id,
       usuario_id: movimientosAuditoria.usuarioId,
+      // El nombre, no solo el id: "usuario #7" no le sirve a nadie para saber quién tocó qué.
+      usuario_nombre: usuarios.nombre,
       accion: movimientosAuditoria.accion,
       cambios: movimientosAuditoria.cambios,
       creado_en: movimientosAuditoria.creadoEn,
     })
     .from(movimientosAuditoria)
+    .innerJoin(usuarios, eq(usuarios.id, movimientosAuditoria.usuarioId))
     .where(eq(movimientosAuditoria.movimientoId, movimientoId))
     .orderBy(desc(movimientosAuditoria.id));
 
@@ -375,6 +380,7 @@ export async function obtenerAuditoria(movimientoId: number): Promise<FilaAudito
     id: r.id,
     secuencia: total - i,
     usuario_id: r.usuario_id,
+    usuario_nombre: r.usuario_nombre,
     accion: r.accion,
     cambios: r.cambios as CambioAuditoria[],
     creado_en: new Date(r.creado_en).toISOString(),
@@ -404,6 +410,9 @@ export interface MovimientoConDetalle {
   confirmado_en: string | null;
   anulado_en: string | null;
   anulado_por: number | null; // quién anuló: distingue una baja del sync de una anulación humana
+  anulado_por_nombre: string | null;
+  creado_por: number;
+  creado_por_nombre: string;
   detalle: {
     producto_3c: string;
     producto_nombre: string;
@@ -423,6 +432,10 @@ export async function obtenerMovimiento(
 ): Promise<MovimientoConDetalle | undefined> {
   const origen = alias(ubicaciones, 'origen_det');
   const destino = alias(ubicaciones, 'destino_det');
+  // Dos aliases de `usuarios`: quién lo creó y quién lo anuló (pueden ser distintos, y el
+  // anulador puede no existir si el movimiento sigue vivo → leftJoin).
+  const creador = alias(usuarios, 'creador_det');
+  const anulador = alias(usuarios, 'anulador_det');
   const [cab] = await ejecutor
     .select({
       id: movimientos.id,
@@ -445,12 +458,17 @@ export async function obtenerMovimiento(
       confirmado_en: movimientos.confirmadoEn,
       anulado_en: movimientos.anuladoEn,
       anulado_por: movimientos.anuladoPor,
+      anulado_por_nombre: anulador.nombre,
+      creado_por: movimientos.usuarioId,
+      creado_por_nombre: creador.nombre,
     })
     .from(movimientos)
     .innerJoin(tiposMovimiento, eq(tiposMovimiento.id, movimientos.tipoId))
     .innerJoin(origen, eq(origen.id, movimientos.origenId))
     .innerJoin(destino, eq(destino.id, movimientos.destinoId))
     .leftJoin(proveedores, eq(proveedores.id, movimientos.proveedorId))
+    .innerJoin(creador, eq(creador.id, movimientos.usuarioId))
+    .leftJoin(anulador, eq(anulador.id, movimientos.anuladoPor))
     .where(eq(movimientos.id, id))
     .limit(1);
   if (!cab) return undefined;

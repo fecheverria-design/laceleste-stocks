@@ -82,7 +82,11 @@ describe('reconciliar bajas de abastecimiento (vaciaron el área en el origen)',
     expect(revivido.id).toBe(mov.id);
     expect(revivido.estado).toBe('CONFIRMADO');
     expect((await obtenerStock({ producto3c: '401' }))[0]!.cantidad).toBe(-150);
-    expect(await obtenerHistorial(mov.id)).toHaveLength(1); // la reedición quedó auditada
+
+    // El historial cuenta la vuelta completa, del más reciente al más viejo:
+    // lo anularon (baja), lo revivieron (el real volvió) y lo reeditaron (con otro valor).
+    const historial = await obtenerHistorial(mov.id);
+    expect(historial.map((h) => h.accion)).toEqual(['EDICION', 'REACTIVACION', 'ANULACION']);
   });
 
   it('una anulación HUMANA no se revive aunque el dato siga en el origen (regla #4)', async () => {
@@ -100,7 +104,10 @@ describe('reconciliar bajas de abastecimiento (vaciaron el área en el origen)',
 
     expect(reintento.estado).toBe('ANULADO'); // se respetó y se devolvió tal cual
     expect(await obtenerStock({ producto3c: '401' })).toHaveLength(0); // sigue revertido
-    expect(await obtenerHistorial(mov.id)).toHaveLength(0); // no se editó
+    // Queda la ANULACION del humano y nada más: el sync no editó ni revivió.
+    const historial = await obtenerHistorial(mov.id);
+    expect(historial.map((h) => h.accion)).toEqual(['ANULACION']);
+    expect(historial[0]!.usuario_nombre).toBe('Admin Humano');
   });
 
   it('el área SIGUE con real: no se toca', async () => {
