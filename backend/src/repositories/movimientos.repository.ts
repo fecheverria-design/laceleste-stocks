@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, like, lte, or, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, gte, ilike, inArray, like, lte, or, sql, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { db, type Tx } from '../db/client.js';
 import {
@@ -504,6 +504,10 @@ export interface ListaFiltros {
   tipo?: string; // codigo de tipos_movimiento
   ubicacionId?: number; // matchea origen O destino
   estado?: string;
+  producto?: string; // código o nombre de un renglón (ILIKE); a nivel detalle
+  familia?: string; // familia O subfamilia exacta de un renglón; a nivel detalle
+  usuarioId?: number; // quién cargó (movimientos.usuario_id)
+  nro?: string; // nro propio o nro_3c (ILIKE)
 }
 
 export interface MovimientoResumen {
@@ -535,6 +539,31 @@ function condicionesLista(f: ListaFiltros): SQL[] {
   if (f.tipo) conds.push(eq(tiposMovimiento.codigo, f.tipo));
   if (f.ubicacionId !== undefined) {
     conds.push(or(eq(movimientos.origenId, f.ubicacionId), eq(movimientos.destinoId, f.ubicacionId))!);
+  }
+  if (f.usuarioId !== undefined) conds.push(eq(movimientos.usuarioId, f.usuarioId));
+  if (f.nro) {
+    const pat = `%${f.nro}%`;
+    conds.push(or(ilike(movimientos.nro, pat), ilike(movimientos.nro3c, pat))!);
+  }
+  // Producto y familia son a nivel RENGLÓN: se filtra con EXISTS sobre movimientos_detalle
+  // (correlado por movimiento_id) para que sirva igual en el listado (que no joina detalle)
+  // y en el export (que sí). Alias d/p propios del subquery, no chocan con el outer.
+  if (f.producto) {
+    const pat = `%${f.producto}%`;
+    conds.push(sql`EXISTS (
+      SELECT 1 FROM ${movimientosDetalle} d
+      JOIN ${productos} p ON p.codigo_3c = d.producto_3c
+      WHERE d.movimiento_id = ${movimientos.id}
+        AND (p.codigo_3c ILIKE ${pat} OR p.nombre ILIKE ${pat})
+    )`);
+  }
+  if (f.familia) {
+    conds.push(sql`EXISTS (
+      SELECT 1 FROM ${movimientosDetalle} d
+      JOIN ${productos} p ON p.codigo_3c = d.producto_3c
+      WHERE d.movimiento_id = ${movimientos.id}
+        AND (p.familia = ${f.familia} OR p.subfamilia = ${f.familia})
+    )`);
   }
   return conds;
 }

@@ -2,11 +2,12 @@
 // descarga en el navegador. Los valores se pasan ya como string; para números con
 // decimales usá coma (ej. "1380,000") para que Excel los lea como número.
 
-function celda(v: string): string {
-  return /[";\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+function celda(v: string | number): string {
+  const s = String(v);
+  return /[";\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-export function descargarCsv(filename: string, headers: string[], filas: string[][]): void {
+export function descargarCsv(filename: string, headers: string[], filas: (string | number)[][]): void {
   const lineas = [headers, ...filas].map((f) => f.map(celda).join(';'));
   const csv = '﻿' + lineas.join('\r\n'); // BOM para que Excel reconozca UTF-8
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
