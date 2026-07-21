@@ -2,7 +2,13 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { apiGet, descargarArchivo } from '../../shared/api/client';
-import type { EstadoMovimiento, ListaMovimientos, TipoMovimiento, Ubicacion } from '../../shared/api/types';
+import type {
+  EstadoMovimiento,
+  ListaMovimientos,
+  TipoMovimiento,
+  Ubicacion,
+  UsuarioPublico,
+} from '../../shared/api/types';
 
 type FiltroEstado = EstadoMovimiento | 'TODOS';
 const FILTROS: FiltroEstado[] = ['TODOS', 'CONFIRMADO', 'ANULADO', 'BORRADOR'];
@@ -29,17 +35,36 @@ export function MovimientosPage() {
   const [ubicacion, setUbicacion] = useState('');
   const [desde, setDesde] = useState('');
   const [hasta, setHasta] = useState('');
+  const [producto, setProducto] = useState('');
+  const [familia, setFamilia] = useState('');
+  const [usuario, setUsuario] = useState('');
+  const [nro, setNro] = useState('');
 
   const tipos = useQuery({ queryKey: ['tipos'], queryFn: () => apiGet<TipoMovimiento[]>('/api/tipos') });
   const ubicaciones = useQuery({ queryKey: ['ubicaciones'], queryFn: () => apiGet<Ubicacion[]>('/api/ubicaciones') });
+  const familias = useQuery({ queryKey: ['familias'], queryFn: () => apiGet<string[]>('/api/articulos/familias') });
+  const usuarios = useQuery({ queryKey: ['usuarios'], queryFn: () => apiGet<UsuarioPublico[]>('/api/usuarios') });
 
-  const hayFiltros = tipo !== '' || ubicacion !== '' || desde !== '' || hasta !== '' || estado !== 'TODOS';
+  const hayFiltros =
+    tipo !== '' ||
+    ubicacion !== '' ||
+    desde !== '' ||
+    hasta !== '' ||
+    estado !== 'TODOS' ||
+    producto !== '' ||
+    familia !== '' ||
+    usuario !== '' ||
+    nro !== '';
   const limpiar = () => {
     setEstado('TODOS');
     setTipo('');
     setUbicacion('');
     setDesde('');
     setHasta('');
+    setProducto('');
+    setFamilia('');
+    setUsuario('');
+    setNro('');
   };
 
   // Querystring de filtros, compartido por el listado y el export (sin limit).
@@ -50,11 +75,15 @@ export function MovimientosPage() {
     if (ubicacion) qs.set('ubicacion', ubicacion);
     if (desde) qs.set('desde', desde);
     if (hasta) qs.set('hasta', hasta);
+    if (producto.trim()) qs.set('producto', producto.trim());
+    if (familia) qs.set('familia', familia);
+    if (usuario) qs.set('usuario', usuario);
+    if (nro.trim()) qs.set('nro', nro.trim());
     return qs;
   };
 
   const { data, isLoading, isError, error } = useQuery({
-    queryKey: ['movimientos', estado, tipo, ubicacion, desde, hasta],
+    queryKey: ['movimientos', estado, tipo, ubicacion, desde, hasta, producto, familia, usuario, nro],
     queryFn: () => {
       const qs = filtrosQs();
       qs.set('limit', '50');
@@ -130,6 +159,36 @@ export function MovimientosPage() {
           Hasta
           <input type="date" className={inputCls} value={hasta} onChange={(e) => setHasta(e.target.value)} />
         </label>
+        <input
+          type="text"
+          className={inputCls}
+          placeholder="Producto (cód. o nombre)"
+          value={producto}
+          onChange={(e) => setProducto(e.target.value)}
+        />
+        <select className={inputCls} value={familia} onChange={(e) => setFamilia(e.target.value)}>
+          <option value="">Todas las familias</option>
+          {(familias.data ?? []).map((f) => (
+            <option key={f} value={f}>
+              {f}
+            </option>
+          ))}
+        </select>
+        <select className={inputCls} value={usuario} onChange={(e) => setUsuario(e.target.value)}>
+          <option value="">Cargado por: todos</option>
+          {(usuarios.data ?? []).map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.nombre}
+            </option>
+          ))}
+        </select>
+        <input
+          type="text"
+          className={inputCls}
+          placeholder="Nro (RINT… o 3c)"
+          value={nro}
+          onChange={(e) => setNro(e.target.value)}
+        />
         {hayFiltros && (
           <button onClick={limpiar} className="text-sm font-medium text-sky-600 hover:underline">
             Limpiar filtros

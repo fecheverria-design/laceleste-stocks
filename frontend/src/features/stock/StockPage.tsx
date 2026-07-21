@@ -46,15 +46,15 @@ function MovimientosDeProducto({
   const exportarKardex = () => {
     const filas = data.map((m) => {
       const entrada = m.destino_id === ubicacionId;
-      const contraparte = entrada
-        ? `${m.origen_dep_id_3c} - ${m.origen_nombre}`
-        : `${m.destino_dep_id_3c} - ${m.destino_nombre}`;
+      // ID y nombre de la contraparte en columnas separadas (no "47 - Panaderia" pegado).
+      const contraparteId = entrada ? m.origen_dep_id_3c : m.destino_dep_id_3c;
+      const contraparte = entrada ? m.origen_nombre : m.destino_nombre;
       const cant = m.estado === 'ANULADO' ? '0' : `${entrada ? '' : '-'}${dec(m.cantidad_real)}`;
-      return [m.fecha, m.nro, TIPO_LABEL[m.tipo] ?? m.tipo, m.estado, contraparte, cant, m.unidad, m.saldo === null ? '' : dec(m.saldo)];
+      return [m.fecha, m.nro, TIPO_LABEL[m.tipo] ?? m.tipo, m.estado, contraparteId, contraparte, cant, m.unidad, m.saldo === null ? '' : dec(m.saldo)];
     });
     descargarCsv(
       `kardex_${producto3c}_dep${ubicacionId}.csv`,
-      ['Fecha', 'Nro', 'Tipo', 'Estado', 'Contraparte', 'Movimiento', 'Unidad', 'Saldo'],
+      ['Fecha', 'Nro', 'Tipo', 'Estado', 'Contraparte ID', 'Contraparte', 'Movimiento', 'Unidad', 'Saldo'],
       filas,
     );
   };
