@@ -89,6 +89,10 @@ export const MovimientosQuerySchema = z
     tipo: z.string().trim().min(1).max(16).optional(), // codigo de tipos_movimiento
     estado: z.enum(['BORRADOR', 'CONFIRMADO', 'ANULADO']).optional(),
     ubicacion: z.coerce.number().int().positive().optional(), // ubicacion_id (origen O destino)
+    producto: z.string().trim().min(1).max(200).optional(), // código o nombre de un renglón
+    familia: z.string().trim().min(1).max(64).optional(), // familia o subfamilia de un renglón
+    usuario: z.coerce.number().int().positive().optional(), // quién cargó (usuario_id)
+    nro: z.string().trim().min(1).max(32).optional(), // nro propio o nro_3c (parcial)
     page: z.coerce.number().int().positive().default(1),
     limit: z.coerce.number().int().positive().max(200).default(50),
   })

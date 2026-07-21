@@ -67,13 +67,17 @@ export async function getMovimientos(req: Request, res: Response): Promise<void>
   if (!parsed.success) {
     throw badRequest('VALIDACION', z.prettifyError(parsed.error));
   }
-  const { desde, hasta, tipo, estado, ubicacion, page, limit } = parsed.data;
+  const { desde, hasta, tipo, estado, ubicacion, producto, familia, usuario, nro, page, limit } = parsed.data;
   const result = await listarMovimientos({
     desde,
     hasta,
     tipo,
     estado,
     ubicacionId: ubicacion,
+    producto,
+    familia,
+    usuarioId: usuario,
+    nro,
     page,
     limit,
   });
@@ -151,13 +155,14 @@ export async function getStock(req: Request, res: Response): Promise<void> {
 }
 
 // CSV apto para Excel es-AR: separador ';', decimales con coma, comillas si hace falta.
-function celdaCsv(v: string): string {
-  return /[";\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+function celdaCsv(v: string | number): string {
+  const s = String(v);
+  return /[";\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
-function filaCsv(campos: string[]): string {
+function filaCsv(campos: (string | number)[]): string {
   return campos.map(celdaCsv).join(';');
 }
-function aCsv(headers: string[], filas: string[][]): string {
+function aCsv(headers: string[], filas: (string | number)[][]): string {
   const lineas = [filaCsv(headers), ...filas.map(filaCsv)];
   return '﻿' + lineas.join('\r\n'); // BOM para que Excel lea UTF-8
 }
@@ -169,18 +174,32 @@ export async function getMovimientosCsv(req: Request, res: Response): Promise<vo
   if (!parsed.success) {
     throw badRequest('VALIDACION', z.prettifyError(parsed.error));
   }
-  const { desde, hasta, tipo, estado, ubicacion } = parsed.data;
-  const filas = await obtenerMovimientosExport({ desde, hasta, tipo, estado, ubicacionId: ubicacion });
+  const { desde, hasta, tipo, estado, ubicacion, producto, familia, usuario, nro } = parsed.data;
+  const filas = await obtenerMovimientosExport({
+    desde,
+    hasta,
+    tipo,
+    estado,
+    ubicacionId: ubicacion,
+    producto,
+    familia,
+    usuarioId: usuario,
+    nro,
+  });
+  // Cada entidad (origen/destino/producto) va con su ID y su nombre en COLUMNAS separadas,
+  // nunca "47 - Panaderia" en una sola celda (rompe el filtrado/tabla dinámica en Excel).
   const csv = aCsv(
-    ['Nro', 'Fecha', 'Hora', 'Tipo', 'Estado', 'Origen', 'Destino', 'Codigo', 'Producto', 'Cantidad', 'Unidad'],
+    ['Nro', 'Fecha', 'Hora', 'Tipo', 'Estado', 'Origen ID', 'Origen', 'Destino ID', 'Destino', 'Codigo', 'Producto', 'Cantidad', 'Unidad'],
     filas.map((r) => [
       r.nro,
       r.fecha,
       r.hora,
       r.tipo,
       r.estado,
-      `${r.origen_dep_id_3c} - ${r.origen_nombre}`,
-      `${r.destino_dep_id_3c} - ${r.destino_nombre}`,
+      r.origen_dep_id_3c,
+      r.origen_nombre,
+      r.destino_dep_id_3c,
+      r.destino_nombre,
       r.producto_3c,
       r.producto_nombre,
       dec(r.cantidad_real),
