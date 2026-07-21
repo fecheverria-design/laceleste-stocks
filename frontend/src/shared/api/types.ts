@@ -15,6 +15,15 @@ export interface SesionResult {
   user: AuthUser;
 }
 
+// Usuario con campos públicos (GET /api/usuarios) — para selects, ej. filtro "quién cargó".
+export interface UsuarioPublico {
+  id: number;
+  nombre: string;
+  email: string;
+  rol: Rol;
+  activo: boolean;
+}
+
 // Maestro de artículos (productos).
 export interface Articulo {
   codigo_3c: string;
@@ -159,6 +168,11 @@ export interface Producto {
   codigo_3c: string;
   nombre: string;
   unidad_base: string;
+  // Info de referencia (nullable; se muestra al elegir el producto en un renglón).
+  familia?: string | null;
+  subfamilia?: string | null;
+  presentacion_compra?: string | null;
+  unidades_por_bulto?: string | null; // numeric → string por el driver
 }
 export interface TipoMovimiento {
   codigo: string;

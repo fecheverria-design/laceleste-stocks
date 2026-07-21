@@ -23,6 +23,11 @@ export async function listarProductos() {
       codigo_3c: productos.codigo3c,
       nombre: productos.nombre,
       unidad_base: productos.unidadBase,
+      // Info de referencia que el front muestra al elegir el producto en un renglón.
+      familia: productos.familia,
+      subfamilia: productos.subfamilia,
+      presentacion_compra: productos.presentacionCompra,
+      unidades_por_bulto: productos.unidadesPorBulto,
     })
     .from(productos)
     .where(eq(productos.activo, true))
