@@ -1,6 +1,7 @@
-import { eq, inArray } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { db, pool } from './client.js';
-import { productos, proveedores } from './schema.js';
+import { proveedores } from './schema.js';
+import { existentesEnMaestro, notaFaltantes, separarPorMaestro } from './sync-maestro.js';
 import { resolverUsuarioIntegracion } from '../repositories/movimientos.repository.js';
 import { reconciliarBajas, registrarRecepcion } from '../services/movimientos.service.js';
 import { AppError } from '../domain/errors.js';
@@ -252,17 +253,6 @@ function aNumero(v: string | number | null): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-// Códigos de producto que SÍ existen en nuestro maestro (los demás no se pueden mover).
-async function existentesEnMaestro(codigos: string[]): Promise<Set<string>> {
-  const unicos = [...new Set(codigos)];
-  if (unicos.length === 0) return new Set();
-  const rows = await db
-    .select({ c: productos.codigo3c })
-    .from(productos)
-    .where(inArray(productos.codigo3c, unicos));
-  return new Set(rows.map((r) => r.c));
-}
-
 interface RenglonRecep {
   producto_3c: string;
   cantidad_real: number;
@@ -377,10 +367,16 @@ async function main(): Promise<void> {
 
       // Pre-filtra productos inexistentes en nuestro maestro: así una recepción no se
       // pierde entera por un artículo que aún no está en 3c (se saltea ese renglón).
+      // Mismo criterio que el sync de abastecimientos, ver sync-maestro.ts.
       const existentes = await existentesEnMaestro(candidatos.map((c) => c.producto_3c));
-      const detalle = candidatos.filter((c) => existentes.has(c.producto_3c));
+      const { detalle, faltantes } = separarPorMaestro(candidatos, existentes);
       const faltan = candidatos.length - detalle.length;
-      if (faltan > 0) prodSalteados += faltan;
+      if (faltan > 0) {
+        prodSalteados += faltan;
+        console.log(
+          `    ⚠ recep #${r.id} ${r.proveedor_nombre ?? ''}: ${faltantes.length} producto(s) sin alta en el maestro → ${faltantes.join(', ')} (renglón salteado; entra solo al darlos de alta)`,
+        );
+      }
       if (detalle.length === 0) {
         console.log(`  ⚠ ${fecha} recep #${r.id} (${r.proveedor_nombre ?? '?'}): ${faltan} artículo(s) no están en el maestro → recepción salteada.`);
         continue;
@@ -398,7 +394,8 @@ async function main(): Promise<void> {
         fecha: (r.fecha ?? fecha).slice(0, 10),
         proveedor_id: proveedorId,
         detalle,
-        observaciones: `Sync recepción #${r.id} ${r.proveedor_nombre ?? ''} (${fecha})`.trim(),
+        observaciones:
+          `Sync recepción #${r.id} ${r.proveedor_nombre ?? ''} (${fecha})`.trim() + notaFaltantes(faltantes),
       };
 
       if (dry) {
