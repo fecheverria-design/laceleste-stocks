@@ -1,4 +1,5 @@
 import { pool } from './client.js';
+import { existentesEnMaestro, notaFaltantes, separarPorMaestro } from './sync-maestro.js';
 import { resolverUsuarioIntegracion } from '../repositories/movimientos.repository.js';
 import { reconciliarBajasPorClave, registrarAbastecimiento } from '../services/movimientos.service.js';
 import { AppError } from '../domain/errors.js';
@@ -34,6 +35,12 @@ import type { AbastecimientoInput } from '../domain/movimientos.schema.js';
 //   - la baja la hace el usuario de integración, y el modo reconciliar REVIVE sus propias
 //     bajas si el real reaparece → un real borrado y vuelto a guardar se recupera solo.
 // Una anulación hecha por una persona nunca se revive (regla #4).
+//
+// PRODUCTO QUE NO ESTÁ EN NUESTRO MAESTRO: saltea ESE renglón, nunca el movimiento. Antes el
+// service rechazaba el RINT completo (PRODUCTO_NO_ENCONTRADO) y el área perdía el día entero
+// por un artículo nuevo de 3c. Se avisa por consola y queda anotado en las observaciones del
+// movimiento; al dar de alta el producto, el modo reconciliar completa el renglón solo dentro
+// de la ventana. Mismo criterio que el sync de recepciones. Ver sync-maestro.ts.
 //
 // VENTANA MÓVIL: sin argumentos, sincroniza HOY + los VENTANA_DIAS_ATRAS días previos
 // (default 2). Así, si la PC estuvo apagada, al volver reconcilia sola los días que se
@@ -273,6 +280,8 @@ async function main(): Promise<void> {
   let movimientos = 0;
   let renglones = 0;
   let errores = 0;
+  let prodSalteados = 0;
+  let areasSalteadas = 0;
   // Días en que la API SÍ devolvió filas: son los únicos donde una (fecha, área) ausente
   // significa "la vaciaron" y no "el pull falló". Y las claves que el origen sigue teniendo.
   const fechasConDatos: string[] = [];
@@ -292,19 +301,43 @@ async function main(): Promise<void> {
     }
 
     for (const g of grupos) {
+      // Un producto que todavía no está en NUESTRO maestro (recién dado de alta en 3c) saltea
+      // SU renglón, no el abastecimiento del área. El service sigue siendo estricto (regla #1),
+      // pero el sync no puede perder el día entero de un área por un artículo nuevo. Cuando lo
+      // den de alta, el modo reconciliar reedita el RINT y el renglón entra solo. Ver sync-maestro.ts.
+      const existentes = await existentesEnMaestro(g.detalle.map((r) => r.producto_3c));
+      const { detalle, faltantes } = separarPorMaestro(g.detalle, existentes);
+      if (faltantes.length > 0) {
+        prodSalteados += g.detalle.length - detalle.length;
+        console.log(
+          `    ⚠ área ${g.destino_dep_id_3c} (${g.fecha}): ${faltantes.length} producto(s) sin alta en el maestro → ${faltantes.join(', ')} (renglón salteado; entra solo al darlos de alta)`,
+        );
+      }
+      if (detalle.length === 0) {
+        areasSalteadas++;
+        console.log(
+          `  ⚠ ${g.fecha} área ${g.destino_dep_id_3c}: ningún producto del área está en el maestro → área salteada.`,
+        );
+        continue;
+      }
+
       const input: AbastecimientoInput = {
         idempotency_key: `abast:${g.fecha}:${g.destino_dep_id_3c}`,
         destino_dep_id_3c: g.destino_dep_id_3c,
         fecha: g.fecha,
         proyeccion: g.proyeccion,
-        detalle: g.detalle,
-        observaciones: `Sync app_ordenes_produccion (${g.fecha})`,
+        detalle,
+        // La nota deja el agujero a la vista en la app, no solo en el log. Sin faltantes queda
+        // el texto de siempre → el diff del modo reconciliar no se ensucia.
+        observaciones: `Sync app_ordenes_produccion (${g.fecha})${notaFaltantes(faltantes)}`,
       };
 
       if (dry) {
-        console.log(`    [dry] área ${g.destino_dep_id_3c}: ${g.detalle.length} renglón(es)`);
+        console.log(
+          `    [dry] área ${g.destino_dep_id_3c}: ${detalle.length} renglón(es)${faltantes.length ? ` (+${g.detalle.length - detalle.length} salteado)` : ''}`,
+        );
         movimientos++;
-        renglones += g.detalle.length;
+        renglones += detalle.length;
         continue;
       }
 
@@ -314,8 +347,8 @@ async function main(): Promise<void> {
         // estaba; auditado y con stock recalculado. Sin cambios = no-op. No duplica.
         const mov = await registrarAbastecimiento(input, { usuarioId, reconciliar: true });
         movimientos++;
-        renglones += g.detalle.length;
-        console.log(`    ✔ ${mov.nro} → área ${g.destino_dep_id_3c} (${g.detalle.length} renglón/es)`);
+        renglones += detalle.length;
+        console.log(`    ✔ ${mov.nro} → área ${g.destino_dep_id_3c} (${detalle.length} renglón/es)`);
       } catch (e) {
         errores++;
         const msg = e instanceof AppError ? `${e.code}: ${e.message}` : e instanceof Error ? e.message : String(e);
@@ -336,6 +369,8 @@ async function main(): Promise<void> {
   console.log(
     `\n${dry ? 'DRY-RUN — nada se escribió. ' : ''}` +
       `${movimientos} movimiento(s), ${renglones} renglón(es)` +
+      `${prodSalteados ? `, ${prodSalteados} renglón(es) sin producto en el maestro (dar de alta y se completan solos)` : ''}` +
+      `${areasSalteadas ? `, ${areasSalteadas} área(s) salteada(s) entera(s)` : ''}` +
       `${bajas.length ? `, ${bajas.length} anulado(s) por baja en el origen` : ''}` +
       `${errores ? `, ${errores} con error` : ''}.`,
   );
