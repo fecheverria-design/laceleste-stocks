@@ -1,5 +1,33 @@
 # Operación de los syncs "en vivo"
 
+> ## ⚠ LEER PRIMERO — desde el 17/07/2026 esto corre EN EL SERVER, no en la PC
+>
+> La app vive en el **LXC 105** del Proxmox (`https://modulocompras.plataformaceleste.com`) y
+> los dos syncs los dispara el **cron del LXC** (:00 abastecimientos, :05 recepciones), no la
+> Tarea Programada de Windows — que quedó **deshabilitada a propósito el 28/07** (tenerla
+> prendida solo alimentaba una copia vieja de la DB en la PC). **La app ya no depende de que
+> la PC esté prendida.** Lo único que sigue saliendo de la PC es la copia off-site a Dropbox.
+>
+> El resto de este documento describe el esquema viejo y **queda como referencia histórica**
+> (la lógica de reconciliación, bajas y ventana móvil sigue siendo exacta). Equivalencias:
+>
+> | En la PC (viejo) | En el server (hoy) |
+> |---|---|
+> | `Get-Content logs\sync-live.log -Tail 40` | `pct exec 105 -- tail -40 /var/log/laceleste-sync.log` |
+> | `Get-ScheduledTaskInfo -TaskName "LaCeleste Sync en vivo"` | `pct exec 105 -- crontab -l` |
+> | `npm -w backend run sync:abastecimientos -- --fecha=…` | `cd /opt/laceleste && docker compose -f docker-compose.prod.yml exec -T backend npm -w backend run sync:abastecimientos -- --fecha=…` |
+> | `docker exec laceleste_movimientos_db psql …` | `pct exec 105 -- docker exec -i laceleste_db psql -U $POSTGRES_USER -d $POSTGRES_DB` |
+>
+> Se entra con `ssh -i C:\Users\MSI\.ssh\laceleste_backup -p 2255 root@179.43.117.2` y de ahí
+> `pct exec 105 -- …` (la IP 10.10.10.105 es interna, la PC no le llega directo).
+>
+> **Vigía:** `scripts/health-check.sh` corre por cron en el LXC a las 09:30 y manda mail SOLO
+> si hay algo (sync frenado, cron/contenedores caídos, backup local o off-site viejo, área que
+> no cerró la sesión, productos caídos, renglones salteados por productos sin alta en el
+> maestro). Probarlo sin enviar: `pct exec 105 -- /opt/laceleste/scripts/health-check.sh --dry`.
+>
+> *Pendiente: reescribir el resto de la guía en clave server.*
+
 Guía práctica para que el stock se mantenga sincronizado con la app del compañero
 **todos los días, solo**. Pensada para la PC local de J (mientras no haya server propio).
 
