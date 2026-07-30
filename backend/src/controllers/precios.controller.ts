@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { AppError, badRequest } from '../domain/errors.js';
+import { dec, enviarCsv } from '../lib/csv.js';
 import { CrearPrecioSchema, EditarPrecioSchema } from '../domain/precios.schema.js';
 import {
   crearPrecio,
@@ -12,11 +13,43 @@ import {
 } from '../services/precios.service.js';
 
 const IdParamSchema = z.object({ id: z.coerce.number().int().positive() });
+const PreciosCsvQuerySchema = z.object({ familia: z.string().trim().min(1).max(64).optional() });
 const ProductoParamSchema = z.object({ codigo: z.string().trim().min(1).max(32) });
 
 // GET /api/precios — precio vigente por producto (incluye los sin precio).
 export async function getPrecios(_req: Request, res: Response): Promise<void> {
   res.status(200).json(await obtenerPreciosVigentes());
+}
+
+// GET /api/precios/export.csv — el precio vigente de cada producto, para Excel.
+// Incluye los que no tienen precio (columna vacía): saber cuáles faltan es medio punto
+// del archivo, y filtrarlos acá los escondería.
+export async function getPreciosCsv(req: Request, res: Response): Promise<void> {
+  const parsed = PreciosCsvQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    throw badRequest('VALIDACION', z.prettifyError(parsed.error));
+  }
+  const { familia } = parsed.data;
+  const todas = await obtenerPreciosVigentes();
+  // Mismo filtro que la pantalla: si estás mirando una familia, el archivo trae esa
+  // familia y no el maestro entero.
+  const filas = familia ? todas.filter((p) => p.producto_familia === familia) : todas;
+  enviarCsv(
+    res,
+    'precios.csv',
+    ['Codigo', 'Producto', 'Familia', 'Unidad', 'Precio', 'Vigente desde', 'Tipo', 'Proveedor ID', 'Proveedor'],
+    filas.map((p) => [
+      p.producto_3c,
+      p.producto_nombre,
+      p.producto_familia ?? '',
+      p.unidad_base,
+      p.precio ? dec(p.precio) : '',
+      p.vigente_desde ?? '',
+      p.tipo ?? '',
+      p.proveedor_numero_3c ?? '',
+      p.proveedor_nombre ?? '',
+    ]),
+  );
 }
 
 // GET /api/valorizacion — valor del stock (cantidad × precio vigente): total,

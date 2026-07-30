@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, ilike, inArray, like, lte, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, ilike, inArray, like, lte, or, sql, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { db, type Tx } from '../db/client.js';
 import {
@@ -568,10 +568,29 @@ function condicionesLista(f: ListaFiltros): SQL[] {
   return conds;
 }
 
+// Columnas por las que se puede ordenar el listado (clic en el encabezado). El id siempre
+// desempata: sin eso, dos filas con la misma fecha pueden salir en distinto orden entre
+// páginas y una fila se repetiría o se perdería al paginar.
+export type OrdenLista = 'fecha' | 'nro' | 'tipo' | 'estado';
+export type DirLista = 'asc' | 'desc';
+
+function ordenLista(orden: OrdenLista, dir: DirLista): SQL[] {
+  const d = dir === 'asc' ? asc : desc;
+  const col = {
+    fecha: movimientos.fecha,
+    nro: movimientos.nro,
+    tipo: tiposMovimiento.codigo,
+    estado: movimientos.estado,
+  }[orden];
+  return [d(col), desc(movimientos.id)];
+}
+
 export async function listarMovimientos(
   f: ListaFiltros,
   page: number,
   limit: number,
+  orden: OrdenLista = 'fecha',
+  dir: DirLista = 'desc',
 ): Promise<MovimientoResumen[]> {
   const conds = condicionesLista(f);
   const origen = alias(ubicaciones, 'origen');
@@ -602,7 +621,7 @@ export async function listarMovimientos(
     .innerJoin(destino, eq(destino.id, movimientos.destinoId))
     .leftJoin(proveedores, eq(proveedores.id, movimientos.proveedorId))
     .where(conds.length ? and(...conds) : undefined)
-    .orderBy(desc(movimientos.fecha), desc(movimientos.id)) // recientes primero; id desempata
+    .orderBy(...ordenLista(orden, dir))
     .limit(limit)
     .offset((page - 1) * limit);
 
@@ -637,6 +656,7 @@ export async function resolverUsuarioIntegracion(): Promise<number | undefined> 
 export interface FilaStock {
   producto_3c: string;
   producto_nombre: string;
+  producto_familia: string | null;
   ubicacion_id: number;
   ubicacion_dep_id_3c: number;
   ubicacion_nombre: string;
@@ -786,13 +806,14 @@ export async function consultarStock(filtros: {
   const res = await db.execute<{
     producto_3c: string;
     producto_nombre: string;
+    producto_familia: string | null;
     ubicacion_id: number;
     ubicacion_dep_id_3c: number;
     ubicacion_nombre: string;
     cantidad: string;
     actualizado_en: string | null;
   }>(
-    sql`SELECT s.producto_3c, p.nombre AS producto_nombre,
+    sql`SELECT s.producto_3c, p.nombre AS producto_nombre, p.familia AS producto_familia,
                s.ubicacion_id, u.dep_id_3c AS ubicacion_dep_id_3c, u.nombre AS ubicacion_nombre,
                s.cantidad, s.actualizado_en
         FROM stock_actual s
@@ -805,6 +826,7 @@ export async function consultarStock(filtros: {
   return res.rows.map((r) => ({
     producto_3c: r.producto_3c,
     producto_nombre: r.producto_nombre,
+    producto_familia: r.producto_familia,
     ubicacion_id: r.ubicacion_id,
     ubicacion_dep_id_3c: r.ubicacion_dep_id_3c,
     ubicacion_nombre: r.ubicacion_nombre,

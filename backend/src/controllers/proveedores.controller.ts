@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { badRequest } from '../domain/errors.js';
+import { dec, enviarCsv } from '../lib/csv.js';
 import { CrearProveedorSchema, GastoQuerySchema } from '../domain/proveedores.schema.js';
 import {
   crearProveedor,
@@ -18,6 +19,29 @@ export async function getProveedores(req: Request, res: Response): Promise<void>
     throw badRequest('VALIDACION', z.prettifyError(parsed.error));
   }
   res.status(200).json(await obtenerProveedores(parsed.data));
+}
+
+// GET /api/proveedores/export.csv — la lista con su gasto, respetando el mismo filtro de
+// familia/período que la pantalla (si no, el archivo no cuadraría con lo que se ve).
+export async function getProveedoresCsv(req: Request, res: Response): Promise<void> {
+  const parsed = GastoQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    throw badRequest('VALIDACION', z.prettifyError(parsed.error));
+  }
+  const filas = await obtenerProveedores(parsed.data);
+  enviarCsv(
+    res,
+    'proveedores.csv',
+    ['Numero 3c', 'Proveedor', 'CUIT', 'Compras', 'Gasto neto', 'Familias'],
+    filas.map((p) => [
+      p.numero_3c ?? '',
+      p.nombre,
+      p.cuit ?? '',
+      p.compras,
+      dec(p.gasto_neto),
+      (p.familias ?? []).join(' / '),
+    ]),
+  );
 }
 
 // GET /api/familias — familias distintas (para el filtro del gráfico).

@@ -3,6 +3,7 @@ import {
   deletePrecio,
   getHistorialPrecios,
   getPrecios,
+  getPreciosCsv,
   getValorizacion,
   postPrecio,
   putPrecio,
@@ -13,6 +14,7 @@ export const preciosRouter = Router();
 
 // Precios de productos (historial con fecha de vigencia). Todo requiere login.
 preciosRouter.get('/precios', requireAuth, getPrecios);
+preciosRouter.get('/precios/export.csv', requireAuth, getPreciosCsv);
 preciosRouter.get('/valorizacion', requireAuth, getValorizacion);
 preciosRouter.get('/productos/:codigo/precios', requireAuth, getHistorialPrecios);
 preciosRouter.post('/precios', requireAuth, postPrecio);

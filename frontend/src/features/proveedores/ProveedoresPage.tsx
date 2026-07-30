@@ -1,7 +1,10 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { apiGet, apiPost } from '../../shared/api/client';
+import { apiGet, apiPost, descargarArchivo } from '../../shared/api/client';
+import { IconoDescarga } from '../../shared/components/iconos';
+import { CLS_BOTON, CLS_BOTON_PRIMARIO } from '../../shared/components/tabla';
+import { EncabezadoPagina } from '../../shared/components/ui';
 import type { GastoMes, GastoProveedor, ProductoDeProveedor, Proveedor } from '../../shared/api/types';
 
 const ars0 = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 });
@@ -92,20 +95,34 @@ export function ProveedoresPage() {
     (p) => !q || p.nombre.toLowerCase().includes(q) || String(p.numero_3c ?? '').includes(q),
   );
 
+  // El CSV respeta el mismo filtro de familia/período que la pantalla, así el archivo
+  // cuadra con lo que se ve (misma decisión que la columna Gasto neto).
+  const exportar = () => {
+    const p = new URLSearchParams();
+    if (familia) p.set('familia', familia);
+    if (desde) p.set('desde', desde);
+    if (hasta) p.set('hasta', hasta);
+    const qs = p.toString();
+    void descargarArchivo(`/api/proveedores/export.csv${qs ? `?${qs}` : ''}`, 'proveedores.csv');
+  };
+
   return (
     <section className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h2 className="text-xl font-semibold">Proveedores</h2>
-          <p className="text-sm text-slate-500">Gasto por proveedor (compras reales, neto sin IVA)</p>
-        </div>
-        <button
-          onClick={() => setMostrarAlta((v) => !v)}
-          className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-sky-700"
-        >
-          {mostrarAlta ? 'Cerrar' : '+ Nuevo proveedor'}
-        </button>
-      </div>
+      <EncabezadoPagina
+        titulo="Proveedores"
+        bajada="Gasto por proveedor (compras reales, neto sin IVA)"
+        acciones={
+          <>
+            <button onClick={exportar} className={CLS_BOTON} title="Descarga la lista con el filtro puesto">
+              <IconoDescarga />
+              Descargar CSV
+            </button>
+            <button onClick={() => setMostrarAlta((v) => !v)} className={CLS_BOTON_PRIMARIO}>
+              {mostrarAlta ? 'Cerrar' : '+ Nuevo proveedor'}
+            </button>
+          </>
+        }
+      />
 
       {mostrarAlta && (
         <form
