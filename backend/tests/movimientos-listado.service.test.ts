@@ -125,6 +125,46 @@ describe('listarMovimientos + obtenerMovimientoPorId', () => {
     expect(p2.items.map((m) => m.id)).toEqual([id1]);
   });
 
+  // El orden lo resuelve el server (no el cliente) porque el listado está paginado:
+  // ordenar solo la página visible mostraría un orden que no es el real.
+  it('ordena por la columna pedida en las dos direcciones', async () => {
+    const { id1, id2, id3 } = await escenario();
+
+    const asc = await listarMovimientos({ page: 1, limit: 10, orden: 'fecha', dir: 'asc' });
+    expect(asc.items.map((m) => m.id)).toEqual([id1, id2, id3]);
+
+    const desc = await listarMovimientos({ page: 1, limit: 10, orden: 'fecha', dir: 'desc' });
+    expect(desc.items.map((m) => m.id)).toEqual([id3, id2, id1]);
+
+    // Por defecto (sin orden/dir explícitos) sigue siendo fecha descendente: el listado
+    // arranca mostrando lo más reciente, que es lo que se mira todos los días.
+    const porDefecto = await listarMovimientos({ page: 1, limit: 10 });
+    expect(porDefecto.items.map((m) => m.id)).toEqual([id3, id2, id1]);
+
+    const porNro = await listarMovimientos({ page: 1, limit: 10, orden: 'nro', dir: 'asc' });
+    const nros = porNro.items.map((m) => m.nro);
+    expect(nros).toEqual([...nros].sort());
+  });
+
+  // Sin desempate estable, dos filas con la misma fecha pueden salir en distinto orden en
+  // cada consulta → al paginar una se repetiría en dos páginas y otra no aparecería nunca.
+  it('con la misma fecha el paginado no repite ni pierde filas', async () => {
+    const fx = await sembrarEscenario({ productos3c: ['401'] });
+    const ids = [
+      await crearMov(fx, '2026-03-01', fx.area.depId3c, 1),
+      await crearMov(fx, '2026-03-01', fx.area.depId3c, 2),
+      await crearMov(fx, '2026-03-01', fx.area.depId3c, 3),
+      await crearMov(fx, '2026-03-01', fx.area.depId3c, 4),
+    ];
+
+    const p1 = await listarMovimientos({ page: 1, limit: 2, orden: 'fecha', dir: 'desc' });
+    const p2 = await listarMovimientos({ page: 2, limit: 2, orden: 'fecha', dir: 'desc' });
+    const vistos = [...p1.items, ...p2.items].map((m) => m.id);
+
+    expect(new Set(vistos).size).toBe(4); // ninguna repetida
+    expect([...vistos].sort()).toEqual([...ids].sort()); // ninguna perdida
+  });
+
   it('obtenerMovimientoPorId devuelve el detalle; inexistente lanza MOVIMIENTO_NO_ENCONTRADO', async () => {
     const { id1 } = await escenario();
 

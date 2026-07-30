@@ -21,6 +21,8 @@ import {
   insertarDetalle,
   leerSnapshotMovimiento,
   listarMovimientos as repoListarMovimientos,
+  type DirLista,
+  type OrdenLista,
   marcarAnulado,
   movimientosDeProducto,
   movimientosParaExport,
@@ -422,6 +424,8 @@ export async function reconciliarBajasPorClave(
 export interface ListarMovimientosParams extends ListaFiltros {
   page: number;
   limit: number;
+  orden?: OrdenLista;
+  dir?: DirLista;
 }
 
 export interface ListaMovimientosResult {
@@ -434,9 +438,9 @@ export interface ListaMovimientosResult {
 // Listado paginado con filtros. items y total comparten el mismo filtro para que
 // la paginación sea coherente (total = cuántos matchean, no cuántos se devuelven).
 export async function listarMovimientos(params: ListarMovimientosParams): Promise<ListaMovimientosResult> {
-  const { page, limit, ...filtros } = params;
+  const { page, limit, orden, dir, ...filtros } = params;
   const [items, total] = await Promise.all([
-    repoListarMovimientos(filtros, page, limit),
+    repoListarMovimientos(filtros, page, limit, orden, dir),
     contarMovimientos(filtros),
   ]);
   return { items, page, limit, total };

@@ -95,6 +95,10 @@ export const MovimientosQuerySchema = z
     nro: z.string().trim().min(1).max(32).optional(), // nro propio o nro_3c (parcial)
     page: z.coerce.number().int().positive().default(1),
     limit: z.coerce.number().int().positive().max(200).default(50),
+    // Orden de la tabla (clic en el encabezado). Va al server y no al cliente porque el
+    // listado está PAGINADO: ordenar solo la página visible daría un orden mentiroso.
+    orden: z.enum(['fecha', 'nro', 'tipo', 'estado']).default('fecha'),
+    dir: z.enum(['asc', 'desc']).default('desc'),
   })
   .refine((q) => !q.desde || !q.hasta || q.desde <= q.hasta, {
     message: 'desde no puede ser posterior a hasta',

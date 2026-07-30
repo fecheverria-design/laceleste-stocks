@@ -132,6 +132,7 @@ export interface ListaMovimientos {
 export interface FilaStock {
   producto_3c: string;
   producto_nombre: string;
+  producto_familia: string | null;
   ubicacion_id: number;
   ubicacion_dep_id_3c: number;
   ubicacion_nombre: string;
@@ -224,6 +225,7 @@ export type TipoPrecio = 'COMPRA' | 'ACTUALIZACION';
 export interface PrecioVigente {
   producto_3c: string;
   producto_nombre: string;
+  producto_familia: string | null;
   unidad_base: string;
   precio: string | null; // numeric(14,4) serializado; null = sin precio cargado
   vigente_desde: string | null; // YYYY-MM-DD
