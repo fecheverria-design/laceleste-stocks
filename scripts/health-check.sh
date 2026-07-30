@@ -5,7 +5,9 @@
 #  Cron diario. Junta dos cosas y, si hay algo, manda UN mail:
 #
 #    [INFRA]  acá mismo: que el cron tenga sus líneas, que los contenedores
-#             estén Up y que el backup de anoche exista en /opt/backups.
+#             estén Up, que el backup de anoche exista en /opt/backups y que la
+#             última corrida del sync de EXTRAS no haya fallado (ese no se nota
+#             por los datos: un día sin extras es normal).
 #    [DATOS]  backend/src/db/health-check.ts adentro del contenedor: frescura
 #             del sync, renglones salteados por productos sin alta en el
 #             maestro, áreas que no cerraron la sesión y productos caídos.
@@ -55,14 +57,14 @@ add() { PROBLEMAS="${PROBLEMAS}* $1"$'\n\n'; }
 # apagado y nadie se enteró durante 5 días.
 CRON=$(crontab -l 2>/dev/null)
 FALTAN_CRON=""
-for job in "sync:abastecimientos" "sync:recepciones" "backup-db.sh"; do
+for job in "sync:abastecimientos" "sync:recepciones" "sync:extras" "backup-db.sh"; do
   if ! grep -q -- "$job" <<<"$CRON"; then
     add "Falta la línea de \"$job\" en el crontab del LXC (crontab -l). Sin eso no corre solo."
     log "  PROBLEMA: crontab sin $job"
     FALTAN_CRON="si"
   fi
 done
-[ -z "$FALTAN_CRON" ] && log "  OK: el crontab tiene los 2 syncs y el backup"
+[ -z "$FALTAN_CRON" ] && log "  OK: el crontab tiene los 3 syncs y el backup"
 if ! systemctl is-active --quiet cron; then
   add "El servicio cron NO está activo en el LXC: nada automático está corriendo (systemctl status cron)."
   log "  PROBLEMA: cron inactivo"
@@ -111,6 +113,33 @@ else
     log "  PROBLEMA: off-site viejo (${EDAD_OFF}h)"
   else
     log "  OK: copia off-site de hace ${EDAD_OFF}h"
+  fi
+fi
+
+# ── INFRA 5: la última corrida del sync de EXTRAS no falló ────────────────────
+# Los otros dos syncs se notan por los datos (si dejan de traer movimientos, el chequeo de
+# DATOS lo ve). El de extras no: un día sin ningún extra es lo NORMAL, así que "0 movimientos"
+# no distingue "no hubo extras" de "el sync se está cayendo". Lo único que lo delata es el log.
+SYNC_LOG=/var/log/laceleste-sync.log
+if [ ! -f "$SYNC_LOG" ]; then
+  log "  (sin $SYNC_LOG todavía, no se evalúa el sync de extras)"
+elif ! grep -q "Sync abastecimientos EXTRAS" "$SYNC_LOG"; then
+  add "El sync de abastecimientos EXTRAS no aparece en $SYNC_LOG: nunca corrió por cron. Revisá la línea \"sync:extras\" del crontab."
+  log "  PROBLEMA: extras nunca corrió"
+else
+  # Última corrida = última cabecera + su bloque (el bloque de extras es corto y termina en
+  # la línea de resumen; 40 líneas sobran salvo catástrofe).
+  BLOQUE_EXTRAS=$(grep -A 40 "Sync abastecimientos EXTRAS" "$SYNC_LOG" | tail -41)
+  if grep -qE '✗ Sync abortado|con error' <<<"$BLOQUE_EXTRAS"; then
+    add "La última corrida del sync de abastecimientos EXTRAS falló:"$'\n'"$(grep -E '✗|con error' <<<"$BLOQUE_EXTRAS" | head -5)"
+    log "  PROBLEMA: última corrida de extras con error"
+  elif grep -qE 'Área\(s\) que no sabemos mapear' <<<"$BLOQUE_EXTRAS"; then
+    # No es una falla del sync, pero es stock que NO se está descontando: el encargado eligió
+    # un área que no está en AREAS_3C (extras-mapeo.ts) y esos extras se saltean en silencio.
+    add "El sync de extras encontró un área que no sabe mapear a un depósito de 3c → esos egresos NO se están descontando:"$'\n'"$(grep 'Área(s) que no sabemos mapear' <<<"$BLOQUE_EXTRAS" | head -3)"
+    log "  PROBLEMA: extras con área sin mapear"
+  else
+    log "  OK: última corrida del sync de extras sin errores"
   fi
 fi
 
