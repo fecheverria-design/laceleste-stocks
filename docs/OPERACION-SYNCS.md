@@ -3,8 +3,8 @@
 > ## ⚠ LEER PRIMERO — desde el 17/07/2026 esto corre EN EL SERVER, no en la PC
 >
 > La app vive en el **LXC 105** del Proxmox (`https://modulocompras.plataformaceleste.com`) y
-> los dos syncs los dispara el **cron del LXC** (:00 abastecimientos, :05 recepciones), no la
-> Tarea Programada de Windows — que quedó **deshabilitada a propósito el 28/07** (tenerla
+> los tres syncs los dispara el **cron del LXC** (:00 abastecimientos, :05 recepciones,
+> :10 extras), no la Tarea Programada de Windows — que quedó **deshabilitada a propósito el 28/07** (tenerla
 > prendida solo alimentaba una copia vieja de la DB en la PC). **La app ya no depende de que
 > la PC esté prendida.** Lo único que sigue saliendo de la PC es la copia off-site a Dropbox.
 >
@@ -53,6 +53,23 @@ Guía práctica para que el stock se mantenga sincronizado con la app del compa�
   - un día en que la API no devuelve filas (falla de red, servidor caído) **no anula nada**;
   - el sync solo revive **sus propias** bajas. Si vos anulaste un movimiento a mano desde el
     front, el sync **jamás** lo resucita (regla #4: la decisión humana manda).
+- **Abastecimientos EXTRAS** (`sync:extras`, desde el 30/07/2026): los egresos que el encargado
+  de depósito despacha **por fuera del abastecimiento diario** y carga con el botón nuevo de la
+  app del compañero. Se leen de `GET /api/movimientos?fechaDesde&fechaHasta` y se materializan
+  como **un RINT por (fecha, área)** juntando todos los extras del día de esa área
+  (clave `abastx:<fecha>:<dep_id_3c>`). No tienen sugerido: la cantidad cargada es la que
+  descuenta stock (regla #2). Mismo modo reconciliar que el diario → el RINT del día se reedita
+  a medida que cargan más extras.
+  - El área viaja como **nombre** y se mapea a `dep_id_3c` con la tabla `AREAS_3C` de
+    `backend/src/db/extras-mapeo.ts` (copiada de su front, verificada contra el export de 3c).
+    **Si aparece un área nueva, el sync la saltea y avisa** (`⚠ Área(s) que no sabemos mapear`)
+    en vez de inventarle un id — hay que agregarla ahí. `RECETAS EN AREAS` no tiene depósito en
+    3c, se saltea siempre.
+  - **Bajas:** si borran un extra en su app, la próxima corrida reedita el RINT; si borran
+    **todos** los de esa (fecha, área), el RINT se anula. A diferencia del diario, acá el seguro
+    contra anulaciones espurias **no** es "solo los días con filas" (un día sin extras es lo
+    normal) sino que la llamada HTTP haya sido exitosa: si la API falla, el sync aborta sin
+    anular nada.
 - **Los movimientos importados de 3c no los toca ningún sync** (no tienen `idempotencia_key`).
   O sea que un día cargado a mano con `import:movimientos` está a salvo.
 
@@ -105,6 +122,7 @@ scripts\sync-live.cmd --dry
 # Correr un día puntual o un rango a mano (no toca la tarea horaria)
 npm -w backend run sync:abastecimientos -- --fecha=2026-07-01
 npm -w backend run sync:recepciones -- --desde=2026-06-20 --hasta=2026-06-30
+npm -w backend run sync:extras -- --fecha=2026-07-30 --dry
 ```
 
 ## Ajustes
