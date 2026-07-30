@@ -11,6 +11,7 @@ import { precios, productos, proveedores } from '../db/schema.js';
 export type FilaPrecioVigente = {
   producto_3c: string;
   producto_nombre: string;
+  producto_familia: string | null;
   unidad_base: string;
   precio: string | null; // null = producto sin precio cargado
   vigente_desde: string | null;
@@ -28,6 +29,7 @@ export async function listarPreciosVigentes(): Promise<FilaPrecioVigente[]> {
     sql`SELECT
           p.codigo_3c AS producto_3c,
           p.nombre AS producto_nombre,
+          p.familia AS producto_familia,
           p.unidad_base AS unidad_base,
           v.precio AS precio,
           v.vigente_desde::text AS vigente_desde,

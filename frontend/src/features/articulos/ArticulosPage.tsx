@@ -1,6 +1,10 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiGet, apiPost, apiPut } from '../../shared/api/client';
+import { apiGet, apiPost, apiPut, descargarArchivo } from '../../shared/api/client';
+import { BarraFiltros, Campo, type ChipFiltro } from '../../shared/components/filtros';
+import { IconoDescarga, IconoLupa } from '../../shared/components/iconos';
+import { CLS_BOTON, CLS_BOTON_PRIMARIO, CLS_INPUT, Paginacion } from '../../shared/components/tabla';
+import { EncabezadoPagina, EtiquetaFamilia, Panel } from '../../shared/components/ui';
 import type { Articulo, ListaArticulos } from '../../shared/api/types';
 
 const inputCls =
@@ -129,52 +133,85 @@ export function ArticulosPage() {
 
   const items = articulos.data?.items ?? [];
   const total = articulos.data?.total ?? 0;
-  const totalPaginas = Math.max(1, Math.ceil(total / LIMIT));
   const puedeGuardar = form.nombre.trim() !== '' && form.unidad_base.trim() !== '';
 
-  return (
-    <section className="space-y-6">
-      <div className="flex flex-wrap items-center gap-3">
-        <div>
-          <h2 className="text-xl font-semibold">Artículos</h2>
-          <p className="text-sm text-slate-500">Maestro de productos con su rubro (familia / subfamilia).</p>
-        </div>
-        <button
-          onClick={abrirAlta}
-          className="ml-auto rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-700"
-        >
-          + Nuevo artículo
-        </button>
-      </div>
+  const chips: ChipFiltro[] = [
+    q.trim() && { key: 'q', label: `Busca: ${q.trim()}`, onQuitar: () => setQ('') },
+    familia && { key: 'fam', label: `Familia: ${familia}`, onQuitar: () => setFamilia('') },
+  ].filter(Boolean) as ChipFiltro[];
 
-      {/* Filtros */}
-      <div className="flex flex-wrap items-center gap-3">
-        <input
-          className={inputCls}
-          placeholder="Buscar por código o nombre…"
-          value={q}
-          onChange={(e) => {
-            setQ(e.target.value);
-            setPage(1);
-          }}
-        />
-        <select
-          className={inputCls}
-          value={familia}
-          onChange={(e) => {
-            setFamilia(e.target.value);
-            setPage(1);
-          }}
-        >
-          <option value="">Todas las familias</option>
-          {(familias.data ?? []).map((f) => (
-            <option key={f} value={f}>
-              {f}
-            </option>
-          ))}
-        </select>
-        <span className="text-sm text-slate-500">{total} artículo(s)</span>
-      </div>
+  // El export baja TODO lo filtrado, no solo la página que se ve (endpoint aparte).
+  const exportar = () => {
+    const p = new URLSearchParams();
+    if (q.trim()) p.set('q', q.trim());
+    if (familia) p.set('familia', familia);
+    const s = p.toString();
+    void descargarArchivo(`/api/articulos/export.csv${s ? `?${s}` : ''}`, 'articulos.csv');
+  };
+
+  return (
+    <section>
+      <EncabezadoPagina
+        titulo="Artículos"
+        bajada={`${total.toLocaleString('es-AR')} artículo${total === 1 ? '' : 's'} · maestro con su rubro (familia / subfamilia)`}
+        acciones={
+          <button onClick={abrirAlta} className={CLS_BOTON_PRIMARIO}>
+            + Nuevo artículo
+          </button>
+        }
+      />
+
+      <BarraFiltros
+        abierto={false}
+        onToggle={() => undefined}
+        chips={chips}
+        onLimpiar={() => {
+          setQ('');
+          setFamilia('');
+          setPage(1);
+        }}
+        principal={
+          <>
+            <div className="relative min-w-[240px] flex-1">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+                <IconoLupa />
+              </span>
+              <input
+                className={`${CLS_INPUT} w-full pl-9`}
+                placeholder="Buscar por código o nombre…"
+                value={q}
+                onChange={(e) => {
+                  setQ(e.target.value);
+                  setPage(1);
+                }}
+              />
+            </div>
+            <Campo label="">
+              <select
+                className={CLS_INPUT}
+                value={familia}
+                onChange={(e) => {
+                  setFamilia(e.target.value);
+                  setPage(1);
+                }}
+              >
+                <option value="">Todas las familias</option>
+                {(familias.data ?? []).map((f) => (
+                  <option key={f} value={f}>
+                    {f}
+                  </option>
+                ))}
+              </select>
+            </Campo>
+          </>
+        }
+        acciones={
+          <button onClick={exportar} className={CLS_BOTON} title="Descarga todos los artículos que matchean el filtro">
+            <IconoDescarga />
+            Descargar CSV
+          </button>
+        }
+      />
 
       {/* Alta / edición */}
       {(alta || editando) && (
@@ -293,9 +330,9 @@ export function ArticulosPage() {
       )}
 
       {/* Tabla */}
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+      <Panel>
         <table className="w-full text-sm">
-          <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+          <thead className="border-b border-slate-200 bg-slate-50/60 text-left text-xs uppercase tracking-wide text-slate-500">
             <tr>
               <th className="px-4 py-3">Código</th>
               <th className="px-4 py-3">Nombre</th>
@@ -325,7 +362,7 @@ export function ArticulosPage() {
               </tr>
             )}
             {items.map((a) => (
-              <tr key={a.codigo_3c} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+              <tr key={a.codigo_3c} className="border-b border-slate-100 transition last:border-0 hover:bg-sky-50/50">
                 <td className="px-4 py-2 font-mono text-xs">
                   {a.codigo_3c}
                   {a.creado_local && (
@@ -335,7 +372,9 @@ export function ArticulosPage() {
                   )}
                 </td>
                 <td className="px-4 py-2">{a.nombre}</td>
-                <td className="px-4 py-2 text-slate-600">{a.familia ?? '—'}</td>
+                <td className="px-4 py-2">
+                  <EtiquetaFamilia familia={a.familia} />
+                </td>
                 <td className="px-4 py-2 text-slate-600">{a.subfamilia ?? '—'}</td>
                 <td className="px-4 py-2 text-xs text-slate-500">{a.presentacion_compra ?? '—'}</td>
                 <td className="px-4 py-2 text-right tabular-nums text-slate-600">
@@ -362,30 +401,8 @@ export function ArticulosPage() {
             ))}
           </tbody>
         </table>
-      </div>
-
-      {/* Paginado */}
-      {totalPaginas > 1 && (
-        <div className="flex items-center justify-center gap-3 text-sm">
-          <button
-            disabled={page <= 1}
-            onClick={() => setPage((p) => p - 1)}
-            className="rounded-lg border border-slate-200 px-3 py-1.5 font-medium text-slate-600 transition hover:bg-slate-100 disabled:opacity-40"
-          >
-            ← Anterior
-          </button>
-          <span className="text-slate-500">
-            Página {page} de {totalPaginas}
-          </span>
-          <button
-            disabled={page >= totalPaginas}
-            onClick={() => setPage((p) => p + 1)}
-            className="rounded-lg border border-slate-200 px-3 py-1.5 font-medium text-slate-600 transition hover:bg-slate-100 disabled:opacity-40"
-          >
-            Siguiente →
-          </button>
-        </div>
-      )}
+        <Paginacion page={page} limit={LIMIT} total={total} onPage={setPage} />
+      </Panel>
     </section>
   );
 }

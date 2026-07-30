@@ -5,6 +5,7 @@ import {
   getGastoProveedores,
   getProductosProveedor,
   getProveedores,
+  getProveedoresCsv,
   postProveedor,
 } from '../controllers/proveedores.controller.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -13,6 +14,7 @@ export const proveedoresRouter = Router();
 
 // Proveedores + gasto (de compras reales). Todo requiere login.
 proveedoresRouter.get('/proveedores', requireAuth, getProveedores);
+proveedoresRouter.get('/proveedores/export.csv', requireAuth, getProveedoresCsv);
 proveedoresRouter.get('/proveedores/gasto', requireAuth, getGastoProveedores);
 proveedoresRouter.get('/proveedores/gasto-mensual', requireAuth, getGastoMensual);
 proveedoresRouter.get('/proveedores/:id/productos', requireAuth, getProductosProveedor);
