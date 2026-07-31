@@ -61,12 +61,19 @@ describe('fechaHoraLocal', () => {
     expect(fechaHoraLocal('2026-07-30 08:05:00')).toEqual({ fecha: '2026-07-30', hora: '08:05' });
   });
 
-  it('la Z que agrega su backend es espuria: la hora es la que tipeó el encargado', () => {
+  it('la hora tipeada a mano viene con Z espuria: se toma tal cual', () => {
     // Los 11 extras reales del 30/07 vinieron "05:37:00.000Z" y fueron las 05:37 de la mañana
     // (confirmado por J el 31/07). Convertir de UTC las habría puesto a las 02:37 y, en una
     // carga de madrugada, habría corrido el RINT al día anterior.
     expect(fechaHoraLocal('2026-07-30T05:37:00.000Z')).toEqual({ fecha: '2026-07-30', hora: '05:37' });
     expect(fechaHoraLocal('2026-07-31T01:00:00Z')).toEqual({ fecha: '2026-07-31', hora: '01:00' });
+  });
+
+  it('la que pone su servidor (campo vacío) SÍ es UTC de verdad y se convierte a Buenos Aires', () => {
+    // El campo fecha/hora es opcional; si lo dejan vacío lo completa su now(), que trae
+    // segundos y milisegundos. Sin convertir, una carga de las 22:15 se iría al día siguiente.
+    expect(fechaHoraLocal('2026-08-01T01:15:33.412Z')).toEqual({ fecha: '2026-07-31', hora: '22:15' });
+    expect(fechaHoraLocal('2026-07-31T12:05:33.412Z')).toEqual({ fecha: '2026-07-31', hora: '09:05' });
   });
 
   it('devuelve null si no hay ni siquiera una fecha reconocible', () => {
