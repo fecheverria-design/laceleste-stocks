@@ -455,7 +455,7 @@ export function InformePage() {
                     Cantidad
                   </ThOrden>
                   <ThOrden campo="precio" orden={ordenProd} dir={dirProd} onOrdenar={(c) => alternar(c, ordenProd, dirProd, setOrdenProd, setDirProd)} alineado="der">
-                    Precio prom.
+                    Precio
                   </ThOrden>
                   <ThOrden campo="var_precio" orden={ordenProd} dir={dirProd} onOrdenar={(c) => alternar(c, ordenProd, dirProd, setOrdenProd, setDirProd)} alineado="der">
                     Var. precio
@@ -476,8 +476,15 @@ export function InformePage() {
                     </td>
                     <td className="px-4 py-2.5 text-right tabular-nums text-slate-900">{ars.format(p.gasto)}</td>
                     <td className="px-4 py-2.5 text-right tabular-nums text-slate-600">{num2.format(p.cantidad)}</td>
+                    {/* Precio vigente arriba; abajo lo pagado, solo cuando difiere: ahí es
+                        donde hay algo para mirar (lista desactualizada, bonificación, etc.). */}
                     <td className="px-4 py-2.5 text-right tabular-nums text-slate-600">
                       {p.precio === null ? '—' : ars.format(p.precio)}
+                      {p.precio_pagado !== null && p.precio !== null && Math.abs(p.precio_pagado - p.precio) / p.precio > 0.01 && (
+                        <span className="block text-xs text-slate-400" title="Promedio pagado en el mes según las compras">
+                          pagado {ars.format(p.precio_pagado)}
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-2.5 text-right">
                       <Variacion v={p.var_precio} />
@@ -501,9 +508,10 @@ export function InformePage() {
           </Panel>
 
           <p className="mt-4 text-xs text-slate-400">
-            El gasto se mide con IVA (la columna «Valor total» de 3c). La variación de precio se calcula sobre el neto —
-            un cambio de alícuota no es un aumento — y compara el precio promedio ponderado del mes contra el del mes
-            anterior. Se excluyen servicios, esporádicos y productos de prueba.
+            El gasto sale de las compras y se mide con IVA (la columna «Valor total» de 3c). El precio y su variación
+            salen de la hoja de Precios: es el vigente al cierre de cada mes (la última compra tildada), así que si
+            corregís un precio ahí, el informe lo toma. Cuando lo pagado en el mes difiere del precio de lista, se
+            muestra abajo. Se excluyen servicios, esporádicos y productos de prueba.
           </p>
         </>
       )}

@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { armarEvolucion, armarInforme, mesAnteriorDe, variacion, ventanaMeses } from '../src/services/informe.service.js';
-import type { FilaGastoMensual, FilaGastoMes } from '../src/repositories/informe.repository.js';
+import type { FilaGastoMensual, FilaGastoMes, FilaPrecioMes } from '../src/repositories/informe.repository.js';
 
 // Informe de Compras, solapa "Por Comprador". Se testea la lógica pura: atribución por
 // familia, gasto con IVA, variación de precio sobre el neto y la ponderación por gasto.
 
 const MES = '2026-06';
 const PREVIO = '2026-05';
+
+// Precio VIGENTE al cierre del mes (lo que manda la variación).
+function precio(producto_3c: string, mes: string, monto: number): FilaPrecioMes {
+  return { mes, producto_3c, precio: String(monto) };
+}
 
 function fila(over: Partial<FilaGastoMes> = {}): FilaGastoMes {
   return {
@@ -32,6 +37,7 @@ describe('atribución por comprador', () => {
         fila({ familia: 'MATERIAS PRIMAS', gasto: '1000', gasto_neto: '826' }),
         fila({ producto_3c: '525', familia: 'PACKAGING', gasto: '400', gasto_neto: '330' }),
       ],
+      [],
       MES,
       PREVIO,
     );
@@ -44,6 +50,7 @@ describe('atribución por comprador', () => {
   it('lo que no tiene comprador queda afuera del informe (servicios, esporádicos)', () => {
     const inf = armarInforme(
       [fila(), fila({ producto_3c: '900', familia: 'SERVICIOS', gasto: '99999', gasto_neto: '82644' })],
+      [],
       MES,
       PREVIO,
     );
@@ -55,6 +62,7 @@ describe('atribución por comprador', () => {
   it('filtrando por comprador solo entra ese', () => {
     const inf = armarInforme(
       [fila({ familia: 'MATERIAS PRIMAS' }), fila({ producto_3c: '525', familia: 'PACKAGING' })],
+      [],
       MES,
       PREVIO,
       'Fausto',
@@ -67,17 +75,37 @@ describe('atribución por comprador', () => {
 
 describe('gasto y variación', () => {
   it('el gasto se mide CON IVA (columna VALOR TOTAL del informe de J)', () => {
-    const inf = armarInforme([fila({ gasto: '1210', gasto_neto: '1000' })], MES, PREVIO);
+    const inf = armarInforme([fila({ gasto: '1210', gasto_neto: '1000' })], [], MES, PREVIO);
     expect(inf.resumen.gasto).toBe(1210);
   });
 
-  it('la variación de precio se calcula sobre el NETO: un cambio de IVA no es un aumento', () => {
+  it('la variación sale del precio VIGENTE (la tabla precios), no de lo que se pagó', () => {
+    // Lo pagado no cambió (mismo gasto y cantidad los dos meses), pero el precio de lista sí:
+    // de $100 a $130. Es el caso de corregir un precio a mano en la hoja de Precios.
     const inf = armarInforme(
       [
-        // Mismo precio neto (100/unidad) los dos meses, pero el IVA cambió de 10,5% a 21%.
+        fila({ mes: PREVIO, gasto_neto: '1000', cantidad: '10' }),
+        fila({ mes: MES, gasto_neto: '1000', cantidad: '10' }),
+      ],
+      [precio('460', PREVIO, 100), precio('460', MES, 130)],
+      MES,
+      PREVIO,
+    );
+
+    expect(inf.productos[0]!.precio).toBe(130);
+    expect(inf.productos[0]!.var_precio).toBeCloseTo(0.3, 10);
+    // Lo pagado queda al lado como referencia, sin mandar en la variación.
+    expect(inf.productos[0]!.precio_pagado).toBe(100);
+  });
+
+  it('el IVA no ensucia la variación: el precio vigente es neto', () => {
+    const inf = armarInforme(
+      [
+        // El IVA cambió de 10,5% a 21%, pero el precio de lista es el mismo.
         fila({ mes: PREVIO, gasto: '1105', gasto_neto: '1000', cantidad: '10' }),
         fila({ mes: MES, gasto: '1210', gasto_neto: '1000', cantidad: '10' }),
       ],
+      [precio('460', PREVIO, 100), precio('460', MES, 100)],
       MES,
       PREVIO,
     );
@@ -86,25 +114,15 @@ describe('gasto y variación', () => {
     expect(inf.productos[0]!.gasto).toBe(1210); // el gasto sí refleja lo pagado
   });
 
-  it('el precio del mes es el promedio ponderado, no el último que se pagó', () => {
-    const inf = armarInforme(
-      [
-        fila({ mes: PREVIO, gasto_neto: '1000', cantidad: '10' }), // $100
-        // Dos compras en el mes: 10 a $100 y 10 a $200 → promedio $150, +50%.
-        fila({ mes: MES, gasto_neto: '1000', cantidad: '10' }),
-        fila({ mes: MES, gasto_neto: '2000', cantidad: '10' }),
-      ],
-      MES,
-      PREVIO,
-    );
-
-    expect(inf.productos[0]!.precio).toBe(150);
-    expect(inf.productos[0]!.var_precio).toBeCloseTo(0.5, 10);
+  it('sin precio en alguno de los dos meses la variación es null, no 0', () => {
+    const inf = armarInforme([fila()], [precio('460', MES, 130)], MES, PREVIO);
+    expect(inf.productos[0]!.precio).toBe(130);
+    expect(inf.productos[0]!.precio_anterior).toBeNull();
+    expect(inf.productos[0]!.var_precio).toBeNull();
   });
 
-  it('sin mes anterior la variación es null, no 0 ("no compré" no es "no cambió")', () => {
-    const inf = armarInforme([fila()], MES, PREVIO);
-    expect(inf.productos[0]!.var_precio).toBeNull();
+  it('sin mes anterior el gasto anterior es 0 y su variación null', () => {
+    const inf = armarInforme([fila()], [], MES, PREVIO);
     expect(inf.productos[0]!.gasto_anterior).toBe(0);
     expect(inf.resumen.var_gasto).toBeNull();
   });
@@ -119,12 +137,18 @@ describe('variación ponderada por proveedor', () => {
   it('pesa cada producto por su gasto: el insumo grande manda sobre el chico', () => {
     const inf = armarInforme(
       [
-        // Producto grande: $900.000 este mes, +10%.
-        fila({ producto_3c: 'A', mes: PREVIO, gasto: '1', gasto_neto: '100000', cantidad: '1000' }),
-        fila({ producto_3c: 'A', mes: MES, gasto: '900000', gasto_neto: '110000', cantidad: '1000' }),
-        // Producto chico: $1.000 este mes, +100%.
-        fila({ producto_3c: 'B', mes: PREVIO, gasto: '1', gasto_neto: '100', cantidad: '10' }),
-        fila({ producto_3c: 'B', mes: MES, gasto: '1000', gasto_neto: '200', cantidad: '10' }),
+        // Producto grande: $900.000 de gasto este mes, precio +10%.
+        fila({ producto_3c: 'A', mes: PREVIO, gasto: '1' }),
+        fila({ producto_3c: 'A', mes: MES, gasto: '900000' }),
+        // Producto chico: $1.000 de gasto, precio +100%.
+        fila({ producto_3c: 'B', mes: PREVIO, gasto: '1' }),
+        fila({ producto_3c: 'B', mes: MES, gasto: '1000' }),
+      ],
+      [
+        precio('A', PREVIO, 100),
+        precio('A', MES, 110),
+        precio('B', PREVIO, 100),
+        precio('B', MES, 200),
       ],
       MES,
       PREVIO,
@@ -135,7 +159,7 @@ describe('variación ponderada por proveedor', () => {
   });
 
   it('un proveedor sin nada con qué comparar queda con variación null', () => {
-    const inf = armarInforme([fila()], MES, PREVIO);
+    const inf = armarInforme([fila()], [], MES, PREVIO);
     expect(inf.proveedores[0]!.var_precio).toBeNull();
   });
 
@@ -145,6 +169,7 @@ describe('variación ponderada por proveedor', () => {
         fila({ proveedor_id: 1, proveedor: 'CHICO', gasto: '100' }),
         fila({ proveedor_id: 2, proveedor: 'GRANDE', producto_3c: '461', gasto: '5000' }),
       ],
+      [],
       MES,
       PREVIO,
     );

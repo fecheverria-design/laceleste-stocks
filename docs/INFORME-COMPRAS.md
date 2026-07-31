@@ -26,16 +26,21 @@ Inflación (las dos hojas se cargan a mano y todavía no existen en la app).
 
 ## Las fórmulas
 
-**Precio del mes** = `suma(gasto neto del producto en el mes) / suma(cantidad)`, o sea el
-**promedio ponderado de lo que se pagó ese mes**. Si hubo dos compras del mismo producto a
-distinto precio, el precio del mes queda en el medio, pesado por cantidad.
+**Precio del mes** = el **precio VIGENTE al cierre de ese mes**: la última fila de `precios` de
+tipo `COMPRA` con `vigente_desde <= fin de mes` (el "tick `Usar`" del script). Si un producto
+nunca tuvo COMPRA, cae a la última `ACTUALIZACION`, igual que el precio vigente del resto de la
+app. **Sale de la tabla `precios`, no de las compras** — por eso corregir un precio a mano en la
+hoja de Precios mueve el informe en la corrida siguiente, sin reimportar nada.
 
-> ⚠ **Acá nos apartamos del Apps Script a propósito.** El script toma *el último precio con el
-> tick `Usar`* de la hoja BASE DE PRECIOS. Nosotros calculamos el promedio del mes desde
-> `compras`, que es el dato duro de 3c. Ventaja: no depende de que el tick esté al día (el
-> 31/07 los COMPRA de la planilla estaban cortados en el 26/05) y refleja lo que realmente
-> costó el mes. Desventaja: con dos compras a distinto precio, el número no va a ser idéntico
-> al del Excel. Cambiarlo a "último precio del mes" es una función.
+Al lado se muestra **`precio_pagado`**: el promedio de lo que efectivamente se pagó ese mes
+(`gasto neto / cantidad`, de `compras`). Es solo referencia y aparece cuando difiere del precio
+de lista en más de 1% — ahí es donde hay algo para mirar (lista desactualizada, bonificación,
+compra a otro proveedor). **No manda en la variación.**
+
+> **Se probó al revés y estaba mal.** La v1 calculaba el precio como promedio de lo pagado,
+> derivado de `compras`. J corrigió un precio en la hoja de Precios, el informe no se movió, y
+> ahí quedó claro: el informe tiene que mirar la tabla de precios, como hace el script.
+> *(Decisión de J, 2026-07-31.)*
 
 **Variación de precio de un producto** = `precio del mes / precio del mes anterior − 1`.
 Si no hubo compras el mes anterior → **`null`, que en pantalla es "—"**, nunca 0%: *"no compré"*

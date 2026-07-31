@@ -3,8 +3,10 @@ import {
   gastoMensualPorProveedor,
   gastoPorMesProveedorProducto,
   mesesConCompras,
+  preciosVigentesPorMes,
   type FilaGastoMes,
   type FilaGastoMensual,
+  type FilaPrecioMes,
 } from '../repositories/informe.repository.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -13,15 +15,20 @@ import {
 // Reproduce el informe que J genera con Apps Script: gasto real del mes por proveedor y
 // por producto, separado por comprador, con la variación de precio contra el mes anterior.
 //
-// DOS PLATAS DISTINTAS, a propósito:
-//   - el GASTO se mide CON IVA (columna "VALOR TOTAL" de su planilla), que es lo que
-//     efectivamente se pagó y lo que hay que poder comparar contra su informe;
-//   - la VARIACIÓN de precio se calcula sobre el NETO, porque un cambio de alícuota de IVA
-//     no es un cambio de precio del proveedor.
+// DOS FUENTES DISTINTAS, a propósito:
+//   - el GASTO sale de `compras` y se mide CON IVA (columna "VALOR TOTAL" de su planilla):
+//     es lo que efectivamente se pagó y lo que tiene que cerrar contra su informe;
+//   - el PRECIO sale de la tabla `precios`: es el VIGENTE al cierre del mes (última COMPRA
+//     con fecha <= fin de mes, el "tick Usar" del script). Por eso corregir un precio a mano
+//     en la hoja de Precios mueve el informe, sin reimportar nada.
 //
-// PRECIO DEL MES = gasto neto / cantidad, o sea el promedio ponderado de lo que se pagó ese
-// mes por ese producto. No es "el último precio": si en el mes hubo dos compras a distinto
-// precio, la variación refleja lo que costó en promedio.
+// Se probó al revés (precio = promedio ponderado de lo pagado ese mes, derivado de `compras`)
+// y estaba mal: J corrigió un precio y el informe no se movía, porque no miraba esa tabla.
+// Decisión de J, 2026-07-31.
+//
+// `precio_pagado` se conserva al lado como referencia: es lo que salió en promedio ese mes
+// según las compras. Sirve justamente para ver cuándo el precio de lista y lo pagado no
+// coinciden, pero NO es lo que manda la variación.
 //
 // La atribución a comprador sale de la familia del producto (domain/familias.ts).
 // ─────────────────────────────────────────────────────────────────────────────
@@ -47,9 +54,10 @@ export interface FilaProductoInforme {
   gasto: number;
   gasto_anterior: number;
   cantidad: number;
-  precio: number | null;
+  precio: number | null; // vigente al cierre del mes (el que manda la variación)
   precio_anterior: number | null;
   var_precio: number | null;
+  precio_pagado: number | null; // promedio de lo pagado ese mes, solo como referencia
 }
 
 export interface InformeCompradores {
@@ -113,12 +121,24 @@ function precioPromedio(a: Acumulado | undefined): number | null {
 
 // Arma el informe a partir de las filas crudas de los dos meses. Pura: sin DB, para poder
 // testear las variaciones y la ponderación con datos de laboratorio.
+// Índice (mes, producto) → precio vigente, para no recorrer el array por cada producto.
+function indicePrecios(filas: FilaPrecioMes[]): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const f of filas) {
+    const p = Number(f.precio);
+    if (Number.isFinite(p) && p > 0) m.set(`${f.mes}|${f.producto_3c}`, p);
+  }
+  return m;
+}
+
 export function armarInforme(
   filas: FilaGastoMes[],
+  precios: FilaPrecioMes[],
   mes: string,
   mesAnterior: string,
   comprador?: Comprador,
 ): InformeCompradores {
+  const precioDe = indicePrecios(precios);
   const productos = new Map<string, { info: FilaGastoMes; actual: Acumulado; previo: Acumulado }>();
   const proveedores = new Map<string, { id: number | null; nombre: string; actual: Acumulado; previo: Acumulado }>();
   // (proveedor, producto) para poder ponderar la variación de precio por proveedor.
@@ -163,11 +183,19 @@ export function armarInforme(
     porComprador.set(suComprador, comp);
   }
 
+  // Variación de precio de un producto: la del precio VIGENTE al cierre de cada mes.
+  const varDeProducto = (producto3c: string): number | null => {
+    const ahora = precioDe.get(`${mes}|${producto3c}`);
+    const antes = precioDe.get(`${mesAnterior}|${producto3c}`);
+    if (ahora === undefined || antes === undefined) return null;
+    return variacion(ahora, antes);
+  };
+
   // Variación de precio ponderada por gasto, por proveedor: pesa cada producto por lo que
   // se le gastó este mes, así un insumo grande mueve la aguja más que uno chico.
   const ponderadaPorProveedor = new Map<string, { suma: number; peso: number }>();
   for (const pp of proveedorProducto.values()) {
-    const v = variacion(precioPromedio(pp.actual) ?? 0, precioPromedio(pp.previo) ?? 0);
+    const v = varDeProducto(pp.producto3c);
     if (v === null || pp.actual.gasto <= 0) continue;
     const acum = ponderadaPorProveedor.get(pp.proveedorClave) ?? { suma: 0, peso: 0 };
     acum.suma += v * pp.actual.gasto;
@@ -193,23 +221,20 @@ export function armarInforme(
 
   const filasProductos: FilaProductoInforme[] = [...productos.values()]
     .filter((p) => p.actual.gasto > 0 || p.previo.gasto > 0)
-    .map((p) => {
-      const precio = precioPromedio(p.actual);
-      const precioPrevio = precioPromedio(p.previo);
-      return {
-        producto_3c: p.info.producto_3c,
-        nombre: p.info.producto,
-        familia: p.info.familia,
-        comprador: compradorDeFamilia(p.info.familia)!,
-        clasificacion_abc: p.info.clasificacion_abc,
-        gasto: p.actual.gasto,
-        gasto_anterior: p.previo.gasto,
-        cantidad: p.actual.cantidad,
-        precio,
-        precio_anterior: precioPrevio,
-        var_precio: precio !== null && precioPrevio !== null ? variacion(precio, precioPrevio) : null,
-      };
-    })
+    .map((p) => ({
+      producto_3c: p.info.producto_3c,
+      nombre: p.info.producto,
+      familia: p.info.familia,
+      comprador: compradorDeFamilia(p.info.familia)!,
+      clasificacion_abc: p.info.clasificacion_abc,
+      gasto: p.actual.gasto,
+      gasto_anterior: p.previo.gasto,
+      cantidad: p.actual.cantidad,
+      precio: precioDe.get(`${mes}|${p.info.producto_3c}`) ?? null,
+      precio_anterior: precioDe.get(`${mesAnterior}|${p.info.producto_3c}`) ?? null,
+      var_precio: varDeProducto(p.info.producto_3c),
+      precio_pagado: precioPromedio(p.actual),
+    }))
     .sort((a, b) => b.gasto - a.gasto);
 
   const gasto = filasProductos.reduce((a, p) => a + p.gasto, 0);
@@ -241,8 +266,11 @@ export function armarInforme(
 
 export async function informePorComprador(mes: string, comprador?: Comprador): Promise<InformeCompradores> {
   const anterior = mesAnteriorDe(mes);
-  const filas = await gastoPorMesProveedorProducto([mes, anterior]);
-  return armarInforme(filas, mes, anterior, comprador);
+  const [filas, precios] = await Promise.all([
+    gastoPorMesProveedorProducto([mes, anterior]),
+    preciosVigentesPorMes([mes, anterior]),
+  ]);
+  return armarInforme(filas, precios, mes, anterior, comprador);
 }
 
 export async function mesesDisponibles(): Promise<string[]> {

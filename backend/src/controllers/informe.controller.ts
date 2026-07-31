@@ -43,7 +43,7 @@ export async function getInformeCsv(req: Request, res: Response): Promise<void> 
   enviarCsv(
     res,
     `informe-compras-${informe.mes}.csv`,
-    ['Codigo 3c', 'Producto', 'Familia', 'Comprador', 'ABC', 'Gasto (con IVA)', 'Gasto mes anterior', 'Cantidad', 'Precio prom.', 'Precio prom. anterior', 'Var. precio %'],
+    ['Codigo 3c', 'Producto', 'Familia', 'Comprador', 'ABC', 'Gasto (con IVA)', 'Gasto mes anterior', 'Cantidad', 'Precio vigente', 'Precio mes anterior', 'Var. precio %', 'Precio pagado (prom.)'],
     informe.productos.map((p) => [
       p.producto_3c,
       p.nombre,
@@ -56,6 +56,7 @@ export async function getInformeCsv(req: Request, res: Response): Promise<void> 
       p.precio === null ? '' : money(p.precio),
       p.precio_anterior === null ? '' : money(p.precio_anterior),
       pct(p.var_precio),
+      p.precio_pagado === null ? '' : money(p.precio_pagado),
     ]),
   );
 }

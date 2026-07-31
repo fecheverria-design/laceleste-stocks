@@ -67,6 +67,46 @@ export async function gastoPorMesProveedorProducto(meses: string[]): Promise<Fil
   return res.rows;
 }
 
+export type FilaPrecioMes = {
+  mes: string;
+  producto_3c: string;
+  precio: string;
+};
+
+// Precio VIGENTE al cierre de cada mes, que es el que usa el informe para la variación:
+// la última COMPRA con fecha <= fin de mes (el "tick Usar" de la planilla de J). Si un
+// producto nunca tuvo COMPRA, cae a la última ACTUALIZACION, igual que el precio vigente del
+// resto de la app (ver docs/IMPORTACION-3C.md).
+//
+// Sale de la tabla `precios`, NO de las compras: por eso un precio corregido a mano en la
+// hoja de Precios mueve el informe en la corrida siguiente, sin reimportar nada.
+export async function preciosVigentesPorMes(meses: string[]): Promise<FilaPrecioMes[]> {
+  const res = await db.execute<FilaPrecioMes>(
+    sql`WITH ventana(mes) AS (VALUES ${sql.join(
+      meses.map((m) => sql`(${m}::text)`),
+      sql`, `,
+    )}),
+         cierres AS (
+           SELECT mes, (to_date(mes || '-01', 'YYYY-MM-DD') + INTERVAL '1 month - 1 day')::date AS fin
+           FROM ventana
+         ),
+         ordenados AS (
+           SELECT c.mes,
+                  p.producto_3c,
+                  p.precio::text AS precio,
+                  row_number() OVER (
+                    PARTITION BY c.mes, p.producto_3c
+                    -- La COMPRA gana siempre sobre la ACTUALIZACION, sea cual sea la fecha.
+                    ORDER BY (p.tipo = 'COMPRA') DESC, p.vigente_desde DESC, p.id DESC
+                  ) AS rn
+           FROM cierres c
+           JOIN precios p ON p.vigente_desde <= c.fin AND p.precio > 0
+         )
+    SELECT mes, producto_3c, precio FROM ordenados WHERE rn = 1`,
+  );
+  return res.rows;
+}
+
 export type FilaGastoMensual = {
   mes: string;
   proveedor_id: number | null;

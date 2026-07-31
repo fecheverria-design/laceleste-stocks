@@ -347,9 +347,10 @@ export interface FilaProductoInforme {
   gasto: number;
   gasto_anterior: number;
   cantidad: number;
-  precio: number | null;
+  precio: number | null; // vigente al cierre del mes: el que manda la variación
   precio_anterior: number | null;
   var_precio: number | null;
+  precio_pagado: number | null; // promedio de lo pagado ese mes, solo referencia
 }
 
 export interface InformeCompradores {
