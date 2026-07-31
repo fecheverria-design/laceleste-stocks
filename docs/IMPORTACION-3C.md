@@ -103,7 +103,13 @@ PROVEEDORES (nombre)`. Ignora DOC_ID/ID/PRECIO_LISTA/MES/AÑO.
 
 - El **gasto** se mide por `precio_total` (neto, sin IVA); `total_con_iva` es lo pagado.
 - Auto-crea productos (y **setea su `familia`**) y proveedores (numero_3c = PERSONAS_ID).
-- Idempotente por `(numero, producto_3c)`.
+- Idempotente por `(numero, producto_3c, renglon)`. **El `renglon` importa:** un mismo remito
+  puede traer el MISMO producto en varias líneas (cantidades o precios distintos) y 3c no
+  exporta un id de línea — `DOC_ID` es del documento y se repite. Los numera
+  `compras-lectura.ts` por orden de aparición en el archivo, así que es determinístico y
+  reimportar el mismo export cae en las mismas filas. *(Con la clave vieja `(numero,
+  producto_3c)` la segunda línea pisaba a la primera: 65 renglones y $60.705.167 que nunca
+  entraron. Se detectó el 2026-07-31 porque el gasto de junio no cerraba; ver migración 0016.)*
 - **Excluye familias que no son compras reales**: `SERVICIOS`, `TRANSPORTE TERCERIZADO`,
   `AJUSTE DE SALDO`, `GASTOS SOCIOS`, `IMPUESTOS`, `GASTOS BANCARIOS` (honorarios/servicios,
   flete tercerizado, ajuste de saldo contable, gastos de socios, impuestos y gastos
@@ -113,6 +119,40 @@ PROVEEDORES (nombre)`. Ignora DOC_ID/ID/PRECIO_LISTA/MES/AÑO.
 - La hoja **Proveedores** del front usa esto: lista con gasto total + ranking por familia
   (`GET /api/proveedores`, `/api/proveedores/gasto?familia=`). Alta de proveedor exige
   `numero_3c` (regla #1).
+
+### Comparar el gasto contra el Informe de Compras de J (planilla)
+
+Si un total no coincide, chequear estas tres cosas **en este orden** — las tres explicaron
+diferencias reales el 2026-07-31:
+
+1. **IVA.** El informe de la planilla suma la columna **`VALOR TOTAL` (con IVA)**; la app
+   muestra el **neto**. Para junio 2026 eran $438,9M neto vs $530,8M con IVA: la misma plata.
+   Para comparar hay que usar `coalesce(total_con_iva, precio_total)`.
+2. **Atribución por comprador.** Sale de la familia del producto, no de un campo:
+   `MATERIAS PRIMAS → Lautaro`; `PACKAGING | LIMPIEZA | MERCHANDISING | DESCARTABLES →
+   Fausto`; el resto no suma a ningún comprador.
+3. **Antigüedad del export.** Las compras solo llegan hasta la fecha en que J bajó el
+   archivo. Si faltan semanas, el gasto aparece bajo y no hay bug que buscar.
+
+Referencia verificada (junio 2026, export del 31/07): Lautaro **$530.798.232**, Fausto
+**$74.153.348** — ambos con IVA y coincidentes con el informe.
+
+### Precios: qué manda, y qué pasa si se cargan desde la app
+
+El precio vigente es la **última `COMPRA`** (ver la sección de `import:precios`), y de ahí
+cuelga todo lo que muestra plata: valorización del stock, Panel, hoja de Precios. La app
+permite cargar y editar precios a mano (`POST/PUT /api/precios`), y eso impacta **al instante**
+sin reimportar nada, porque todo lee la misma tabla.
+
+⚠ **Son dos fuentes que no se hablan:** un precio cargado a mano y un reimport del export de la
+planilla escriben en la misma tabla, y el import **pisa** si coincide
+`(producto, proveedor, fecha, tipo)`. Mientras la planilla siga siendo la fuente, cargar a mano
+sirve para tapar huecos, no para reemplazarla.
+
+⚠ **Nunca valorizar sin excluir los productos ficticios.** El `480 PRUEBA` tiene stock inventado
+y llegó a tener un precio de $462.842: él solo inflaba la valorización a $5.068M contra los
+$490M reales. La app ya lo excluye (`PRODUCTOS_FICTICIOS` en `backend/src/domain/familias.ts`),
+pero una consulta SQL a mano no.
 
 ---
 
@@ -138,6 +178,7 @@ y `count(*) WHERE cantidad < 0` = 0. **Hacer `pg_dump` antes.**
 
 | Fecha | Cambio | Commit |
 |---|---|---|
+| 2026-07-31 | Compras: clave `(numero, producto_3c, renglon)` (mig. 0016). Un remito puede repetir el mismo producto en varias líneas y la clave vieja las pisaba: 65 renglones / $60,7M perdidos. Con esto el gasto de junio cierra con el informe de J (Lautaro $530.798.232, Fausto $74.153.348, ambos con IVA) | (este commit) |
 | 2026-07-01 | Recuento de stock = tipo `INVENTARIO` (mig. 0015), separado del AJUSTE operativo; lo usan `import:inventario` y el módulo Inventarios. `import:inventario` acepta alias `ARTICULO` para el código | (este commit) |
 | 2026-07-01 | Compras: excluir familias que no son compras reales (SERVICIOS, TRANSPORTE TERCERIZADO, AJUSTE DE SALDO, GASTOS SOCIOS, IMPUESTOS, GASTOS BANCARIOS) del gasto | (este commit) |
 | 2026-06-25 | Compras reales (`import:compras`) + hoja Proveedores con gasto por familia; `familia` en productos | (este commit) |
