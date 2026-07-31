@@ -226,6 +226,10 @@ export const compras = pgTable(
   {
     id: bigserial('id', { mode: 'number' }).primaryKey(),
     numero: varchar('numero', { length: 64 }).notNull(), // NUMERO del documento de 3c
+    // Un remito puede repetir el MISMO producto en varias líneas (distinta cantidad o precio).
+    // Como el export de 3c no trae id de línea, lo numera el importador por orden de aparición.
+    // Sin esto la segunda línea pisaba a la primera: 65 renglones y $60,7M perdidos (ver 0016).
+    renglon: integer('renglon').notNull().default(1),
     fecha: date('fecha').notNull(),
     producto3c: varchar('producto_3c', { length: 32 })
       .notNull()
@@ -244,7 +248,7 @@ export const compras = pgTable(
   (t) => [
     index('idx_compras_proveedor').on(t.proveedorId),
     index('idx_compras_fecha').on(t.fecha.desc()),
-    uniqueIndex('uq_compras_numero_producto').on(t.numero, t.producto3c),
+    uniqueIndex('uq_compras_numero_producto_renglon').on(t.numero, t.producto3c, t.renglon),
   ],
 );
 
