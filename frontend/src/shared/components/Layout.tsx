@@ -10,6 +10,7 @@ const tabs = [
   { to: '/consumos', label: 'Consumos' },
   { to: '/precios', label: 'Precios' },
   { to: '/proveedores', label: 'Proveedores' },
+  { to: '/informe', label: 'Informe' },
   { to: '/health', label: 'Estado' },
 ];
 

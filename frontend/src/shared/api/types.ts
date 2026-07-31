@@ -323,6 +323,62 @@ export interface GastoMes {
   compras: number;
 }
 
+// ── Informe de Compras ───────────────────────────────────────────────────────
+// El gasto va CON IVA (como el informe de la planilla) y la variación de precio sobre el
+// neto (un cambio de alícuota no es un aumento). Ver backend/src/services/informe.service.ts.
+export type Comprador = 'Lautaro' | 'Fausto';
+
+export interface FilaProveedorInforme {
+  proveedor_id: number | null;
+  nombre: string;
+  gasto: number;
+  gasto_anterior: number;
+  var_gasto: number | null;
+  var_precio: number | null; // ponderada por gasto
+  productos: number;
+}
+
+export interface FilaProductoInforme {
+  producto_3c: string;
+  nombre: string;
+  familia: string | null;
+  comprador: Comprador;
+  clasificacion_abc: string | null;
+  gasto: number;
+  gasto_anterior: number;
+  cantidad: number;
+  precio: number | null;
+  precio_anterior: number | null;
+  var_precio: number | null;
+}
+
+export interface InformeCompradores {
+  mes: string;
+  mes_anterior: string;
+  resumen: {
+    gasto: number;
+    gasto_anterior: number;
+    var_gasto: number | null;
+    renglones: number;
+    proveedores: number;
+    productos: number;
+  };
+  por_comprador: Array<{ comprador: Comprador; gasto: number; gasto_anterior: number; var_gasto: number | null }>;
+  proveedores: FilaProveedorInforme[];
+  productos: FilaProductoInforme[];
+}
+
+export interface SerieProveedor {
+  nombre: string;
+  serie: Array<number | null>; // null = ese mes no se le compró (la línea se corta)
+  total: number;
+}
+export interface EvolucionGasto {
+  meses: string[];
+  total: number[];
+  proveedores: SerieProveedor[];
+}
+
 // ── Historial de ediciones ───────────────────────────────────────────────────
 export interface CambioAuditoria {
   campo: string;
