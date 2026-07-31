@@ -1,6 +1,14 @@
 import { pool } from './client.js';
 import { existentesEnMaestro, notaFaltantes, separarPorMaestro } from './sync-maestro.js';
-import { agruparExtras, hoyEnBsAs, type FilaExtra } from './extras-mapeo.js';
+import {
+  agruparExtras,
+  armarCatalogo,
+  fechasDeFilas,
+  hoyEnBsAs,
+  type CatalogoExtras,
+  type FilaCatalogo,
+  type FilaExtra,
+} from './extras-mapeo.js';
 import { resolverUsuarioIntegracion } from '../repositories/movimientos.repository.js';
 import { reconciliarBajasPorClave, registrarAbastecimiento } from '../services/movimientos.service.js';
 import { AppError } from '../domain/errors.js';
@@ -15,8 +23,16 @@ import type { AbastecimientoInput } from '../domain/movimientos.schema.js';
 // Fuente: GET /api/movimientos?fechaDesde=&fechaHasta= (detrás de JWT). En su app estos
 // egresos se cargan de a UNO (POST /api/movimientos {articulo_id, cantidad, area, nota,
 // fecha_hora}), así que cada fila es un artículo suelto, no un ticket con renglones.
-// Campos que consumimos: fecha_hora, codigo_3c (producto), area (NOMBRE), cantidad, unidad,
-// nota, usuario. El mapeo área→dep_id_3c y la agrupación viven en extras-mapeo.ts.
+// Campos que consumimos: fecha_hora, articulo_id (producto), area + codigo_area (destino),
+// cantidad, unidad, nota, usuario. La agrupación vive en extras-mapeo.ts.
+//
+// PRODUCTO (verificado 2026-07-31 contra los primeros extras reales): la respuesta NO trae
+// codigo_3c, trae `articulo_id`, que es el id de la fila del catálogo integral. Por eso antes
+// de agrupar se arma el catálogo articulo_id → codigo_3c pidiendo
+// GET /api/abastecimiento/tabla-integral?fecha=… de cada día que tenga extras (mismo endpoint
+// que usa el sync diario). El código sale de SU dato, no se deriva de la numeración (regla #1).
+// Si el catálogo no se puede traer, el sync ABORTA: sin él todo se descartaría por "sin
+// producto" y encima el modo bajas anularía RINT buenos.
 //
 // AGRUPACIÓN: un RINT por (fecha, área) juntando todos los extras del día de esa área
 // (decisión de J, 2026-07-30: el listado queda legible en vez de decenas de RINT de un
@@ -148,6 +164,32 @@ async function fetchExtras(baseUrl: string, token: string, desde: string, hasta:
   return json.data ?? [];
 }
 
+// Catálogo articulo_id → codigo_3c desde la tabla integral de SU app (la misma que lee el sync
+// diario). Se pide por día porque el endpoint lo exige; el contenido es el maestro vigente.
+// Si falla, lanza: mejor abortar que descartar todo por "sin producto" (ver cabecera).
+async function fetchCatalogo(
+  baseUrl: string,
+  token: string,
+  fechas: string[],
+): Promise<CatalogoExtras> {
+  const cat: CatalogoExtras = new Map();
+  for (const fecha of fechas) {
+    const res = await fetch(`${baseUrl}/api/abastecimiento/tabla-integral?fecha=${fecha}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const json = (await res.json().catch(() => ({}))) as {
+      success?: boolean;
+      data?: FilaCatalogo[];
+      message?: string;
+    };
+    if (!res.ok || !json.success) {
+      throw new Error(`catálogo (tabla-integral ${fecha}) falló (${res.status}): ${json.message ?? 'sin detalle'}`);
+    }
+    armarCatalogo(json.data ?? [], cat);
+  }
+  return cat;
+}
+
 async function main(): Promise<void> {
   const { fechas, dry } = parseArgs(process.argv.slice(2));
   if (fechas.length === 0) {
@@ -172,7 +214,17 @@ async function main(): Promise<void> {
   console.log('  Login OK.');
 
   const filas = await fetchExtras(baseUrl, token, desde, hasta);
-  const { grupos, descartes } = agruparExtras(filas, new Set(fechas));
+
+  // Solo se pide el catálogo de los días que efectivamente tienen extras (lo normal es que no
+  // haya ninguno: en ese caso ni se sale a buscarlo).
+  const ventana = new Set(fechas);
+  const conExtras = fechasDeFilas(filas, ventana);
+  const catalogo = conExtras.length > 0 ? await fetchCatalogo(baseUrl, token, conExtras) : new Map();
+  if (conExtras.length > 0) {
+    console.log(`  Catálogo: ${catalogo.size} artículo(s) (tabla integral de ${conExtras.join(', ')}).`);
+  }
+
+  const { grupos, descartes } = agruparExtras(filas, ventana, catalogo);
   console.log(`  ${filas.length} extra(s) en el origen → ${grupos.length} movimiento(s) por (fecha, área).`);
 
   if (descartes.areasDesconocidas.size > 0) {
@@ -185,9 +237,19 @@ async function main(): Promise<void> {
       `  ⚠ Área(s) sin depósito en 3c: ${[...descartes.areasSinDeposito].join(', ')} → salteadas (no hay dónde imputar el egreso).`,
     );
   }
+  if (descartes.areasEnConflicto.size > 0) {
+    console.log(
+      `  ⚠ Área(s) donde su codigo_area no coincide con nuestra tabla (gana el del origen): ${[...descartes.areasEnConflicto].join('; ')}`,
+    );
+  }
   if (descartes.sinCantidad > 0 || descartes.sinProducto > 0 || descartes.sinFecha > 0) {
     console.log(
-      `  ⚠ Descartes: ${descartes.sinCantidad} sin cantidad, ${descartes.sinProducto} sin codigo_3c, ${descartes.sinFecha} sin fecha_hora válida.`,
+      `  ⚠ Descartes: ${descartes.sinCantidad} sin cantidad, ${descartes.sinProducto} sin producto resoluble, ${descartes.sinFecha} sin fecha_hora válida.`,
+    );
+  }
+  if (descartes.articulosSinCatalogo.size > 0) {
+    console.log(
+      `  ⚠ articulo_id que no está en la tabla integral (no sabemos su codigo_3c): ${[...descartes.articulosSinCatalogo].join(', ')}`,
     );
   }
 

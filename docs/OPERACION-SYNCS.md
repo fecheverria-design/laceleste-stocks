@@ -60,11 +60,18 @@ Guía práctica para que el stock se mantenga sincronizado con la app del compa�
   (clave `abastx:<fecha>:<dep_id_3c>`). No tienen sugerido: la cantidad cargada es la que
   descuenta stock (regla #2). Mismo modo reconciliar que el diario → el RINT del día se reedita
   a medida que cargan más extras.
-  - El área viaja como **nombre** y se mapea a `dep_id_3c` con la tabla `AREAS_3C` de
-    `backend/src/db/extras-mapeo.ts` (copiada de su front, verificada contra el export de 3c).
-    **Si aparece un área nueva, el sync la saltea y avisa** (`⚠ Área(s) que no sabemos mapear`)
-    en vez de inventarle un id — hay que agregarla ahí. `RECETAS EN AREAS` no tiene depósito en
-    3c, se saltea siempre.
+  - **El producto no viene con su código de 3c** (verificado el 31/07 contra los primeros extras
+    reales): la fila trae `articulo_id`, que es el id de la fila del **catálogo integral**. Por
+    eso, antes de agrupar, el sync pide `GET /api/abastecimiento/tabla-integral?fecha=…` de cada
+    día que tenga extras y arma el mapa `articulo_id → codigo_3c`. Si ese pedido falla, el sync
+    **aborta** (sin catálogo se descartaría todo y encima se anularían RINT buenos). Un
+    `articulo_id` que no esté en el catálogo se saltea y se avisa con id y nombre: el código
+    **nunca** se deriva de la numeración (regla #1).
+  - El área viaja con **nombre y `codigo_area`**; se usa el `codigo_area` que manda el origen
+    (es el `dep_id_3c` de 3c), así que **un área nueva entra sola**. Si no viniera, se cae a la
+    tabla `AREAS_3C` de `backend/src/db/extras-mapeo.ts` y, si tampoco está ahí, se saltea y
+    avisa (`⚠ Área(s) que no sabemos mapear`) en vez de inventarle un id. Si los dos valores
+    difieren, gana el del origen y queda avisado en el log.
   - **Bajas:** si borran un extra en su app, la próxima corrida reedita el RINT; si borran
     **todos** los de esa (fecha, área), el RINT se anula. A diferencia del diario, acá el seguro
     contra anulaciones espurias **no** es "solo los días con filas" (un día sin extras es lo
