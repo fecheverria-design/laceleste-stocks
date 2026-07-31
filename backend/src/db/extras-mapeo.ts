@@ -77,16 +77,28 @@ export function hoyEnBsAs(): string {
 }
 
 // fecha_hora del origen → { fecha: YYYY-MM-DD, hora: HH:MM } tal como se ve en su app.
-// Su front lo carga con un <input type="datetime-local"> y el encargado escribe LA HORA EN QUE
-// SACÓ la mercadería (confirmado por J, 2026-07-31). Su backend lo guarda sin zona y lo devuelve
-// marcado con Z ("2026-07-30T05:37:00.000Z" = las 05:37 de la mañana, no las 02:37): esa Z es
-// espuria, así que los dígitos se toman COMO ESTÁN, sin convertir. Convertir de UTC restaba 3
-// horas y, en una carga entre 00:00 y 03:00, le habría cambiado el DÍA al RINT.
+// En su app el campo fecha/hora es OPCIONAL, así que llegan de dos formas distintas:
+//
+//  1. El encargado la TIPEA (`<input type="datetime-local">`): es la hora en que sacó la
+//     mercadería (confirmado por J, 2026-07-31). Su backend la guarda sin zona y la devuelve
+//     marcada con Z — "2026-07-30T05:37:00.000Z" son las 05:37 de la mañana, no las 02:37. Esa
+//     Z es espuria: los dígitos se toman COMO ESTÁN. Convertir restaba 3 horas y, en una carga
+//     entre 00:00 y 03:00, le cambiaba el DÍA al RINT.
+//  2. La deja VACÍA: la pone su servidor (`now()`), y ahí el UTC es de verdad y hay que
+//     convertirlo, o una carga después de las 21:00 se iría al día siguiente.
+//
+// Se distinguen por la precisión: el datetime-local es de MINUTO (segundos y milisegundos en
+// cero) y un now() de base de datos nunca cae justo ahí. Es una heurística, sí, pero el peor
+// caso es 1 de cada 60.000 y solo corre la etiqueta de la hora.
 export function fechaHoraLocal(s: string): { fecha: string; hora: string } | null {
   const t = s.trim();
-  const paredDeReloj = t.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/);
-  if (paredDeReloj) {
-    return { fecha: paredDeReloj[1]!, hora: paredDeReloj[2]! };
+  const conZona = /(Z|[+-]\d{2}:?\d{2})$/.test(t);
+  const partes = t.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?/);
+  if (partes) {
+    const tipeadaAMano = Number(partes[3] ?? '0') === 0 && Number(partes[4] ?? '0') === 0;
+    if (!conZona || tipeadaAMano) {
+      return { fecha: partes[1]!, hora: partes[2]! };
+    }
   }
   const d = new Date(t);
   if (Number.isNaN(d.getTime())) {
