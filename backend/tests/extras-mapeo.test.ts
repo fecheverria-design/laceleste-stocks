@@ -61,10 +61,12 @@ describe('fechaHoraLocal', () => {
     expect(fechaHoraLocal('2026-07-30 08:05:00')).toEqual({ fecha: '2026-07-30', hora: '08:05' });
   });
 
-  it('un timestamp UTC de la noche NO se corre al día siguiente (se convierte a Buenos Aires)', () => {
-    // 2026-07-31T01:00:00Z = 30/07 22:00 en Argentina. Sin la conversión, el RINT quedaría
-    // con fecha 31 y el extra aparecería en el día equivocado.
-    expect(fechaHoraLocal('2026-07-31T01:00:00Z')).toEqual({ fecha: '2026-07-30', hora: '22:00' });
+  it('la Z que agrega su backend es espuria: la hora es la que tipeó el encargado', () => {
+    // Los 11 extras reales del 30/07 vinieron "05:37:00.000Z" y fueron las 05:37 de la mañana
+    // (confirmado por J el 31/07). Convertir de UTC las habría puesto a las 02:37 y, en una
+    // carga de madrugada, habría corrido el RINT al día anterior.
+    expect(fechaHoraLocal('2026-07-30T05:37:00.000Z')).toEqual({ fecha: '2026-07-30', hora: '05:37' });
+    expect(fechaHoraLocal('2026-07-31T01:00:00Z')).toEqual({ fecha: '2026-07-31', hora: '01:00' });
   });
 
   it('devuelve null si no hay ni siquiera una fecha reconocible', () => {

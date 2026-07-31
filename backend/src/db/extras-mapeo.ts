@@ -76,16 +76,17 @@ export function hoyEnBsAs(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: TZ, dateStyle: 'short' }).format(new Date());
 }
 
-// fecha_hora del origen → { fecha: YYYY-MM-DD, hora: HH:MM } en hora de Buenos Aires.
-// Su front lo carga con un <input type="datetime-local"> (sin zona), así que lo normal es que
-// vuelva como "2026-07-30T15:42:00" o "2026-07-30 15:42:00" → se toma tal cual. Si en cambio
-// viniera con Z u offset, se convierte a la zona local: sin esto un extra cargado de noche
-// caería en el día siguiente y el RINT quedaría con la fecha corrida.
+// fecha_hora del origen → { fecha: YYYY-MM-DD, hora: HH:MM } tal como se ve en su app.
+// Su front lo carga con un <input type="datetime-local"> y el encargado escribe LA HORA EN QUE
+// SACÓ la mercadería (confirmado por J, 2026-07-31). Su backend lo guarda sin zona y lo devuelve
+// marcado con Z ("2026-07-30T05:37:00.000Z" = las 05:37 de la mañana, no las 02:37): esa Z es
+// espuria, así que los dígitos se toman COMO ESTÁN, sin convertir. Convertir de UTC restaba 3
+// horas y, en una carga entre 00:00 y 03:00, le habría cambiado el DÍA al RINT.
 export function fechaHoraLocal(s: string): { fecha: string; hora: string } | null {
   const t = s.trim();
-  const sinZona = t.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/);
-  if (sinZona && !/(Z|[+-]\d{2}:?\d{2})$/.test(t)) {
-    return { fecha: sinZona[1]!, hora: sinZona[2]! };
+  const paredDeReloj = t.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/);
+  if (paredDeReloj) {
+    return { fecha: paredDeReloj[1]!, hora: paredDeReloj[2]! };
   }
   const d = new Date(t);
   if (Number.isNaN(d.getTime())) {
