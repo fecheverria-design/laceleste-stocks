@@ -150,8 +150,7 @@ export async function mesesConCompras(): Promise<string[]> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Matriz de precios / cotizaciones — solapas "Matriz & Variación", "Ahorro potencial"
-// y "Evolución de precios".
+// Matriz de precios / cotizaciones — solapas "Matriz & Variación" y "Ahorro potencial".
 //
 // La unidad de análisis es el producto de PRIORIDAD A (`clasificacion_abc = 'A'`), igual
 // que el informe de la planilla, que se limita a la hoja Prioridad.
@@ -269,44 +268,6 @@ export async function preciosCompraPorMesCargado(desde: string, hasta: string): 
             sql`, `,
           )})
         ORDER BY 1, 2, p.vigente_desde DESC, p.id DESC`,
-  );
-  return res.rows;
-}
-
-export type FilaPrecioProveedorMes = {
-  mes: string;
-  producto_3c: string;
-  producto: string;
-  familia: string | null;
-  proveedor: string | null;
-  precio: string;
-};
-
-// Serie mensual por (proveedor, producto) para la solapa Evolución: cómo cotizó cada
-// proveedor cada producto A, mes a mes. Un mes sin cotización queda sin fila → la línea
-// se corta en el gráfico (spanGaps la une, igual que en el informe original).
-export async function preciosProveedorPorMes(desde: string, hasta: string): Promise<FilaPrecioProveedorMes[]> {
-  const res = await db.execute<FilaPrecioProveedorMes>(
-    sql`SELECT DISTINCT ON (to_char(p.vigente_desde, 'YYYY-MM'), p.producto_3c, p.proveedor_id)
-               to_char(p.vigente_desde, 'YYYY-MM') AS mes,
-               p.producto_3c,
-               pr.nombre AS producto,
-               pr.familia,
-               pv.nombre AS proveedor,
-               p.precio::text
-        FROM precios p
-        JOIN productos pr ON pr.codigo_3c = p.producto_3c
-        LEFT JOIN proveedores pv ON pv.id = p.proveedor_id
-        WHERE pr.clasificacion_abc = 'A'
-          AND p.precio > 0
-          AND to_char(p.vigente_desde, 'YYYY-MM') BETWEEN ${desde} AND ${hasta}
-          AND p.producto_3c NOT IN (${sql.join(
-            PRODUCTOS_FICTICIOS.map((cod) => sql`${cod}`),
-            sql`, `,
-          )})
-        -- El ORDER BY tiene que arrancar con las MISMAS expresiones del DISTINCT ON.
-        ORDER BY to_char(p.vigente_desde, 'YYYY-MM'), p.producto_3c, p.proveedor_id,
-                 p.vigente_desde DESC, p.id DESC`,
   );
   return res.rows;
 }

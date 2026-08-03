@@ -452,6 +452,7 @@ export interface FilaVariacionVentana {
   producto: string;
   familia: string | null;
   precio: number;
+  mes_precio: string; // puede ser anterior al mes del informe si no hubo carga nueva
   var_1: number | null;
   var_3: number | null;
   var_6: number | null;
@@ -472,22 +473,6 @@ export interface Canasta {
   anomalias: Array<{ producto: string; familia: string | null; mes: string; de: number; a: number; var: number; gasto: number }>;
 }
 
-export interface SerieDrill {
-  nombre: string;
-  familia: string | null;
-  precio_vigente: number | null;
-  var_mes: number | null;
-  var_acum: number | null;
-  usado: boolean;
-  serie: Array<number | null>;
-}
-
-export interface Evolucion {
-  meses: string[];
-  por_proveedor: Record<string, SerieDrill[]>;
-  por_producto: Record<string, SerieDrill[]>;
-}
-
 export interface InformePrecios {
   mes: string;
   meses: string[];
@@ -497,7 +482,6 @@ export interface InformePrecios {
   ahorro: Ahorro;
   variacion_ventanas: FilaVariacionVentana[];
   canasta: Canasta;
-  evolucion: Evolucion;
 }
 
 // ── Historial de ediciones ───────────────────────────────────────────────────

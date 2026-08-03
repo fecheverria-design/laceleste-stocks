@@ -6,7 +6,6 @@ import { cap, fMjs, mesLargo } from './formato';
 import { SolapaAhorro } from './SolapaAhorro';
 import { SolapaCanasta } from './SolapaCanasta';
 import { SolapaComprador } from './SolapaComprador';
-import { SolapaEvolucion } from './SolapaEvolucion';
 import { SolapaMatriz } from './SolapaMatriz';
 import './informe.css';
 
@@ -22,14 +21,15 @@ import './informe.css';
 // deshabilitadas y diciendo qué falta: es información, no un hueco.
 // ─────────────────────────────────────────────────────────────────────────────
 
-type Solapa = 'comprador' | 'ahorro' | 'matriz' | 'canasta' | 'evolucion';
+// La "Evolución de precios" del informe original no está: la hoja de Precios ya muestra la
+// serie de cada producto y no tenía sentido duplicarla (decisión de J, 2026-08-03).
+type Solapa = 'comprador' | 'ahorro' | 'matriz' | 'canasta';
 
 const SOLAPAS: Array<{ id: Solapa; texto: string }> = [
   { id: 'comprador', texto: 'Por Comprador' },
   { id: 'ahorro', texto: 'Ahorro potencial' },
   { id: 'matriz', texto: 'Matriz & Variación' },
   { id: 'canasta', texto: 'Canasta A' },
-  { id: 'evolucion', texto: 'Evolución Precios' },
 ];
 
 // Lo que falta para completar el informe original. Se listan como solapas apagadas.
@@ -192,7 +192,6 @@ export function InformePage() {
           {solapa === 'canasta' && p && (
             <SolapaCanasta canasta={p.canasta} inflacion={p.canasta.meses.map(() => null)} />
           )}
-          {solapa === 'evolucion' && p && <SolapaEvolucion evolucion={p.evolucion} />}
 
           <div className="controls" style={{ justifyContent: 'flex-end' }}>
             <button

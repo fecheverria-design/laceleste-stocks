@@ -3,12 +3,10 @@ import {
   cotizacionesProductosA,
   gastoPorProductoDelMes,
   preciosCompraPorMesCargado,
-  preciosProveedorPorMes,
   preciosUsadosProductosA,
   type FilaCotizacion,
   type FilaGastoProducto,
   type FilaPrecioMesCargado,
-  type FilaPrecioProveedorMes,
   type FilaPrecioUsado,
 } from '../repositories/informe.repository.js';
 import { ventanaMeses } from './informe.service.js';
@@ -330,6 +328,8 @@ export interface FilaVariacionVentana {
   producto: string;
   familia: string | null;
   precio: number;
+  /** Mes del precio usado. Puede ser anterior al mes del informe si no hubo carga nueva. */
+  mes_precio: string;
   var_1: number | null;
   var_3: number | null;
   var_6: number | null;
@@ -337,6 +337,12 @@ export interface FilaVariacionVentana {
 
 // El gráfico de barras del informe: variación del precio de compra a 1, 3 y 6 meses, solo
 // de los productos A que efectivamente se compraron en el mes.
+//
+// ⚠ La ventana se cuenta desde el MES DEL PRECIO, no desde el mes del informe. Si el
+// producto se compró en julio pero su último precio cargado es de mayo, "1 mes" compara
+// mayo contra abril. Anclarlo al mes del informe comparaba el precio de mayo contra el de
+// junio — es decir, contra sí mismo (0% falso) o al revés (variación con el signo dado
+// vuelta). Era el bug del gráfico de 1 mes.
 export function armarVariacionVentanas(
   serie: SeriePrecios,
   meses: string[],
@@ -351,6 +357,7 @@ export function armarVariacionVentanas(
 
     // Precio del mes foco; si ese mes no hubo carga, el más reciente disponible.
     let actual = porMes.get(mesFoco) ?? null;
+    let idxActual = meses.length - 1;
     if (actual === null) {
       let mejorIdx = -1;
       for (const [mes, precio] of porMes) {
@@ -360,11 +367,13 @@ export function armarVariacionVentanas(
           actual = precio;
         }
       }
+      if (mejorIdx < 0) continue;
+      idxActual = mejorIdx;
     }
     if (actual === null || actual <= 0) continue;
 
     const hacia = (atras: number): number | null => {
-      const i = meses.length - 1 - atras;
+      const i = idxActual - atras;
       if (i < 0) return null;
       const base = porMes.get(meses[i]!);
       if (base === undefined || base <= 0) return null;
@@ -375,6 +384,7 @@ export function armarVariacionVentanas(
       producto: serie.nombres.get(producto3c) ?? producto3c,
       familia: serie.familias.get(producto3c) ?? null,
       precio: actual,
+      mes_precio: meses[idxActual]!,
       var_1: hacia(1),
       var_3: hacia(3),
       var_6: hacia(6),
@@ -541,105 +551,6 @@ export function armarCanasta(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Evolución de precios (por proveedor o por producto)
-// ─────────────────────────────────────────────────────────────────────────────
-
-export interface SerieDrill {
-  nombre: string;
-  familia: string | null;
-  precio_vigente: number | null;
-  var_mes: number | null;
-  var_acum: number | null;
-  usado: boolean;
-  serie: Array<number | null>;
-}
-
-export interface Evolucion {
-  meses: string[];
-  por_proveedor: Record<string, SerieDrill[]>;
-  por_producto: Record<string, SerieDrill[]>;
-}
-
-export function armarEvolucionPrecios(
-  filas: FilaPrecioProveedorMes[],
-  meses: string[],
-  usados: FilaPrecioUsado[],
-): Evolucion {
-  const indice = new Map(meses.map((m, i) => [m, i]));
-  const proveedorUsado = new Map(usados.map((u) => [u.producto_3c, u.proveedor ?? 'Sin proveedor']));
-
-  // (proveedor, producto) → serie
-  const pares = new Map<
-    string,
-    { proveedor: string; producto3c: string; producto: string; familia: string | null; serie: Array<number | null> }
-  >();
-  for (const f of filas) {
-    const i = indice.get(f.mes);
-    if (i === undefined) continue;
-    const proveedor = f.proveedor ?? 'Sin proveedor';
-    const clave = `${proveedor}|${f.producto_3c}`;
-    const par = pares.get(clave) ?? {
-      proveedor,
-      producto3c: f.producto_3c,
-      producto: f.producto,
-      familia: f.familia,
-      serie: meses.map(() => null),
-    };
-    par.serie[i] = num(f.precio);
-    pares.set(clave, par);
-  }
-
-  const porProveedor: Record<string, SerieDrill[]> = {};
-  const porProducto: Record<string, SerieDrill[]> = {};
-
-  for (const par of pares.values()) {
-    let primero = -1;
-    let ultimo = -1;
-    for (let i = 0; i < par.serie.length; i++) {
-      if (par.serie[i] !== null) {
-        if (primero < 0) primero = i;
-        ultimo = i;
-      }
-    }
-    if (ultimo < 0) continue;
-
-    let previo = -1;
-    for (let i = ultimo - 1; i >= 0; i--) {
-      if (par.serie[i] !== null) {
-        previo = i;
-        break;
-      }
-    }
-
-    const vigente = par.serie[ultimo]!;
-    const base = { familia: par.familia, precio_vigente: vigente, serie: par.serie };
-    const varMes = previo >= 0 && par.serie[previo]! > 0 ? vigente / par.serie[previo]! - 1 : null;
-    const varAcum = primero >= 0 && primero < ultimo && par.serie[primero]! > 0 ? vigente / par.serie[primero]! - 1 : null;
-    const usado = proveedorUsado.get(par.producto3c) === par.proveedor;
-
-    (porProveedor[par.proveedor] ??= []).push({
-      ...base,
-      nombre: par.producto,
-      var_mes: varMes,
-      var_acum: varAcum,
-      usado,
-    });
-    (porProducto[par.producto] ??= []).push({
-      ...base,
-      nombre: par.proveedor,
-      var_mes: varMes,
-      var_acum: varAcum,
-      usado,
-    });
-  }
-
-  for (const lista of Object.values(porProveedor)) lista.sort((a, b) => a.nombre.localeCompare(b.nombre));
-  for (const lista of Object.values(porProducto)) lista.sort((a, b) => a.nombre.localeCompare(b.nombre));
-
-  return { meses, por_proveedor: porProveedor, por_producto: porProducto };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Orquestador
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -652,18 +563,16 @@ export interface InformePrecios {
   ahorro: Ahorro;
   variacion_ventanas: FilaVariacionVentana[];
   canasta: Canasta;
-  evolucion: Evolucion;
 }
 
 export async function informePrecios(mes: string, cantidadMeses = 12): Promise<InformePrecios> {
   const meses = ventanaMeses(mes, cantidadMeses);
   const desde = meses[0]!;
 
-  const [cotizaciones, usados, serieCompra, seriePorProveedor, gastos] = await Promise.all([
+  const [cotizaciones, usados, serieCompra, gastos] = await Promise.all([
     cotizacionesProductosA(),
     preciosUsadosProductosA(),
     preciosCompraPorMesCargado(desde, mes),
-    preciosProveedorPorMes(desde, mes),
     gastoPorProductoDelMes(mes),
   ]);
 
@@ -687,6 +596,5 @@ export async function informePrecios(mes: string, cantidadMeses = 12): Promise<I
     ahorro: armarAhorro(matriz, gastoPorProducto),
     variacion_ventanas: armarVariacionVentanas(serie, meses, gastoPorProducto),
     canasta: armarCanasta(serie, meses, gastoPorProducto),
-    evolucion: armarEvolucionPrecios(seriePorProveedor, meses, usados),
   };
 }

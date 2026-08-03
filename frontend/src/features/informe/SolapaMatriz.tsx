@@ -47,6 +47,14 @@ export function SolapaMatriz({
       .map((v) => ({ producto: v.producto, valor: v[clave]! }));
   }, [variaciones, ventana]);
 
+  // Productos que se compraron este mes pero cuyo último precio cargado es anterior: la
+  // variación existe, pero medida desde ese mes. Vale avisarlo, porque suele significar
+  // que la compra se hizo y el precio nunca se registró.
+  const desactualizados = useMemo(
+    () => variaciones.filter((v) => v.mes_precio !== mes),
+    [variaciones, mes],
+  );
+
   const filas = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
     return matriz.filter((m) => {
@@ -101,9 +109,17 @@ export function SolapaMatriz({
             Inflación acumulada {ventana}m: {infl === null ? '—' : pctTxt(infl)}
           </span>
         </div>
+        {desactualizados.length > 0 && (
+          <div className="info-box" style={{ marginBottom: 10, background: '#fffaf3', borderColor: '#f3e2cf' }}>
+            ⚠ <strong>{desactualizados.length} de {variaciones.length}</strong> productos A comprados en{' '}
+            {mesLargo(mes)} no tienen un precio de compra cargado ese mes: se usa el último disponible y la
+            variación se mide desde ahí. Si les compraste y el precio no figura, falta registrarlo.
+          </div>
+        )}
         {barras.length === 0 ? (
           <div className="info-box">
-            Ningún producto A comprado en {mesLargo(mes)} tiene precio cargado {ventana} mes(es) atrás para comparar.
+            Ningún producto A comprado en {mesLargo(mes)} tiene precio cargado {ventana} mes(es) antes de su
+            último precio, así que no hay contra qué comparar.
           </div>
         ) : (
           <div className="chart-wrap tall">

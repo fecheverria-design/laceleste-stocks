@@ -13,7 +13,7 @@ import {
   type ChartOptions,
 } from 'chart.js';
 import { Chart } from 'react-chartjs-2';
-import { fmt, mesLargo, pctTxt } from './formato';
+import { mesLargo, pctTxt } from './formato';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Los gráficos del informe, con las mismas opciones que el HTML de J: Chart.js,
@@ -39,22 +39,6 @@ const GRILLA = '#eef4f7';
 const CELESTE = '#0aa6c4';
 const ROJO = '#d94a4a';
 const NARANJA = '#e8823f';
-
-/** Paleta de series múltiples (la `PAL` del script). */
-const PALETA = [
-  '#0aa6c4',
-  '#ef4444',
-  '#f59e0b',
-  '#22c55e',
-  '#a855f7',
-  '#ec4899',
-  '#14b8a6',
-  '#f97316',
-  '#3b82f6',
-  '#84cc16',
-  '#6366f1',
-  '#eab308',
-];
 
 const ejeY = (formato: (v: number) => string) => ({
   ticks: { color: TINTA, callback: (v: string | number) => formato(Number(v)) },
@@ -111,47 +95,6 @@ export function BarrasVariacion({
   };
 
   return <Chart type="bar" data={data} options={options} />;
-}
-
-// ── Evolución de precios (líneas, 12 meses) ──────────────────────────────────
-// La leyenda es clickeable (viene de Chart.js) y los huecos se unen con spanGaps,
-// igual que en el informe: un mes sin cotización no corta la línea.
-export function LineasPrecios({
-  meses,
-  series,
-}: {
-  meses: string[];
-  series: Array<{ nombre: string; serie: Array<number | null> }>;
-}) {
-  const data: ChartData<'line'> = {
-    labels: meses.map(mesLargo),
-    datasets: series.map((s, i) => {
-      const color = PALETA[i % PALETA.length]!;
-      return {
-        label: s.nombre,
-        data: s.serie,
-        borderColor: color,
-        backgroundColor: color,
-        borderWidth: 2,
-        tension: 0.3,
-        pointRadius: 2,
-        spanGaps: true,
-      };
-    }),
-  };
-
-  const options: ChartOptions<'line'> = {
-    responsive: true,
-    maintainAspectRatio: false,
-    interaction: { mode: 'index', intersect: false },
-    plugins: {
-      legend: leyenda(10),
-      tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${c.parsed.y === null ? '—' : fmt(c.parsed.y)}` } },
-    },
-    scales: { y: ejeY((v) => `$${v.toLocaleString('es-AR')}`), x: ejeX },
-  };
-
-  return <Chart type="line" data={data} options={options} />;
 }
 
 // ── Canasta A vs inflación ───────────────────────────────────────────────────

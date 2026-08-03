@@ -3,10 +3,10 @@
 Reproduce dentro de la app el "Informe de Compras — Prioridad A" que J generaba con un Google
 Apps Script sobre planillas. Hoja `/informe` · backend en `services/informe.service.ts`.
 
-**Estado (2026-08-03):** implementadas 5 solapas — **Por Comprador**, **Ahorro potencial**,
-**Matriz & Variación** (con cobertura y control de datos), **Canasta A** y **Evolución de
-precios**. Pendientes por falta de datos de carga manual: Indicadores vs Ventas y Variaciones
-del Mes. Objetivos y Plan de acción quedaron para más adelante. Ver "Lo que falta y por qué".
+**Estado (2026-08-03):** implementadas 4 solapas — **Por Comprador**, **Ahorro potencial**,
+**Matriz & Variación** (con cobertura y control de datos) y **Canasta A**. Pendientes por falta
+de datos de carga manual: Indicadores vs Ventas y Variaciones del Mes. Objetivos y Plan de
+acción quedaron para más adelante. Ver "Lo que falta y por qué".
 
 ## Qué entra y qué no
 
@@ -105,11 +105,21 @@ copiada tal cual y scopeada bajo `.inf`: por eso la pantalla se ve igual y no "p
 
 - **Variación del precio de compra a 1/3/6 meses** (el `chVar`): barras horizontales, rojo si
   superó la inflación de la ventana, celeste si no. Solo productos A comprados en el mes.
-- **Evolución de precios** (el `chProv`): 12 meses, por proveedor o por producto, leyenda
-  clickeable. Un mes sin cotización queda en `null` (la línea se une con `spanGaps`).
 - **Canasta A vs inflación** (el `chCanasta`): barras + línea en modo mensual, dos líneas en
   acumulado (la inflación punteada).
 - **Evolución del gasto** (12 meses) sigue en Recharts, en el resto de la app.
+
+La **"Evolución de precios"** del original (el `chProv`) **no se hizo**: la hoja de Precios ya
+muestra la serie de cada producto y duplicarla no aportaba nada. Decisión de J, 2026-08-03.
+
+⚠ **La ventana de 1/3/6 meses se cuenta desde el MES DEL PRECIO, no desde el mes del informe.**
+Si el producto se compró en julio pero su último precio cargado es de mayo, "1 mes" compara mayo
+contra abril. Anclarla al mes del informe hacía que el precio de mayo se comparara contra el de
+junio: contra sí mismo (0% falso) o con el signo dado vuelta. Era el bug del gráfico de 1 mes
+(2026-08-03): en julio quedaban 2 barras, las dos en 0%. Hay dos tests que lo fijan.
+
+Cuando el precio usado es de un mes anterior al del informe, la pantalla lo avisa arriba del
+gráfico. En la práctica ese aviso significa **que se compró y el precio nunca se registró**.
 
 ## Lo que falta y por qué
 

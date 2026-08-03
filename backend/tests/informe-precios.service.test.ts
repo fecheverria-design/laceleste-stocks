@@ -5,7 +5,6 @@ import {
   armarCanasta,
   armarCobertura,
   armarControl,
-  armarEvolucionPrecios,
   armarMatriz,
   armarVariacionVentanas,
   indexarSerie,
@@ -14,7 +13,6 @@ import {
 import type {
   FilaCotizacion,
   FilaPrecioMesCargado,
-  FilaPrecioProveedorMes,
   FilaPrecioUsado,
 } from '../src/repositories/informe.repository.js';
 
@@ -210,6 +208,29 @@ describe('serie de precios de compra', () => {
     expect(armarVariacionVentanas(serie, MESES, new Map())).toHaveLength(0);
   });
 
+  // El bug del gráfico de 1 mes: si el producto se compró en junio pero su último precio
+  // cargado es de mayo, la ventana se cuenta desde MAYO. Antes se contaba desde junio, así
+  // que "1 mes atrás" caía justo en mayo y el precio se comparaba contra sí mismo → 0%.
+  it('cuenta la ventana desde el mes del precio, no desde el mes del informe', () => {
+    const serie = indexarSerie(
+      [precio('460', '2026-04', 100), precio('460', '2026-05', 150)],
+      nombres,
+    );
+    // Mes del informe: junio (sin precio cargado) → usa el de mayo.
+    const [fila] = armarVariacionVentanas(serie, MESES, new Map([['460', 500]]));
+
+    expect(fila!.mes_precio).toBe('2026-05');
+    expect(fila!.precio).toBe(150);
+    expect(fila!.var_1).toBeCloseTo(0.5, 5); // mayo contra abril, no contra sí mismo
+  });
+
+  it('nunca compara un precio contra sí mismo', () => {
+    const serie = indexarSerie([precio('460', '2026-05', 150)], nombres);
+    const [fila] = armarVariacionVentanas(serie, MESES, new Map([['460', 500]]));
+    expect(fila!.var_1).toBeNull(); // no hay abril cargado: "sin dato", nunca 0%
+    expect(fila!.var_3).toBeNull();
+  });
+
   it('detecta saltos bruscos del precio usado para revisar la carga', () => {
     const serie = indexarSerie([precio('460', '2026-05', 100), precio('460', '2026-06', 500)], nombres);
     const control = armarControl([], serie, MESES);
@@ -294,43 +315,5 @@ describe('canasta A', () => {
     expect(serie[1]).toBe(0);
     expect(serie[2]).toBeCloseTo(0.1, 5);
     expect(serie[0]).toBeCloseTo(1 / 1.1 - 1, 5); // hacia atrás se descompone
-  });
-});
-
-describe('evolución de precios', () => {
-  function fila(over: Partial<FilaPrecioProveedorMes> = {}): FilaPrecioProveedorMes {
-    return {
-      mes: '2026-06',
-      producto_3c: '460',
-      producto: 'QUESO SARDO',
-      familia: 'MATERIAS PRIMAS',
-      proveedor: 'FUENTES',
-      precio: '1000',
-      ...over,
-    };
-  }
-
-  it('arma la serie por proveedor y por producto, con hueco donde no cotizó', () => {
-    const evo = armarEvolucionPrecios(
-      [fila({ mes: '2026-04', precio: '800' }), fila({ mes: '2026-06', precio: '1000' })],
-      MESES,
-      [usado()],
-    );
-
-    const serie = evo.por_proveedor.FUENTES![0]!;
-    expect(serie.serie).toEqual([null, null, null, 800, null, 1000]);
-    expect(serie.precio_vigente).toBe(1000);
-    expect(serie.var_mes).toBeCloseTo(0.25, 5); // contra la última cotización real, no contra el hueco
-    expect(evo.por_producto['QUESO SARDO']![0]!.nombre).toBe('FUENTES');
-  });
-
-  it('marca al proveedor cuyo precio se está usando', () => {
-    const evo = armarEvolucionPrecios([fila({ proveedor: 'FUENTES' }), fila({ proveedor: 'OTRO', precio: '900' })], MESES, [
-      usado({ proveedor: 'FUENTES' }),
-    ]);
-
-    const porProducto = evo.por_producto['QUESO SARDO']!;
-    expect(porProducto.find((s) => s.nombre === 'FUENTES')!.usado).toBe(true);
-    expect(porProducto.find((s) => s.nombre === 'OTRO')!.usado).toBe(false);
   });
 });
