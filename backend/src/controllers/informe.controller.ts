@@ -2,8 +2,9 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { badRequest } from '../domain/errors.js';
 import { enviarCsv } from '../lib/csv.js';
-import { EvolucionQuerySchema, InformeQuerySchema } from '../domain/informe.schema.js';
+import { EvolucionQuerySchema, InformePreciosQuerySchema, InformeQuerySchema } from '../domain/informe.schema.js';
 import { evolucionGasto, informePorComprador, mesesDisponibles } from '../services/informe.service.js';
+import { informePrecios } from '../services/informe-precios.service.js';
 
 // Los números del informe van con coma decimal como el resto de los export de la app.
 const money = (n: number): string => n.toFixed(2).replace('.', ',');
@@ -26,6 +27,74 @@ export async function getInformeEvolucion(req: Request, res: Response): Promise<
     throw badRequest('VALIDACION', z.prettifyError(parsed.error));
   }
   res.status(200).json(await evolucionGasto(parsed.data.mes, parsed.data.meses, parsed.data.comprador));
+}
+
+// GET /api/informe/precios?mes=YYYY-MM[&meses=12] — matriz de cotizaciones, cobertura,
+// control de datos, ahorro potencial, variación 1/3/6m, canasta A y evolución de precios.
+export async function getInformePrecios(req: Request, res: Response): Promise<void> {
+  const parsed = InformePreciosQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    throw badRequest('VALIDACION', z.prettifyError(parsed.error));
+  }
+  res.status(200).json(await informePrecios(parsed.data.mes, parsed.data.meses));
+}
+
+// GET /api/informe/matriz.csv — la matriz de precios A, una fila por cotización.
+export async function getMatrizCsv(req: Request, res: Response): Promise<void> {
+  const parsed = InformePreciosQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    throw badRequest('VALIDACION', z.prettifyError(parsed.error));
+  }
+  const informe = await informePrecios(parsed.data.mes, parsed.data.meses);
+  enviarCsv(
+    res,
+    `informe-matriz-precios-${informe.mes}.csv`,
+    ['Codigo 3c', 'Producto', 'Familia', 'Cotiz. vigentes', 'Proveedor', 'Precio', 'Fecha', 'Dias', 'Vigente', 'Es el usado'],
+    informe.matriz.flatMap((m) =>
+      m.cotizaciones.map((c) => [
+        m.producto_3c,
+        m.producto,
+        m.familia ?? '',
+        String(m.n_prov),
+        c.proveedor,
+        money(c.precio),
+        c.fecha,
+        String(c.dias),
+        c.vigente ? 'SI' : 'NO',
+        c.es_usado ? 'SI' : '',
+      ]),
+    ),
+  );
+}
+
+// GET /api/informe/ahorro.csv — los dos lados del ahorro potencial en un solo archivo.
+export async function getAhorroCsv(req: Request, res: Response): Promise<void> {
+  const parsed = InformePreciosQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    throw badRequest('VALIDACION', z.prettifyError(parsed.error));
+  }
+  const { ahorro, mes } = await informePrecios(parsed.data.mes, parsed.data.meses);
+  const filas = [
+    ...ahorro.favor.map((f) => ({ lado: 'A FAVOR', f })),
+    ...ahorro.contra.map((f) => ({ lado: 'EN CONTRA', f })),
+  ];
+  enviarCsv(
+    res,
+    `informe-ahorro-${mes}.csv`,
+    ['Lado', 'Producto', 'Familia', 'Comprador', 'Precio compra', 'Mejor alternativa', 'Proveedor alternativa', 'Gap %', 'Gasto del mes', 'Monto'],
+    filas.map(({ lado, f }) => [
+      lado,
+      f.producto,
+      f.familia ?? '',
+      f.comprador ?? '',
+      money(f.compra),
+      money(f.mejor),
+      f.mejor_proveedor,
+      pct(f.gap),
+      money(f.gasto),
+      money(f.monto),
+    ]),
+  );
 }
 
 // GET /api/informe/meses — meses con compras cargadas (para el selector).

@@ -19,3 +19,13 @@ export const EvolucionQuerySchema = InformeQuerySchema.extend({
 });
 
 export type EvolucionQuery = z.infer<typeof EvolucionQuerySchema>;
+
+// Matriz de precios, cobertura, ahorro, canasta y evolución: solo necesita el mes y la
+// ventana. El comprador no filtra acá — las solapas de precios muestran todos los A y el
+// filtro por comprador se aplica en pantalla.
+export const InformePreciosQuerySchema = z.object({
+  mes: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Mes inválido (esperado YYYY-MM)'),
+  meses: z.coerce.number().int().min(2).max(36).default(12),
+});
+
+export type InformePreciosQuery = z.infer<typeof InformePreciosQuerySchema>;

@@ -380,6 +380,126 @@ export interface EvolucionGasto {
   proveedores: SerieProveedor[];
 }
 
+// ── Informe de Compras · solapas de precios ──────────────────────────────────
+// Espejo de backend/src/services/informe-precios.service.ts. Todas las variaciones
+// vienen como FRACCIÓN (0.12 = +12%); el % se arma en pantalla.
+
+export interface CotizacionProducto {
+  proveedor: string;
+  precio: number;
+  fecha: string;
+  dias: number;
+  reciente: boolean; // ≤60 días
+  vigente: boolean; // ≤180 días: recién ahí cuenta para el objetivo de 3 cotizaciones
+  es_usado: boolean; // es el precio con el que se compra
+}
+
+export interface FilaMatriz {
+  producto_3c: string;
+  producto: string;
+  familia: string | null;
+  comprador: Comprador | null;
+  n_prov: number;
+  n_prov_hist: number;
+  precio: number | null;
+  proveedor: string | null;
+  fecha: string | null;
+  dias: number | null;
+  sin_compra: boolean; // no tiene ningún precio tipo COMPRA (usa fallback)
+  cotizaciones: CotizacionProducto[];
+}
+
+export interface Cobertura {
+  c1: number;
+  c2: number;
+  c3: number;
+  riesgo: Array<{ producto: string; familia: string | null; n_prov: number }>;
+}
+
+export interface ControlDatos {
+  saltos: Array<{ producto: string; familia: string | null; mes: string; de: number; a: number; var: number }>;
+  vencidos: Array<{ producto: string; familia: string | null; proveedor: string | null; dias: number }>;
+  sin_compra: Array<{ producto: string; familia: string | null }>;
+  umbral: number;
+  dias_vencido: number;
+}
+
+export interface FilaAhorro {
+  producto: string;
+  familia: string | null;
+  comprador: Comprador | null;
+  compra: number;
+  mejor: number;
+  mejor_proveedor: string;
+  gap: number;
+  gasto: number;
+  monto: number;
+}
+
+export interface Ahorro {
+  favor: FilaAhorro[];
+  contra: FilaAhorro[];
+  total_favor: number;
+  total_contra: number;
+  neto: number;
+  gasto_a: number;
+  pct_favor: number | null;
+  pct_contra: number | null;
+  por_comprador: Record<string, { favor: { monto: number; pct: number | null }; contra: { monto: number; pct: number | null } }>;
+}
+
+export interface FilaVariacionVentana {
+  producto: string;
+  familia: string | null;
+  precio: number;
+  var_1: number | null;
+  var_3: number | null;
+  var_6: number | null;
+}
+
+export interface Contribucion {
+  mes: string;
+  var_indice: number;
+  items: Array<{ producto: string; familia: string | null; gasto: number; peso: number; var: number; aporte: number }>;
+}
+
+export interface Canasta {
+  meses: string[];
+  ancla: string;
+  outlier_max: number;
+  scopes: Record<string, Array<number | null>>;
+  contrib: Record<string, Contribucion>;
+  anomalias: Array<{ producto: string; familia: string | null; mes: string; de: number; a: number; var: number; gasto: number }>;
+}
+
+export interface SerieDrill {
+  nombre: string;
+  familia: string | null;
+  precio_vigente: number | null;
+  var_mes: number | null;
+  var_acum: number | null;
+  usado: boolean;
+  serie: Array<number | null>;
+}
+
+export interface Evolucion {
+  meses: string[];
+  por_proveedor: Record<string, SerieDrill[]>;
+  por_producto: Record<string, SerieDrill[]>;
+}
+
+export interface InformePrecios {
+  mes: string;
+  meses: string[];
+  matriz: FilaMatriz[];
+  cobertura: Cobertura;
+  control: ControlDatos;
+  ahorro: Ahorro;
+  variacion_ventanas: FilaVariacionVentana[];
+  canasta: Canasta;
+  evolucion: Evolucion;
+}
+
 // ── Historial de ediciones ───────────────────────────────────────────────────
 export interface CambioAuditoria {
   campo: string;

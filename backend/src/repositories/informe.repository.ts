@@ -148,3 +148,196 @@ export async function mesesConCompras(): Promise<string[]> {
   );
   return res.rows.map((r) => r.mes);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Matriz de precios / cotizaciones — solapas "Matriz & Variación", "Ahorro potencial"
+// y "Evolución de precios".
+//
+// La unidad de análisis es el producto de PRIORIDAD A (`clasificacion_abc = 'A'`), igual
+// que el informe de la planilla, que se limita a la hoja Prioridad.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type FilaCotizacion = {
+  producto_3c: string;
+  producto: string;
+  familia: string | null;
+  proveedor_id: number | null;
+  proveedor: string | null;
+  precio: string;
+  fecha: string; // vigente_desde, 'YYYY-MM-DD'
+  tipo: string; // 'COMPRA' | 'ACTUALIZACION'
+  dias: number; // antigüedad de esa cotización, en días
+};
+
+// Última cotización de CADA proveedor para cada producto A. De acá salen la matriz
+// expandible, el conteo de proveedores con cotización vigente y el cálculo de ahorro.
+//
+// Una fila por (producto, proveedor): la más reciente. `dias` se calcula en SQL contra
+// CURRENT_DATE para que la antigüedad no dependa del reloj del proceso.
+export async function cotizacionesProductosA(): Promise<FilaCotizacion[]> {
+  const res = await db.execute<FilaCotizacion>(
+    sql`SELECT DISTINCT ON (p.producto_3c, p.proveedor_id)
+               p.producto_3c,
+               pr.nombre AS producto,
+               pr.familia,
+               p.proveedor_id,
+               pv.nombre AS proveedor,
+               p.precio::text,
+               p.vigente_desde::text AS fecha,
+               p.tipo,
+               (CURRENT_DATE - p.vigente_desde)::int AS dias
+        FROM precios p
+        JOIN productos pr ON pr.codigo_3c = p.producto_3c
+        LEFT JOIN proveedores pv ON pv.id = p.proveedor_id
+        WHERE pr.clasificacion_abc = 'A'
+          AND p.precio > 0
+          AND p.producto_3c NOT IN (${sql.join(
+            PRODUCTOS_FICTICIOS.map((cod) => sql`${cod}`),
+            sql`, `,
+          )})
+        ORDER BY p.producto_3c, p.proveedor_id, p.vigente_desde DESC, p.id DESC`,
+  );
+  return res.rows;
+}
+
+// El precio con el que efectivamente se compra (el "tick Usar" de la planilla): la última
+// fila de tipo COMPRA. Si el producto nunca tuvo COMPRA cae a la última ACTUALIZACION y se
+// marca `sin_compra` — el informe lo reporta como control de datos ("sin True").
+export type FilaPrecioUsado = {
+  producto_3c: string;
+  proveedor_id: number | null;
+  proveedor: string | null;
+  precio: string;
+  fecha: string;
+  dias: number;
+  sin_compra: boolean;
+};
+
+export async function preciosUsadosProductosA(): Promise<FilaPrecioUsado[]> {
+  const res = await db.execute<FilaPrecioUsado>(
+    sql`SELECT DISTINCT ON (p.producto_3c)
+               p.producto_3c,
+               p.proveedor_id,
+               pv.nombre AS proveedor,
+               p.precio::text,
+               p.vigente_desde::text AS fecha,
+               (CURRENT_DATE - p.vigente_desde)::int AS dias,
+               (p.tipo <> 'COMPRA') AS sin_compra
+        FROM precios p
+        JOIN productos pr ON pr.codigo_3c = p.producto_3c
+        LEFT JOIN proveedores pv ON pv.id = p.proveedor_id
+        WHERE pr.clasificacion_abc = 'A'
+          AND p.precio > 0
+          AND p.producto_3c NOT IN (${sql.join(
+            PRODUCTOS_FICTICIOS.map((cod) => sql`${cod}`),
+            sql`, `,
+          )})
+        -- La COMPRA gana siempre sobre la ACTUALIZACION, sea cual sea la fecha.
+        ORDER BY p.producto_3c, (p.tipo = 'COMPRA') DESC, p.vigente_desde DESC, p.id DESC`,
+  );
+  return res.rows;
+}
+
+export type FilaPrecioMesCargado = {
+  mes: string;
+  producto_3c: string;
+  familia: string | null;
+  precio: string;
+};
+
+// Serie mensual del precio de COMPRA: el último precio con tick CARGADO en ese mes.
+//
+// ⚠ Distinto de `preciosVigentesPorMes`, que arrastra el último precio conocido hacia
+// adelante. Acá un mes sin compra queda SIN dato, que es lo que hace el script: comparar
+// contra un precio arrastrado daría 0% de variación, y "no compré" no es "no cambió".
+// Lo usan el gráfico de variación 1/3/6m, la canasta A y la detección de saltos.
+export async function preciosCompraPorMesCargado(desde: string, hasta: string): Promise<FilaPrecioMesCargado[]> {
+  const res = await db.execute<FilaPrecioMesCargado>(
+    sql`SELECT DISTINCT ON (to_char(p.vigente_desde, 'YYYY-MM'), p.producto_3c)
+               to_char(p.vigente_desde, 'YYYY-MM') AS mes,
+               p.producto_3c,
+               pr.familia,
+               p.precio::text
+        FROM precios p
+        JOIN productos pr ON pr.codigo_3c = p.producto_3c
+        WHERE pr.clasificacion_abc = 'A'
+          AND p.tipo = 'COMPRA'
+          AND p.precio > 0
+          AND to_char(p.vigente_desde, 'YYYY-MM') BETWEEN ${desde} AND ${hasta}
+          AND p.producto_3c NOT IN (${sql.join(
+            PRODUCTOS_FICTICIOS.map((cod) => sql`${cod}`),
+            sql`, `,
+          )})
+        ORDER BY 1, 2, p.vigente_desde DESC, p.id DESC`,
+  );
+  return res.rows;
+}
+
+export type FilaPrecioProveedorMes = {
+  mes: string;
+  producto_3c: string;
+  producto: string;
+  familia: string | null;
+  proveedor: string | null;
+  precio: string;
+};
+
+// Serie mensual por (proveedor, producto) para la solapa Evolución: cómo cotizó cada
+// proveedor cada producto A, mes a mes. Un mes sin cotización queda sin fila → la línea
+// se corta en el gráfico (spanGaps la une, igual que en el informe original).
+export async function preciosProveedorPorMes(desde: string, hasta: string): Promise<FilaPrecioProveedorMes[]> {
+  const res = await db.execute<FilaPrecioProveedorMes>(
+    sql`SELECT DISTINCT ON (to_char(p.vigente_desde, 'YYYY-MM'), p.producto_3c, p.proveedor_id)
+               to_char(p.vigente_desde, 'YYYY-MM') AS mes,
+               p.producto_3c,
+               pr.nombre AS producto,
+               pr.familia,
+               pv.nombre AS proveedor,
+               p.precio::text
+        FROM precios p
+        JOIN productos pr ON pr.codigo_3c = p.producto_3c
+        LEFT JOIN proveedores pv ON pv.id = p.proveedor_id
+        WHERE pr.clasificacion_abc = 'A'
+          AND p.precio > 0
+          AND to_char(p.vigente_desde, 'YYYY-MM') BETWEEN ${desde} AND ${hasta}
+          AND p.producto_3c NOT IN (${sql.join(
+            PRODUCTOS_FICTICIOS.map((cod) => sql`${cod}`),
+            sql`, `,
+          )})
+        -- El ORDER BY tiene que arrancar con las MISMAS expresiones del DISTINCT ON.
+        ORDER BY to_char(p.vigente_desde, 'YYYY-MM'), p.producto_3c, p.proveedor_id,
+                 p.vigente_desde DESC, p.id DESC`,
+  );
+  return res.rows;
+}
+
+export type FilaGastoProducto = {
+  producto_3c: string;
+  producto: string;
+  familia: string | null;
+  gasto: string;
+};
+
+// Gasto (con IVA) por producto en un mes. Pondera el ahorro y la canasta: un producto que
+// subió mucho pero se compra poco casi no mueve el índice.
+export async function gastoPorProductoDelMes(mes: string): Promise<FilaGastoProducto[]> {
+  const res = await db.execute<FilaGastoProducto>(
+    sql`SELECT c.producto_3c,
+               p.nombre AS producto,
+               p.familia,
+               sum(COALESCE(c.total_con_iva, c.precio_total))::text AS gasto
+        FROM compras c
+        JOIN productos p ON p.codigo_3c = c.producto_3c
+        WHERE to_char(c.fecha, 'YYYY-MM') = ${mes}
+          AND c.producto_3c NOT IN (${sql.join(
+            PRODUCTOS_FICTICIOS.map((cod) => sql`${cod}`),
+            sql`, `,
+          )})
+          AND upper(COALESCE(p.familia, '')) IN (${sql.join(
+            FAMILIAS_CON_COMPRADOR.map((f) => sql`${f}`),
+            sql`, `,
+          )})
+        GROUP BY 1, 2, 3`,
+  );
+  return res.rows;
+}

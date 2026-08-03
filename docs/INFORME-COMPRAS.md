@@ -3,9 +3,10 @@
 Reproduce dentro de la app el "Informe de Compras — Prioridad A" que J generaba con un Google
 Apps Script sobre planillas. Hoja `/informe` · backend en `services/informe.service.ts`.
 
-**Estado:** implementada la solapa **Por Comprador** (v1, 2026-07-31). Faltan: Ahorro potencial,
-Canasta A, Plan de acción. Fuera de alcance hasta que haya datos: Indicadores vs Ventas e
-Inflación (las dos hojas se cargan a mano y todavía no existen en la app).
+**Estado (2026-08-03):** implementadas 5 solapas — **Por Comprador**, **Ahorro potencial**,
+**Matriz & Variación** (con cobertura y control de datos), **Canasta A** y **Evolución de
+precios**. Pendientes por falta de datos de carga manual: Indicadores vs Ventas y Variaciones
+del Mes. Objetivos y Plan de acción quedaron para más adelante. Ver "Lo que falta y por qué".
 
 ## Qué entra y qué no
 
@@ -60,16 +61,70 @@ pesa mucho más que uno de $1.000 que subió 100% (da ≈10,1%, no 55%).
 juicio: comprar más un mes no es ni bueno ni malo, por eso en la pantalla va en gris y no en
 rojo/verde como las de precio.
 
+## Las solapas de precios (`services/informe-precios.service.ts`)
+
+Todo lo que sigue sale de la tabla `precios` y se limita a los productos con
+`clasificacion_abc = 'A'`, igual que la hoja Prioridad del original.
+
+**El precio de compra** ("tick `Usar`") = la última fila de tipo `COMPRA`. Si un producto nunca
+tuvo COMPRA cae a la última `ACTUALIZACION` y se lo reporta en el control de datos.
+
+Los umbrales, todos del script y todos exportados como constantes para no repetirlos:
+
+| Constante | Valor | Para qué |
+|---|---|---|
+| `DIAS_VIGENTE` | 180 | Una cotización más vieja no cuenta para el objetivo de 3 proveedores |
+| `DIAS_RECIENTE` | 60 | Marca visual "+60d": vigente pero ya no fresca |
+| `DIAS_FRESCA` | 90 | Solo una cotización así de nueva sirve para comparar en el ahorro |
+| `DIAS_VENCIDO` | 90 | Precio usado con más días → control de datos |
+| `UMBRAL_SALTO` | 40% | Salto mes a mes que amerita revisar la carga |
+| `OUTLIER_MAX` | 100% | Variación imposible: se excluye del índice y se reporta aparte |
+| `ANCLA_CANASTA` | `2026-01` | Mes base del índice, fijo para que el histórico no se mueva |
+
+**Ahorro potencial.** Por cada A con gasto en el mes: precio de compra vs la mejor cotización
+**fresca de OTRO proveedor**. Si la alternativa es más cara, el mes va *a favor*; si es más
+barata, es una *mala compra*. `monto = |gap%| × gasto del mes`. Sin alternativa fresca el
+producto no entra: comparar contra un precio de hace medio año no dice nada.
+
+**Canasta A.** Variación mensual ponderada por gasto (`aporte = peso × var`, con
+`peso = gasto del producto ÷ gasto de la canasta`), anclada a enero 2026 y compuesta hacia
+adelante y hacia atrás. La suma de los aportes es exactamente la variación del índice — hay un
+test que lo fija. Se excluyen las variaciones de más de `OUTLIER_MAX`, que en la práctica son
+dedazos: en mayo 2026 apareció BOLSA DE PAPEL KRAFT NRO 6 con **+82.949%**.
+
+⚠ **La serie de precios de compra NO arrastra el último precio conocido.** Un mes sin compra
+queda sin dato, no en 0%: `preciosCompraPorMesCargado` toma el precio *cargado en ese mes*, a
+diferencia de `preciosVigentesPorMes` (que sí arrastra y es la que usa Por Comprador). Mezclarlas
+inventaría variaciones de 0% que diluyen el índice.
+
 ## Los gráficos
 
-Copian los del informe original (que usa Chart.js; acá es Recharts):
+Portados uno a uno del HTML de J, con la misma librería (**Chart.js**) y la misma paleta. El
+CSS del informe está en `frontend/src/features/informe/informe.css`, que es su hoja de estilos
+copiada tal cual y scopeada bajo `.inf`: por eso la pantalla se ve igual y no "parecida".
 
-- **Evolución del gasto** (12 meses, el `chProv` del HTML). Dos vistas: total, o una línea por
-  cada uno de los 6 proveedores más grandes de la ventana. Un mes sin compras a ese proveedor
-  va **`null` y corta la línea**, en vez de dibujar una caída a cero que no pasó.
-- **Qué se movió de precio** (el `chVar`): barras horizontales con las 6 mayores subas y las 6
-  mayores bajas del mes. Rojo sube, verde baja. *El original pinta de rojo lo que supera la
-  inflación del período; cuando carguemos inflación, ese es el cambio.*
+- **Variación del precio de compra a 1/3/6 meses** (el `chVar`): barras horizontales, rojo si
+  superó la inflación de la ventana, celeste si no. Solo productos A comprados en el mes.
+- **Evolución de precios** (el `chProv`): 12 meses, por proveedor o por producto, leyenda
+  clickeable. Un mes sin cotización queda en `null` (la línea se une con `spanGaps`).
+- **Canasta A vs inflación** (el `chCanasta`): barras + línea en modo mensual, dos líneas en
+  acumulado (la inflación punteada).
+- **Evolución del gasto** (12 meses) sigue en Recharts, en el resto de la app.
+
+## Lo que falta y por qué
+
+Dos solapas del original no se pueden calcular todavía. Se muestran en pantalla apagadas, con el
+motivo, en vez de esconderlas:
+
+| Solapa | Necesita | Estado |
+|---|---|---|
+| Indicadores vs Ventas | ventas mensuales | carga manual, tabla por crear |
+| Variaciones del Mes | inflación oficial mensual | carga manual, tabla por crear |
+| Objetivos del mes | hoja OBJETIVOS | postergada (decisión de J, 2026-08-03) |
+| Plan de acción | tabla `acciones` + las señales de arriba | pendiente |
+
+La inflación además destraba el rojo del gráfico de variación, el KPI "Sobre inflación" y la
+línea de comparación de la canasta.
 
 ## Referencia verificada (junio 2026, export del 31/07)
 
