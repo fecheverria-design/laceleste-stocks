@@ -476,6 +476,15 @@ export interface Canasta {
   anomalias: Array<{ producto: string; familia: string | null; mes: string; de: number; a: number; var: number; gasto: number }>;
 }
 
+// ── Indicadores mensuales de carga manual ────────────────────────────────────
+// `inflacion` viaja como FRACCIÓN (0.021 = 2,1%), igual que el resto de las variaciones.
+export interface IndicadorMensual {
+  periodo: string; // YYYY-MM
+  ventas: number | null;
+  inflacion: number | null;
+  actualizado_en: string;
+}
+
 // ── Control de precios (hoja de trabajo del área de compras) ─────────────────
 export type AlertaPrecio =
   | 'SIN_COMPRA'

@@ -131,9 +131,14 @@ Cuánto se le compró a cada uno. Sale de las **compras reales importadas de 3c*
 movimientos. Cada proveedor se abre y muestra qué productos le comprás.
 
 ### Informe
-El Informe de Compras — Prioridad A, el mismo que se hacía con la planilla. Cuatro solapas: gasto
-**Por Comprador**, **Ahorro potencial**, **Matriz & Variación** y **Canasta A**. Las fórmulas
-están en `INFORME-COMPRAS.md`.
+El Informe de Compras — Prioridad A, el mismo que se hacía con la planilla. Cinco solapas: gasto
+**Por Comprador**, **Ahorro potencial**, **Matriz & Variación**, **Canasta A** y **Ventas e
+inflación**. Las fórmulas están en `INFORME-COMPRAS.md`.
+
+La última es de **carga a mano**: ventas del mes e inflación oficial son los dos únicos datos del
+informe que no salen de ningún lado automáticamente. Se cargan una vez por mes y sin ellos el
+informe funciona igual, solo que no puede decirte qué subió por encima de la inflación ni
+comparar la canasta contra el mercado. **La inflación se escribe en porcentaje** (2,1 = 2,1%).
 
 ### Estado
 Muestra si la app y la base están respondiendo. Es distinto del **vigía**, que corre solo todas

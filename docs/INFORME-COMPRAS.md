@@ -3,10 +3,10 @@
 Reproduce dentro de la app el "Informe de Compras — Prioridad A" que J generaba con un Google
 Apps Script sobre planillas. Hoja `/informe` · backend en `services/informe.service.ts`.
 
-**Estado (2026-08-03):** implementadas 4 solapas — **Por Comprador**, **Ahorro potencial**,
-**Matriz & Variación** (con cobertura y control de datos) y **Canasta A**. Pendientes por falta
-de datos de carga manual: Indicadores vs Ventas y Variaciones del Mes. Objetivos y Plan de
-acción quedaron para más adelante. Ver "Lo que falta y por qué".
+**Estado (2026-08-03):** implementadas 5 solapas — **Por Comprador**, **Ahorro potencial**,
+**Matriz & Variación** (con cobertura y control de datos), **Canasta A** y **Ventas e
+inflación** (la carga manual). Pendiente: **Indicadores vs Ventas**, que ya tiene los datos
+pero le faltan los ratios. Objetivos y Plan de acción quedaron para más adelante.
 
 ## Qué entra y qué no
 
@@ -139,20 +139,35 @@ Lo hacen `preciosUsadosProductosA` (el precio vigente) y `preciosCompraPorMesCar
 mensual), las dos con `DISTINCT ON ... ORDER BY vigente_desde DESC, id DESC`. El `id DESC`
 desempata dos cargas del mismo día: gana la que se cargó después.
 
-## Lo que falta y por qué
+## Ventas e inflación (solapa de carga manual)
 
-Dos solapas del original no se pueden calcular todavía. Se muestran en pantalla apagadas, con el
-motivo, en vez de esconderlas:
+Los dos únicos datos del informe que no salen de 3c ni de ningún sync. Viven en
+`indicadores_mensuales` (una fila por mes, los dos campos nullable) y se cargan desde la solapa
+**Ventas e inflación**: los últimos 24 meses, cada campo se guarda al salir del foco.
+
+⚠ **La inflación se guarda como FRACCIÓN** (0.021 = 2,1%), igual que todas las variaciones de la
+app. La pantalla la muestra y la recibe en **porcentaje** y hace la conversión, y el schema
+rechaza cualquier valor fuera de ±100% mensual — que es exactamente el error de tipear `2,1`
+donde va `0,021`.
+
+**Un mes sin cargar es `null`, nunca cero.** La inflación acumulada de N meses devuelve `null`
+si falta cualquier mes del tramo: acumular salteando un mes da un número más chico que el real
+y nadie se daría cuenta. Lo mismo con la serie anclada de la canasta, que se corta en el hueco.
+
+Con la inflación cargada se encienden tres cosas: el **rojo** del gráfico de variación (lo que
+subió por encima de la inflación de la ventana), el KPI **"Sobre inflación"** y la **línea de
+comparación** de la canasta.
+
+## Lo que falta y por qué
 
 | Solapa | Necesita | Estado |
 |---|---|---|
-| Indicadores vs Ventas | ventas mensuales | carga manual, tabla por crear |
-| Variaciones del Mes | inflación oficial mensual | carga manual, tabla por crear |
+| Indicadores vs Ventas | los ratios compras/consumo/stock/ajustes contra ventas | las ventas ya se cargan; faltan los ratios |
 | Objetivos del mes | hoja OBJETIVOS | postergada (decisión de J, 2026-08-03) |
-| Plan de acción | tabla `acciones` + las señales de arriba | pendiente |
+| Plan de acción | tabla `acciones` + las señales del informe | pendiente |
 
-La inflación además destraba el rojo del gráfico de variación, el KPI "Sobre inflación" y la
-línea de comparación de la canasta.
+La solapa **Variaciones del Mes** del original no se hizo aparte: su contenido (variación del mes
+contra la inflación) ya está en **Matriz & Variación**, que además deja elegir la ventana.
 
 ## Referencia verificada (junio 2026, export del 31/07)
 

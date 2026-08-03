@@ -71,3 +71,43 @@ export function aMensual(acumulada: Array<number | null>): Array<number | null> 
   }
   return out;
 }
+
+/**
+ * Convierte variaciones mes a mes en una serie acumulada con base 0 en el mes ancla.
+ * Compone hacia adelante y descompone hacia atrás, igual que `anclar()` del backend: así la
+ * inflación y la canasta se pueden comparar sobre el mismo eje.
+ * Un mes sin dato corta la serie: de ahí en adelante es null, porque acumular salteando un
+ * mes daría un número más chico que el real sin que se note.
+ */
+export function anclarSerie(varMensual: Array<number | null>, anclaIdx: number): Array<number | null> {
+  const out: Array<number | null> = varMensual.map(() => null);
+  if (anclaIdx < 0 || anclaIdx >= varMensual.length) return out;
+  out[anclaIdx] = 0;
+
+  let factor = 1;
+  for (let i = anclaIdx + 1; i < varMensual.length; i++) {
+    const v = varMensual[i];
+    if (v === null || v === undefined) break;
+    factor *= 1 + v;
+    out[i] = factor - 1;
+  }
+  factor = 1;
+  for (let j = anclaIdx - 1; j >= 0; j--) {
+    const v = varMensual[j + 1];
+    if (v === null || v === undefined) break;
+    factor /= 1 + v;
+    out[j] = factor - 1;
+  }
+  return out;
+}
+
+/**
+ * Inflación acumulada de los últimos N meses de la ventana. null si falta algún mes del
+ * tramo: una acumulada con huecos subestima y nadie se daría cuenta.
+ */
+export function inflacionAcumulada(inflacion: Array<number | null>, meses: number): number | null {
+  if (meses <= 0 || meses > inflacion.length) return null;
+  const tramo = inflacion.slice(inflacion.length - meses);
+  if (tramo.some((v) => v === null || v === undefined)) return null;
+  return tramo.reduce<number>((acc, v) => acc * (1 + v!), 1) - 1;
+}
