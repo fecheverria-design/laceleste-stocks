@@ -120,6 +120,13 @@
       "when": 1785512000000,
       "tag": "0016_compras_renglon",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1785768998230,
+      "tag": "0017_thankful_banshee",
+      "breakpoints": true
     }
   ]
 }

@@ -19,6 +19,10 @@ const ConsumosPage = lazy(() => import('./features/consumos/ConsumosPage').then(
 const ProveedoresPage = lazy(() =>
   import('./features/proveedores/ProveedoresPage').then((m) => ({ default: m.ProveedoresPage })),
 );
+const InformePage = lazy(() => import('./features/informe/InformePage').then((m) => ({ default: m.InformePage })));
+const ControlPreciosPage = lazy(() =>
+  import('./features/precios/ControlPreciosPage').then((m) => ({ default: m.ControlPreciosPage })),
+);
 
 export function App() {
   return (
@@ -59,10 +63,26 @@ export function App() {
             }
           />
           <Route
+            path="/control-precios"
+            element={
+              <Suspense fallback={<p className="text-slate-500">Cargando control de precios…</p>}>
+                <ControlPreciosPage />
+              </Suspense>
+            }
+          />
+          <Route
             path="/proveedores"
             element={
               <Suspense fallback={<p className="text-slate-500">Cargando proveedores…</p>}>
                 <ProveedoresPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/informe"
+            element={
+              <Suspense fallback={<p className="text-slate-500">Cargando informe…</p>}>
+                <InformePage />
               </Suspense>
             }
           />

@@ -323,6 +323,209 @@ export interface GastoMes {
   compras: number;
 }
 
+// ── Informe de Compras ───────────────────────────────────────────────────────
+// El gasto va CON IVA (como el informe de la planilla) y la variación de precio sobre el
+// neto (un cambio de alícuota no es un aumento). Ver backend/src/services/informe.service.ts.
+export type Comprador = 'Lautaro' | 'Fausto';
+
+export interface FilaProveedorInforme {
+  proveedor_id: number | null;
+  nombre: string;
+  gasto: number;
+  gasto_anterior: number;
+  var_gasto: number | null;
+  var_precio: number | null; // ponderada por gasto
+  productos: number;
+}
+
+export interface FilaProductoInforme {
+  producto_3c: string;
+  nombre: string;
+  familia: string | null;
+  comprador: Comprador;
+  clasificacion_abc: string | null;
+  gasto: number;
+  gasto_anterior: number;
+  cantidad: number;
+  precio: number | null; // vigente al cierre del mes: el que manda la variación
+  precio_anterior: number | null;
+  var_precio: number | null;
+  precio_pagado: number | null; // promedio de lo pagado ese mes, solo referencia
+}
+
+export interface InformeCompradores {
+  mes: string;
+  mes_anterior: string;
+  resumen: {
+    gasto: number;
+    gasto_anterior: number;
+    var_gasto: number | null;
+    renglones: number;
+    proveedores: number;
+    productos: number;
+  };
+  por_comprador: Array<{ comprador: Comprador; gasto: number; gasto_anterior: number; var_gasto: number | null }>;
+  proveedores: FilaProveedorInforme[];
+  productos: FilaProductoInforme[];
+}
+
+export interface SerieProveedor {
+  nombre: string;
+  serie: Array<number | null>; // null = ese mes no se le compró (la línea se corta)
+  total: number;
+}
+export interface EvolucionGasto {
+  meses: string[];
+  total: number[];
+  proveedores: SerieProveedor[];
+}
+
+// ── Informe de Compras · solapas de precios ──────────────────────────────────
+// Espejo de backend/src/services/informe-precios.service.ts. Todas las variaciones
+// vienen como FRACCIÓN (0.12 = +12%); el % se arma en pantalla.
+
+export interface CotizacionProducto {
+  precio_id: number; // fila de `precios`: la hoja de Control la edita o la marca
+  proveedor: string;
+  proveedor_id: number | null;
+  tipo: TipoPrecio;
+  precio: number;
+  fecha: string;
+  dias: number;
+  reciente: boolean; // ≤60 días
+  vigente: boolean; // ≤180 días: recién ahí cuenta para el objetivo de 3 cotizaciones
+  es_usado: boolean; // es el precio con el que se compra
+}
+
+export interface FilaMatriz {
+  producto_3c: string;
+  producto: string;
+  familia: string | null;
+  comprador: Comprador | null;
+  n_prov: number;
+  n_prov_hist: number;
+  precio: number | null;
+  proveedor: string | null;
+  fecha: string | null;
+  dias: number | null;
+  sin_compra: boolean; // no tiene ningún precio tipo COMPRA (usa fallback)
+  cotizaciones: CotizacionProducto[];
+}
+
+export interface Cobertura {
+  c1: number;
+  c2: number;
+  c3: number;
+  riesgo: Array<{ producto: string; familia: string | null; n_prov: number }>;
+}
+
+export interface ControlDatos {
+  saltos: Array<{ producto: string; familia: string | null; mes: string; de: number; a: number; var: number }>;
+  vencidos: Array<{ producto: string; familia: string | null; proveedor: string | null; dias: number }>;
+  sin_compra: Array<{ producto: string; familia: string | null }>;
+  umbral: number;
+  dias_vencido: number;
+}
+
+export interface FilaAhorro {
+  producto: string;
+  familia: string | null;
+  comprador: Comprador | null;
+  compra: number;
+  mejor: number;
+  mejor_proveedor: string;
+  gap: number;
+  gasto: number;
+  monto: number;
+}
+
+export interface Ahorro {
+  favor: FilaAhorro[];
+  contra: FilaAhorro[];
+  total_favor: number;
+  total_contra: number;
+  neto: number;
+  gasto_a: number;
+  pct_favor: number | null;
+  pct_contra: number | null;
+  por_comprador: Record<string, { favor: { monto: number; pct: number | null }; contra: { monto: number; pct: number | null } }>;
+}
+
+export interface FilaVariacionVentana {
+  producto: string;
+  familia: string | null;
+  precio: number;
+  mes_precio: string; // puede ser anterior al mes del informe si no hubo carga nueva
+  var_1: number | null;
+  var_3: number | null;
+  var_6: number | null;
+}
+
+export interface Contribucion {
+  mes: string;
+  var_indice: number;
+  items: Array<{ producto: string; familia: string | null; gasto: number; peso: number; var: number; aporte: number }>;
+}
+
+export interface Canasta {
+  meses: string[];
+  ancla: string;
+  outlier_max: number;
+  scopes: Record<string, Array<number | null>>;
+  contrib: Record<string, Contribucion>;
+  anomalias: Array<{ producto: string; familia: string | null; mes: string; de: number; a: number; var: number; gasto: number }>;
+}
+
+// ── Indicadores mensuales de carga manual ────────────────────────────────────
+// `inflacion` viaja como FRACCIÓN (0.021 = 2,1%), igual que el resto de las variaciones.
+export interface IndicadorMensual {
+  periodo: string; // YYYY-MM
+  ventas: number | null;
+  inflacion: number | null;
+  actualizado_en: string;
+}
+
+// ── Control de precios (hoja de trabajo del área de compras) ─────────────────
+export type AlertaPrecio =
+  | 'SIN_COMPRA'
+  | 'VENCIDO'
+  | 'POCAS_COTIZACIONES'
+  | 'SALTO'
+  | 'SIN_PROVEEDOR';
+
+export interface FilaControlPrecio extends FilaMatriz {
+  alertas: AlertaPrecio[];
+  alternativas_frescas: number;
+  salto: { mes: string; de: number; a: number; var: number } | null;
+}
+
+export interface ControlPrecios {
+  filtro: { abc: string; familia?: string };
+  objetivo_cotizaciones: number;
+  dias_vencido: number;
+  resumen: {
+    productos: number;
+    a_revisar: number;
+    sin_compra: number;
+    vencidos: number;
+    pocas_cotizaciones: number;
+    saltos: number;
+    sin_proveedor: number;
+  };
+  items: FilaControlPrecio[];
+}
+
+export interface InformePrecios {
+  mes: string;
+  meses: string[];
+  matriz: FilaMatriz[];
+  cobertura: Cobertura;
+  control: ControlDatos;
+  ahorro: Ahorro;
+  variacion_ventanas: FilaVariacionVentana[];
+  canasta: Canasta;
+}
+
 // ── Historial de ediciones ───────────────────────────────────────────────────
 export interface CambioAuditoria {
   campo: string;

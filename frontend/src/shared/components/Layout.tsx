@@ -9,7 +9,9 @@ const tabs = [
   { to: '/inventarios', label: 'Inventarios' },
   { to: '/consumos', label: 'Consumos' },
   { to: '/precios', label: 'Precios' },
+  { to: '/control-precios', label: 'Control precios' },
   { to: '/proveedores', label: 'Proveedores' },
+  { to: '/informe', label: 'Informe' },
   { to: '/health', label: 'Estado' },
 ];
 

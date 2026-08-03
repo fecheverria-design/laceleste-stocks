@@ -42,15 +42,16 @@ export async function crearPrecio(input: CrearPrecioInput, ctx: { usuarioId: num
   }
   const vigenteDesde = input.vigente_desde ?? hoyYmd();
   const tipo = input.tipo ?? 'COMPRA'; // default COMPRA (precio que se paga → vigente)
-  // Carga manual desde la UI: sin proveedor (null).
-  if (await existePrecioEnFecha(input.producto_3c, null, vigenteDesde, tipo)) {
+  const proveedorId = input.proveedor_id ?? null;
+  if (await existePrecioEnFecha(input.producto_3c, proveedorId, vigenteDesde, tipo)) {
     throw conflict(
       'PRECIO_DUPLICADO',
-      `Ya hay un precio (${tipo.toLowerCase()}) para ${input.producto_3c} con fecha ${vigenteDesde}`,
+      `Ya hay un precio (${tipo.toLowerCase()}) para ${input.producto_3c} de ese proveedor con fecha ${vigenteDesde}`,
     );
   }
   return insertarPrecio({
     producto3c: input.producto_3c,
+    proveedorId,
     precio: input.precio,
     tipo,
     vigenteDesde,
@@ -65,14 +66,15 @@ export async function editarPrecio(id: number, input: EditarPrecioInput): Promis
 
   const nuevaFecha = input.vigente_desde ?? actual.vigente_desde;
   const nuevoTipo = input.tipo ?? actual.tipo;
-  // Si cambia fecha o tipo, revisar que no choque con otro registro de esa terna.
+  const nuevoProveedor = input.proveedor_id !== undefined ? input.proveedor_id : actual.proveedor_id;
+  // Si cambia fecha, tipo o proveedor, revisar que no choque con otro registro de esa clave.
   if (
-    (input.vigente_desde || input.tipo) &&
-    (await existePrecioEnFecha(actual.producto_3c, actual.proveedor_id, nuevaFecha, nuevoTipo, id))
+    (input.vigente_desde || input.tipo || input.proveedor_id !== undefined) &&
+    (await existePrecioEnFecha(actual.producto_3c, nuevoProveedor, nuevaFecha, nuevoTipo, id))
   ) {
     throw conflict(
       'PRECIO_DUPLICADO',
-      `Ya hay otro precio (${nuevoTipo.toLowerCase()}) para ${actual.producto_3c} con fecha ${nuevaFecha}`,
+      `Ya hay otro precio (${nuevoTipo.toLowerCase()}) para ${actual.producto_3c} de ese proveedor con fecha ${nuevaFecha}`,
     );
   }
 
@@ -80,6 +82,7 @@ export async function editarPrecio(id: number, input: EditarPrecioInput): Promis
     precio: input.precio,
     tipo: input.tipo,
     vigenteDesde: input.vigente_desde,
+    proveedorId: input.proveedor_id,
   });
   if (!row) throw notFound('PRECIO_NO_ENCONTRADO', `No existe el precio ${id}`);
   return row;
