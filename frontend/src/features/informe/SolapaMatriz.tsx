@@ -22,6 +22,7 @@ export function SolapaMatriz({
   control,
   variaciones,
   inflacionVentana,
+  onCargarDatos,
 }: {
   mes: string;
   matriz: FilaMatriz[];
@@ -31,6 +32,7 @@ export function SolapaMatriz({
   // Inflación acumulada por ventana (fracción). Se carga a mano; hasta entonces es null y
   // las barras no se pintan de rojo (no hay contra qué comparar).
   inflacionVentana: Record<Ventana, number | null>;
+  onCargarDatos: () => void;
 }) {
   const [ventana, setVentana] = useState<Ventana>('6');
   const [familia, setFamilia] = useState<FiltroFamilia>('ALL');
@@ -106,7 +108,22 @@ export function SolapaMatriz({
             </button>
           ))}
           <span className="meta" style={{ fontSize: 12, color: 'var(--ink2)' }}>
-            Inflación acumulada {ventana}m: {infl === null ? '—' : pctTxt(infl)}
+            {infl === null ? (
+              <>
+                Sin inflación cargada para {ventana === '1' ? 'este mes' : `los últimos ${ventana} meses`} —{' '}
+                <button
+                  type="button"
+                  onClick={onCargarDatos}
+                  style={{ background: 'none', border: 0, padding: 0, color: 'var(--cyan-d)', cursor: 'pointer' }}
+                >
+                  cargarla →
+                </button>
+              </>
+            ) : (
+              <>
+                Inflación acumulada {ventana}m: <strong>{pctTxt(infl)}</strong>
+              </>
+            )}
           </span>
         </div>
         {desactualizados.length > 0 && (

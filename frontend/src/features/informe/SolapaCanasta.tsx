@@ -1,13 +1,21 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { Canasta } from '../../shared/api/types';
-import { aMensual, cap, fMjs, fmt, mesLargo, pctTxt } from './formato';
+import { aMensual, anclarSerie, baseComparable, cap, fMjs, fmt, mesLargo, pctTxt, reAnclar } from './formato';
 import { GraficoCanasta } from './graficos';
 import { FamTag } from './piezas';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Índice de precios de la canasta A contra la inflación oficial. La canasta se calcula
-// sola desde los precios de compra; la inflación se carga a mano (mientras no esté, el
-// gráfico muestra la canasta y la línea de inflación queda vacía).
+// sola desde los precios de compra; la inflación se carga a mano.
+//
+// ⚠ La inflación entra acá como serie MENSUAL, no acumulada. Antes entraba acumulada y el
+// modo "Mensual" la derivaba de ahí — pero el acumulado se corta en el primer mes sin
+// cargar, así que con datos parciales la línea desaparecía por completo aunque el dato
+// estuviera cargado. La mensual es el dato crudo: siempre se puede mostrar.
+//
+// Para el modo "Acumulado" las dos series se llevan al MISMO mes base. El ideal es el ancla
+// del índice (enero), pero solo sirve si la inflación cubre desde ahí; si no, se compara
+// desde donde efectivamente hay datos y el texto lo aclara.
 // ─────────────────────────────────────────────────────────────────────────────
 
 type Modo = 'MOM' | 'CUM';
@@ -19,28 +27,48 @@ const ALCANCES = [
   ['DESCARTABLES', 'Descartables'],
 ] as const;
 
-export function SolapaCanasta({ canasta, inflacion }: { canasta: Canasta; inflacion: Array<number | null> }) {
+export function SolapaCanasta({
+  canasta,
+  inflacionMensual,
+  onCargarDatos,
+}: {
+  canasta: Canasta;
+  inflacionMensual: Array<number | null>;
+  onCargarDatos: () => void;
+}) {
   const [modo, setModo] = useState<Modo>('MOM');
   const [alcance, setAlcance] = useState<string>('TOTAL');
 
   const mensual = modo === 'MOM';
-  const acumCanasta = canasta.scopes[alcance] ?? [];
-  const serieCanasta = mensual ? aMensual(acumCanasta) : acumCanasta;
-  const serieInfl = mensual ? aMensual(inflacion) : inflacion;
+  const acumCanasta = useMemo(() => canasta.scopes[alcance] ?? [], [canasta.scopes, alcance]);
 
-  const ultimo = <T,>(arr: Array<T | null>): T | null => {
-    for (let i = arr.length - 1; i >= 0; i--) if (arr[i] !== null && arr[i] !== undefined) return arr[i] as T;
-    return null;
+  // Mes base común para comparar acumulados, y las dos series llevadas a ese punto.
+  const { baseIdx, serieCanasta, serieInfl } = useMemo(() => {
+    const anclaIdx = canasta.meses.indexOf(canasta.ancla);
+    const base = baseComparable(inflacionMensual, anclaIdx);
+    if (mensual) {
+      return { baseIdx: base, serieCanasta: aMensual(acumCanasta), serieInfl: inflacionMensual };
+    }
+    return {
+      baseIdx: base,
+      serieCanasta: base >= 0 ? reAnclar(acumCanasta, base) : acumCanasta,
+      serieInfl: base >= 0 ? anclarSerie(inflacionMensual, base) : inflacionMensual.map(() => null),
+    };
+  }, [acumCanasta, inflacionMensual, mensual, canasta.meses, canasta.ancla]);
+
+  const cargados = inflacionMensual.filter((v) => v !== null).length;
+  const faltan = inflacionMensual.length - cargados;
+
+  const ultimo = (arr: Array<number | null>): { valor: number | null; mes: string } => {
+    for (let i = arr.length - 1; i >= 0; i--) {
+      if (arr[i] !== null && arr[i] !== undefined) return { valor: arr[i]!, mes: canasta.meses[i] ?? '' };
+    }
+    return { valor: null, mes: '' };
   };
-  const ultimoMes = (() => {
-    for (let i = serieCanasta.length - 1; i >= 0; i--) if (serieCanasta[i] !== null) return canasta.meses[i] ?? '';
-    return '';
-  })();
 
   const cCan = ultimo(serieCanasta);
   const cInf = ultimo(serieInfl);
-  const diff = cCan !== null && cInf !== null ? cCan - cInf : null;
-
+  const diff = cCan.valor !== null && cInf.valor !== null ? cCan.valor - cInf.valor : null;
   const contrib = canasta.contrib[alcance];
   const etiqueta = alcance === 'TOTAL' ? 'total' : alcance.toLowerCase();
 
@@ -49,9 +77,9 @@ export function SolapaCanasta({ canasta, inflacion }: { canasta: Canasta; inflac
       <div className="section-title">Índice de precios — Canasta A vs Inflación oficial</div>
       <div className="note">
         Variación de precios de nuestra canasta A (solo <strong>compras efectivamente realizadas</strong>, precio
-        tildado, ponderado por gasto) contra la inflación oficial. Por defecto <strong>mensual</strong> (lo que
-        subió o bajó cada mes); con <strong>Acumulado</strong> ves el cambio desde el mes base. Si la canasta queda
-        por debajo de la inflación, comprás mejor que el mercado.
+        tildado, ponderado por gasto) contra la inflación oficial. <strong>Mensual</strong> compara mes contra mes;{' '}
+        <strong>Acumulado</strong> muestra el arrastre desde un mes base. Si la canasta queda por debajo de la
+        inflación, comprás mejor que el mercado.
       </div>
 
       <div className="controls">
@@ -72,13 +100,34 @@ export function SolapaCanasta({ canasta, inflacion }: { canasta: Canasta; inflac
             {texto}
           </button>
         ))}
-        <span className="meta" style={{ fontSize: 12, color: 'var(--ink2)' }}>
-          {mensual
-            ? `Variación mensual · último mes (${cap(mesLargo(ultimoMes))}): canasta ${pctTxt(cCan)} vs inflación ${pctTxt(cInf)}`
-            : `Acumulado desde ${cap(mesLargo(canasta.ancla))}: canasta ${pctTxt(cCan)} vs inflación ${pctTxt(cInf)}` +
-              (diff !== null
-                ? `  →  ${diff < 0 ? `comprando ${Math.abs(diff * 100).toFixed(1)} pts MEJOR que el mercado` : `${(diff * 100).toFixed(1)} pts PEOR que el mercado`}`
-                : '')}
+      </div>
+
+      <div className="gbox-sub" style={{ margin: '0 0 12px' }}>
+        <span className="gl2">{mensual ? `Último mes con dato · ${cap(mesLargo(cCan.mes))}` : 'Acumulado'}</span>
+        <span className="gv2">
+          {mensual ? (
+            <>
+              canasta <span className={cCan.valor !== null && cCan.valor > 0 ? 'up' : 'down'}>{pctTxt(cCan.valor)}</span>
+              {' vs '}inflación {pctTxt(cInf.valor)}
+            </>
+          ) : baseIdx < 0 ? (
+            <span style={{ color: 'var(--muted)' }}>sin inflación cargada</span>
+          ) : (
+            <>
+              desde {cap(mesLargo(canasta.meses[baseIdx] ?? ''))}: canasta {pctTxt(cCan.valor)} vs inflación{' '}
+              {pctTxt(cInf.valor)}
+              {diff !== null && (
+                <>
+                  {'  →  '}
+                  <span className={diff < 0 ? 'down' : 'up'}>
+                    {diff < 0
+                      ? `comprando ${Math.abs(diff * 100).toFixed(1)} pts MEJOR que el mercado`
+                      : `${(diff * 100).toFixed(1)} pts PEOR que el mercado`}
+                  </span>
+                </>
+              )}
+            </>
+          )}
         </span>
       </div>
 
@@ -92,9 +141,32 @@ export function SolapaCanasta({ canasta, inflacion }: { canasta: Canasta; inflac
         />
       </div>
 
-      {cInf === null && (
-        <div className="info-box">
-          Falta cargar la <strong>inflación oficial</strong> para poder comparar. Se carga a mano una vez por mes.
+      {faltan > 0 && (
+        <div className="info-box" style={{ background: '#fffaf3', borderColor: '#f3e2cf' }}>
+          {cargados === 0 ? (
+            <>
+              Falta cargar la <strong>inflación oficial</strong> para poder comparar.
+            </>
+          ) : (
+            <>
+              Hay inflación cargada en <strong>{cargados}</strong> de los {inflacionMensual.length} meses del período.
+              {!mensual && baseIdx >= 0 && (
+                <>
+                  {' '}
+                  Por eso el acumulado se compara desde <strong>{cap(mesLargo(canasta.meses[baseIdx] ?? ''))}</strong> y
+                  no desde {cap(mesLargo(canasta.ancla))}: para arrancar en el mes base hay que tener todos los meses
+                  intermedios.
+                </>
+              )}
+            </>
+          )}{' '}
+          <button
+            type="button"
+            onClick={onCargarDatos}
+            style={{ background: 'none', border: 0, padding: 0, color: 'var(--cyan-d)', cursor: 'pointer' }}
+          >
+            Cargar los meses que faltan →
+          </button>
         </div>
       )}
 

@@ -111,3 +111,50 @@ export function inflacionAcumulada(inflacion: Array<number | null>, meses: numbe
   if (tramo.some((v) => v === null || v === undefined)) return null;
   return tramo.reduce<number>((acc, v) => acc * (1 + v!), 1) - 1;
 }
+
+/**
+ * Mueve una serie ACUMULADA a otro mes base, sin recalcularla desde cero:
+ * `nuevo[i] = (1 + viejo[i]) / (1 + viejo[base]) − 1`.
+ * Sirve para comparar la canasta contra la inflación cuando la inflación no cubre todo el
+ * período: se llevan las dos al mismo punto de partida.
+ */
+export function reAnclar(acumulada: Array<number | null>, baseIdx: number): Array<number | null> {
+  const base = acumulada[baseIdx];
+  if (base === null || base === undefined) return acumulada;
+  return acumulada.map((v) => (v === null || v === undefined ? null : (1 + v) / (1 + base) - 1));
+}
+
+/**
+ * Índice del mes base a usar para comparar acumulados.
+ *
+ * El ideal es el ancla del índice (enero), pero solo sirve si hay inflación cargada en todos
+ * los meses desde ahí: con un hueco, el acumulado se corta y la línea desaparece. Si falta
+ * algo, se usa el mes anterior al tramo continuo de inflación que llega hasta el final —
+ * o sea, se compara desde donde efectivamente hay datos.
+ *
+ * Devuelve -1 si no hay ningún mes con inflación cargada.
+ */
+export function baseComparable(inflacionMensual: Array<number | null>, anclaIdx: number): number {
+  const hayDato = (i: number) => inflacionMensual[i] !== null && inflacionMensual[i] !== undefined;
+
+  // ¿Alcanza con el ancla preferida? Necesita datos desde el mes siguiente hasta el final.
+  if (anclaIdx >= 0) {
+    let completa = true;
+    for (let i = anclaIdx + 1; i < inflacionMensual.length; i++) {
+      if (!hayDato(i)) {
+        completa = false;
+        break;
+      }
+    }
+    if (completa && anclaIdx < inflacionMensual.length - 1) return anclaIdx;
+  }
+
+  // Si no, el arranque del último tramo continuo: el mes anterior al primer dato de ese tramo.
+  let inicio = inflacionMensual.length;
+  for (let i = inflacionMensual.length - 1; i >= 0; i--) {
+    if (!hayDato(i)) break;
+    inicio = i;
+  }
+  if (inicio >= inflacionMensual.length) return -1; // no hay inflación cargada
+  return Math.max(0, inicio - 1);
+}

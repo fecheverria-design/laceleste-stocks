@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiGet, descargarArchivo } from '../../shared/api/client';
 import type { Comprador, IndicadorMensual, InformeCompradores, InformePrecios } from '../../shared/api/types';
-import { anclarSerie, cap, fMjs, inflacionAcumulada, mesLargo } from './formato';
+import { cap, fMjs, inflacionAcumulada, mesLargo } from './formato';
 import { SolapaAhorro } from './SolapaAhorro';
 import { SolapaCanasta } from './SolapaCanasta';
 import { SolapaComprador } from './SolapaComprador';
@@ -74,11 +74,9 @@ export function InformePage() {
     const meses = precios.data?.canasta.meses ?? [];
     const porMes = new Map((indicadores.data ?? []).map((i) => [i.periodo, i]));
     const inflacion = meses.map((m) => porMes.get(m)?.inflacion ?? null);
-    const anclaIdx = meses.indexOf(precios.data?.canasta.ancla ?? '');
     return {
       meses,
       inflacion,
-      inflacionAnclada: anclarSerie(inflacion, anclaIdx),
       ventanas: {
         '1': inflacionAcumulada(inflacion, 1),
         '3': inflacionAcumulada(inflacion, 3),
@@ -244,9 +242,16 @@ export function InformePage() {
               control={p.control}
               variaciones={p.variacion_ventanas}
               inflacionVentana={serie.ventanas}
+              onCargarDatos={() => setSolapa('datos')}
             />
           )}
-          {solapa === 'canasta' && p && <SolapaCanasta canasta={p.canasta} inflacion={serie.inflacionAnclada} />}
+          {solapa === 'canasta' && p && (
+            <SolapaCanasta
+              canasta={p.canasta}
+              inflacionMensual={serie.inflacion}
+              onCargarDatos={() => setSolapa('datos')}
+            />
+          )}
           {solapa === 'datos' && <SolapaDatos indicadores={indicadores.data ?? []} />}
 
           <div className="controls" style={{ justifyContent: 'flex-end' }}>
