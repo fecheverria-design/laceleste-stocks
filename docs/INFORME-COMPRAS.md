@@ -116,10 +116,28 @@ muestra la serie de cada producto y duplicarla no aportaba nada. Decisión de J,
 Si el producto se compró en julio pero su último precio cargado es de mayo, "1 mes" compara mayo
 contra abril. Anclarla al mes del informe hacía que el precio de mayo se comparara contra el de
 junio: contra sí mismo (0% falso) o con el signo dado vuelta. Era el bug del gráfico de 1 mes
-(2026-08-03): en julio quedaban 2 barras, las dos en 0%. Hay dos tests que lo fijan.
+(2026-08-03). Hay dos tests que lo fijan.
 
 Cuando el precio usado es de un mes anterior al del informe, la pantalla lo avisa arriba del
-gráfico. En la práctica ese aviso significa **que se compró y el precio nunca se registró**.
+gráfico: o se compró sin registrar el precio, o **la base no tiene el último export de precios**.
+
+> **Antes de culpar a los datos, chequeá que la base esté al día.** El 2026-08-03 se diagnosticó
+> que "en julio los 41 productos A comprados no dejaron precio de compra" y era falso: la base
+> local tenía el export viejo. El CSV del 31/07 traía 456 filas COMPRA de julio y 640 de junio.
+> Se importó y el informe quedó completo: 41 barras, 0 productos con precio atrasado, 0 sin
+> precio de compra. **La clasificación COMPRA/ACTUALIZACION del export de J está bien.**
+
+## Qué precio se toma, exactamente
+
+Lo pedido por J (2026-08-03) y verificado con datos reales:
+
+- **El último precio de tipo COMPRA**, sin importar de qué mes sea.
+- **Si hay varias compras en el mismo mes, la última.** Verificado con BONDIOLA, que en julio
+  2026 tiene compras el 03, el 10 y el 19: el informe toma la del **19/07 ($15.442,64)**.
+
+Lo hacen `preciosUsadosProductosA` (el precio vigente) y `preciosCompraPorMesCargado` (la serie
+mensual), las dos con `DISTINCT ON ... ORDER BY vigente_desde DESC, id DESC`. El `id DESC`
+desempata dos cargas del mismo día: gana la que se cargó después.
 
 ## Lo que falta y por qué
 
