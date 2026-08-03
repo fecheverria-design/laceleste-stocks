@@ -320,3 +320,76 @@ describe('canasta A', () => {
     expect(serie[0]).toBeCloseTo(1 / 1.1 - 1, 5); // hacia atrás se descompone
   });
 });
+
+describe('rebote de una anomalía', () => {
+  const nombres = new Map([['471', 'MARGARINA MTK MASA']]);
+  const precio = (mes: string, monto: number): FilaPrecioMesCargado => ({
+    mes,
+    producto_3c: '471',
+    familia: 'MATERIAS PRIMAS',
+    precio: String(monto),
+  });
+
+  // Caso real: la margarina se cargó en mayo a $23.665 (seis veces su precio) y en junio
+  // volvió a $4.863. La subida imposible ya se excluía; la vuelta entraba como un −79% y
+  // hundía el índice de junio. No es una baja de precio: es la corrección del error.
+  it('excluye también la vuelta, no solo el salto que la produjo', () => {
+    const serie = indexarSerie(
+      [precio('2026-04', 4000), precio('2026-05', 23665), precio('2026-06', 4863)],
+      nombres,
+    );
+    const canasta = armarCanasta(serie, MESES, new Map([['471', 1_000_000]]));
+
+    // Mayo (la ida) y junio (la vuelta) quedan los dos reportados como anomalía.
+    expect(canasta.anomalias.map((a) => a.mes).sort()).toEqual(['2026-05', '2026-06']);
+    // Y ninguno de los dos mueve el índice.
+    expect(canasta.scopes.TOTAL![4]).toBeCloseTo(canasta.scopes.TOTAL![3]!, 6);
+    expect(canasta.scopes.TOTAL![5]).toBeCloseTo(canasta.scopes.TOTAL![4]!, 6);
+  });
+
+  it('una variación normal después de una anomalía vuelve a contar', () => {
+    const serie = indexarSerie(
+      [precio('2026-03', 4000), precio('2026-04', 23665), precio('2026-05', 4000), precio('2026-06', 4400)],
+      nombres,
+    );
+    const canasta = armarCanasta(serie, MESES, new Map([['471', 1_000_000]]));
+    // Junio compara 4000 → 4400 contra un mayo que ya no es sospechoso: +10% cuenta.
+    expect(canasta.contrib.TOTAL!.var_indice).toBeCloseTo(0.1, 6);
+  });
+});
+
+describe('pico aislado con meses de por medio', () => {
+  const nombres = new Map([['471', 'MARGARINA MTK MASA']]);
+  const precio = (mes: string, monto: number): FilaPrecioMesCargado => ({
+    mes,
+    producto_3c: '471',
+    familia: 'MATERIAS PRIMAS',
+    precio: String(monto),
+  });
+
+  // El caso que motivó la regla: valía $2.756, pasó cuatro meses sin compras, apareció a
+  // $23.665 y volvió a $3.910. El salto no se veía porque no había mes anterior contiguo.
+  it('detecta el pico aunque el precio anterior sea de meses atrás', () => {
+    const serie = indexarSerie(
+      [precio('2026-01', 2756), precio('2026-05', 23665), precio('2026-06', 3910)],
+      nombres,
+    );
+    const canasta = armarCanasta(serie, MESES, new Map([['471', 1_000_000]]));
+
+    expect(canasta.anomalias.map((a) => a.mes)).toContain('2026-06');
+    // Junio comparaba contra el precio inflado y daba −79%: ahora no mueve el índice.
+    expect(canasta.contrib.TOTAL!.var_indice).toBe(0);
+  });
+
+  it('no confunde una subida sostenida con un pico', () => {
+    // Sube fuerte y se queda arriba: es un aumento real, tiene que contar.
+    const serie = indexarSerie(
+      [precio('2026-04', 1000), precio('2026-05', 1800), precio('2026-06', 1900)],
+      nombres,
+    );
+    const canasta = armarCanasta(serie, MESES, new Map([['471', 1_000_000]]));
+
+    expect(canasta.anomalias).toHaveLength(0);
+    expect(canasta.contrib.TOTAL!.var_indice).toBeCloseTo(1900 / 1800 - 1, 6);
+  });
+});

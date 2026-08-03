@@ -466,6 +466,51 @@ export function armarCanasta(
       return alcance === 'TOTAL' || (serie.familias.get(p) ?? '').toUpperCase() === alcance;
     });
 
+  // Meses cuyo precio quedó bajo sospecha: los que llegaron con un salto imposible. No se
+  // usan NI como destino NI como base de comparación — si el precio de mayo está mal, la
+  // "baja" de junio contra ese precio tampoco es real, es la corrección del error.
+  //
+  // Sin esto pasaba lo siguiente: MARGARINA MTK MASA cargada en mayo a $23.665 (seis veces
+  // su precio) subía +490% y quedaba excluida, pero en junio volvía a $4.863 y ese −79% SÍ
+  // entraba, hundiendo el índice de junio 2,1 puntos. El filtro atrapaba la ida y dejaba
+  // pasar la vuelta.
+  const sospechosos = new Set<string>();
+  for (const [producto3c, porMes] of serie.precios) {
+    // Los meses que tienen precio, en orden. Los huecos importan: un producto puede pasar
+    // varios meses sin compras.
+    const conPrecio = meses
+      .map((mes, i) => ({ mes, i, precio: porMes.get(mes) }))
+      .filter((x): x is { mes: string; i: number; precio: number } => x.precio !== undefined && x.precio > 0);
+
+    for (let k = 0; k < conPrecio.length; k++) {
+      const actual = conPrecio[k]!;
+      const previo = conPrecio[k - 1];
+      const siguiente = conPrecio[k + 1];
+
+      // 1) Salto contra el mes inmediatamente anterior.
+      if (previo && previo.i === actual.i - 1 && Math.abs(actual.precio / previo.precio - 1) > OUTLIER_MAX) {
+        sospechosos.add(`${producto3c}|${actual.mes}`);
+        continue;
+      }
+
+      // 2) Pico aislado: se dispara respecto del precio anterior Y vuelve con el siguiente,
+      // aunque entre medio haya meses sin compras. Es la firma de un error de carga.
+      //
+      // Caso real: MARGARINA MTK MASA valía $2.756 en diciembre, no se compró en cuatro
+      // meses, apareció a $23.665 en mayo y volvió a $3.910 en junio. Sin esta regla el
+      // pico no se detectaba (no había mes anterior con qué compararlo) y la vuelta entraba
+      // como un −79% que hundía el índice de junio.
+      if (
+        previo &&
+        siguiente &&
+        Math.abs(actual.precio / previo.precio - 1) > OUTLIER_MAX &&
+        Math.abs(actual.precio / siguiente.precio - 1) > OUTLIER_MAX
+      ) {
+        sospechosos.add(`${producto3c}|${actual.mes}`);
+      }
+    }
+  }
+
   const varMensualDe = (alcance: string): number[] => {
     const lista = miembros(alcance);
     const mv = meses.map(() => 0);
@@ -479,7 +524,8 @@ export function armarCanasta(
         if (antes === undefined || ahora === undefined || antes <= 0) continue;
         const v = ahora / antes - 1;
         const g = gastoPorProducto.get(producto3c) ?? 0;
-        if (Math.abs(v) > OUTLIER_MAX) {
+        const baseSospechosa = sospechosos.has(`${producto3c}|${meses[i - 1]}`);
+        if (Math.abs(v) > OUTLIER_MAX || baseSospechosa) {
           // Un salto así casi siempre es dedazo o cambio de unidad: se excluye del índice
           // y se reporta aparte para que alguien lo revise en la hoja de Precios.
           anomalias.set(`${producto3c}|${meses[i]}`, {
@@ -520,7 +566,9 @@ export function armarCanasta(
         const ahora = porMes.get(ultimo);
         if (antes === undefined || ahora === undefined || antes <= 0) continue;
         const v = ahora / antes - 1;
-        if (Math.abs(v) > OUTLIER_MAX) continue;
+        // Misma regla que el índice: ni saltos imposibles ni comparaciones contra un
+        // precio ya marcado como sospechoso.
+        if (Math.abs(v) > OUTLIER_MAX || sospechosos.has(`${producto3c}|${previo}`)) continue;
         const g = gastoPorProducto.get(producto3c) ?? 0;
         total += g;
         crudos.push({ producto3c, g, v });

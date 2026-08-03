@@ -89,8 +89,20 @@ producto no entra: comparar contra un precio de hace medio año no dice nada.
 **Canasta A.** Variación mensual ponderada por gasto (`aporte = peso × var`, con
 `peso = gasto del producto ÷ gasto de la canasta`), anclada a enero 2026 y compuesta hacia
 adelante y hacia atrás. La suma de los aportes es exactamente la variación del índice — hay un
-test que lo fija. Se excluyen las variaciones de más de `OUTLIER_MAX`, que en la práctica son
-dedazos: en mayo 2026 apareció BOLSA DE PAPEL KRAFT NRO 6 con **+82.949%**.
+test que lo fija.
+
+**Cómo se descartan los precios mal cargados.** Un precio erróneo ensucia el índice dos veces:
+cuando aparece y cuando se corrige. Por eso hay dos reglas, y lo que se marca por cualquiera de
+las dos queda fuera del índice **como destino y como base de comparación**:
+
+1. **Salto** contra el mes inmediatamente anterior mayor a `OUTLIER_MAX`.
+2. **Pico aislado**: el precio se dispara respecto del anterior *y* vuelve con el siguiente,
+   aunque entre medio haya meses sin compras.
+
+La segunda regla existe por un caso real: MARGARINA MTK MASA valía $2.756 en diciembre, pasó
+cuatro meses sin compras, apareció a **$23.665** en mayo y volvió a $3.910 en junio. Como no
+había un mes anterior contiguo, el pico no se detectaba; la vuelta entraba como un **−79%** y
+hundía el índice de junio 2,1 puntos (−3,14% cuando era −1,03%).
 
 ⚠ **La serie de precios de compra NO arrastra el último precio conocido.** Un mes sin compra
 queda sin dato, no en 0%: `preciosCompraPorMesCargado` toma el precio *cargado en ese mes*, a
