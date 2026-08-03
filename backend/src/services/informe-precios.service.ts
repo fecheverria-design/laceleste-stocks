@@ -1,9 +1,9 @@
 import { compradorDeFamilia, type Comprador } from '../domain/familias.js';
 import {
-  cotizacionesProductosA,
+  cotizacionesProductos,
   gastoPorProductoDelMes,
   preciosCompraPorMesCargado,
-  preciosUsadosProductosA,
+  preciosUsadosProductos,
   type FilaCotizacion,
   type FilaGastoProducto,
   type FilaPrecioMesCargado,
@@ -56,7 +56,11 @@ const claveProveedor = (id: number | null, nombre: string | null): string =>
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface CotizacionProducto {
+  /** id de la fila de `precios`: la hoja de Control la usa para editarla o marcarla. */
+  precio_id: number;
   proveedor: string;
+  proveedor_id: number | null;
+  tipo: string; // COMPRA | ACTUALIZACION
   precio: number;
   fecha: string;
   dias: number;
@@ -106,7 +110,10 @@ export function armarMatriz(cotizaciones: FilaCotizacion[], usados: FilaPrecioUs
 
     const cots: CotizacionProducto[] = lista
       .map((c) => ({
+        precio_id: c.id,
         proveedor: c.proveedor ?? 'Sin proveedor',
+        proveedor_id: c.proveedor_id,
+        tipo: c.tipo,
         precio: num(c.precio),
         fecha: c.fecha,
         dias: c.dias,
@@ -570,8 +577,8 @@ export async function informePrecios(mes: string, cantidadMeses = 12): Promise<I
   const desde = meses[0]!;
 
   const [cotizaciones, usados, serieCompra, gastos] = await Promise.all([
-    cotizacionesProductosA(),
-    preciosUsadosProductosA(),
+    cotizacionesProductos(),
+    preciosUsadosProductos(),
     preciosCompraPorMesCargado(desde, mes),
     gastoPorProductoDelMes(mes),
   ]);

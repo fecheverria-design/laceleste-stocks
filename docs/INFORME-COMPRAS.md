@@ -163,3 +163,36 @@ línea de comparación de la canasta.
 
 Ver también `docs/IMPORTACION-3C.md` (de dónde salen compras y precios) y los tests en
 `backend/tests/informe.service.test.ts`, que fijan cada una de estas reglas.
+
+## Control de precios (hoja `/control-precios`)
+
+La hoja de trabajo del área de compras: la misma información que la matriz, pero ordenada
+para responder **qué hay que revisar y por qué**. Backend en `services/control-precios.service.ts`,
+endpoint `GET /api/precios/control?abc=A[&familia=]`.
+
+Cada producto trae sus **alertas**, y la lista arranca filtrada por los que tienen alguna,
+ordenada por cantidad de alertas (lo más urgente arriba):
+
+| Alerta | Cuándo | Por qué importa |
+|---|---|---|
+| `SIN_COMPRA` | ningún precio de tipo COMPRA | el informe está usando un fallback |
+| `VENCIDO` | el precio usado tiene más de `DIAS_VENCIDO` | el número que valoriza está viejo |
+| `POCAS_COTIZACIONES` | menos de `OBJETIVO_COTIZACIONES` proveedores vigentes | no hay con qué comparar |
+| `SALTO` | el precio saltó más de `UMBRAL_SALTO` en un mes | casi siempre dedazo o cambio de unidad |
+| `SIN_PROVEEDOR` | el precio usado no tiene proveedor | queda fuera del ahorro y de la cobertura |
+
+Los umbrales **se importan de `informe-precios.service.ts`**, no se repiten: si cambia el
+objetivo de cotizaciones, cambia en la pantalla y en el informe a la vez.
+
+Desde la fila se puede **cargar una cotización con proveedor** y **marcar cuál es el precio de
+compra** (`PUT /api/precios/:id {tipo:'COMPRA'}`), que es el equivalente del tick `Usar`. Gana
+la COMPRA más reciente, así que marcar una fila vieja no la hace ganar sobre una posterior —
+la pantalla muestra al instante cuál quedó vigente.
+
+⚠ **El alta de precios acepta `proveedor_id` desde 2026-08-03.** Antes toda carga manual
+quedaba sin proveedor, y una cotización sin proveedor no se puede comparar contra las de otros:
+no suma a la cobertura ni entra al ahorro potencial.
+
+⚠ **Mientras se siga reimportando `precios - Precios.csv`, la planilla pisa lo que se corrija
+acá** (el upsert va por `producto + proveedor + fecha + tipo`). Para que la app sea la fuente de
+verdad hay que dejar de reimportar precios.

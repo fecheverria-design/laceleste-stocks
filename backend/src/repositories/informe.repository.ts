@@ -150,13 +150,24 @@ export async function mesesConCompras(): Promise<string[]> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Matriz de precios / cotizaciones — solapas "Matriz & Variación" y "Ahorro potencial".
+// Matriz de precios / cotizaciones — solapas "Matriz & Variación" y "Ahorro potencial",
+// y la hoja de Control de precios.
 //
-// La unidad de análisis es el producto de PRIORIDAD A (`clasificacion_abc = 'A'`), igual
-// que el informe de la planilla, que se limita a la hoja Prioridad.
+// Por defecto la unidad de análisis es el producto de PRIORIDAD A, igual que el informe de
+// la planilla (que se limita a la hoja Prioridad). El Control de precios usa el mismo dato
+// pero deja elegir prioridad y familia, porque ahí se trabaja también sobre B y C.
 // ─────────────────────────────────────────────────────────────────────────────
 
+export type FiltroProductos = { abc?: 'A' | 'B' | 'C' | 'TODOS'; familia?: string };
+
+// Condición de prioridad + familia, compartida por todas las consultas de precios.
+function condProductos({ abc = 'A', familia }: FiltroProductos = {}) {
+  return sql`${abc === 'TODOS' ? sql`TRUE` : sql`pr.clasificacion_abc = ${abc}`}
+          ${familia ? sql`AND upper(COALESCE(pr.familia, '')) = upper(${familia})` : sql``}`;
+}
+
 export type FilaCotizacion = {
+  id: number; // id de la fila de `precios`, para poder accionar sobre ella
   producto_3c: string;
   producto: string;
   familia: string | null;
@@ -173,9 +184,10 @@ export type FilaCotizacion = {
 //
 // Una fila por (producto, proveedor): la más reciente. `dias` se calcula en SQL contra
 // CURRENT_DATE para que la antigüedad no dependa del reloj del proceso.
-export async function cotizacionesProductosA(): Promise<FilaCotizacion[]> {
+export async function cotizacionesProductos(filtro?: FiltroProductos): Promise<FilaCotizacion[]> {
   const res = await db.execute<FilaCotizacion>(
     sql`SELECT DISTINCT ON (p.producto_3c, p.proveedor_id)
+               p.id,
                p.producto_3c,
                pr.nombre AS producto,
                pr.familia,
@@ -188,7 +200,7 @@ export async function cotizacionesProductosA(): Promise<FilaCotizacion[]> {
         FROM precios p
         JOIN productos pr ON pr.codigo_3c = p.producto_3c
         LEFT JOIN proveedores pv ON pv.id = p.proveedor_id
-        WHERE pr.clasificacion_abc = 'A'
+        WHERE ${condProductos(filtro)}
           AND p.precio > 0
           AND p.producto_3c NOT IN (${sql.join(
             PRODUCTOS_FICTICIOS.map((cod) => sql`${cod}`),
@@ -212,7 +224,7 @@ export type FilaPrecioUsado = {
   sin_compra: boolean;
 };
 
-export async function preciosUsadosProductosA(): Promise<FilaPrecioUsado[]> {
+export async function preciosUsadosProductos(filtro?: FiltroProductos): Promise<FilaPrecioUsado[]> {
   const res = await db.execute<FilaPrecioUsado>(
     sql`SELECT DISTINCT ON (p.producto_3c)
                p.producto_3c,
@@ -225,7 +237,7 @@ export async function preciosUsadosProductosA(): Promise<FilaPrecioUsado[]> {
         FROM precios p
         JOIN productos pr ON pr.codigo_3c = p.producto_3c
         LEFT JOIN proveedores pv ON pv.id = p.proveedor_id
-        WHERE pr.clasificacion_abc = 'A'
+        WHERE ${condProductos(filtro)}
           AND p.precio > 0
           AND p.producto_3c NOT IN (${sql.join(
             PRODUCTOS_FICTICIOS.map((cod) => sql`${cod}`),
@@ -250,7 +262,11 @@ export type FilaPrecioMesCargado = {
 // adelante. Acá un mes sin compra queda SIN dato, que es lo que hace el script: comparar
 // contra un precio arrastrado daría 0% de variación, y "no compré" no es "no cambió".
 // Lo usan el gráfico de variación 1/3/6m, la canasta A y la detección de saltos.
-export async function preciosCompraPorMesCargado(desde: string, hasta: string): Promise<FilaPrecioMesCargado[]> {
+export async function preciosCompraPorMesCargado(
+  desde: string,
+  hasta: string,
+  filtro?: FiltroProductos,
+): Promise<FilaPrecioMesCargado[]> {
   const res = await db.execute<FilaPrecioMesCargado>(
     sql`SELECT DISTINCT ON (to_char(p.vigente_desde, 'YYYY-MM'), p.producto_3c)
                to_char(p.vigente_desde, 'YYYY-MM') AS mes,
@@ -259,7 +275,7 @@ export async function preciosCompraPorMesCargado(desde: string, hasta: string): 
                p.precio::text
         FROM precios p
         JOIN productos pr ON pr.codigo_3c = p.producto_3c
-        WHERE pr.clasificacion_abc = 'A'
+        WHERE ${condProductos(filtro)}
           AND p.tipo = 'COMPRA'
           AND p.precio > 0
           AND to_char(p.vigente_desde, 'YYYY-MM') BETWEEN ${desde} AND ${hasta}

@@ -385,7 +385,10 @@ export interface EvolucionGasto {
 // vienen como FRACCIÓN (0.12 = +12%); el % se arma en pantalla.
 
 export interface CotizacionProducto {
+  precio_id: number; // fila de `precios`: la hoja de Control la edita o la marca
   proveedor: string;
+  proveedor_id: number | null;
+  tipo: TipoPrecio;
   precio: number;
   fecha: string;
   dias: number;
@@ -471,6 +474,36 @@ export interface Canasta {
   scopes: Record<string, Array<number | null>>;
   contrib: Record<string, Contribucion>;
   anomalias: Array<{ producto: string; familia: string | null; mes: string; de: number; a: number; var: number; gasto: number }>;
+}
+
+// ── Control de precios (hoja de trabajo del área de compras) ─────────────────
+export type AlertaPrecio =
+  | 'SIN_COMPRA'
+  | 'VENCIDO'
+  | 'POCAS_COTIZACIONES'
+  | 'SALTO'
+  | 'SIN_PROVEEDOR';
+
+export interface FilaControlPrecio extends FilaMatriz {
+  alertas: AlertaPrecio[];
+  alternativas_frescas: number;
+  salto: { mes: string; de: number; a: number; var: number } | null;
+}
+
+export interface ControlPrecios {
+  filtro: { abc: string; familia?: string };
+  objetivo_cotizaciones: number;
+  dias_vencido: number;
+  resumen: {
+    productos: number;
+    a_revisar: number;
+    sin_compra: number;
+    vencidos: number;
+    pocas_cotizaciones: number;
+    saltos: number;
+    sin_proveedor: number;
+  };
+  items: FilaControlPrecio[];
 }
 
 export interface InformePrecios {
