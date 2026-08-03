@@ -4,6 +4,9 @@ Módulo de **Movimientos Internos** de La Celeste (panadería/producción de ali
 
 Contexto completo en `docs/ARCHITECTURE.md`. **Leelo antes de proponer estructura o tocar el modelo de datos.**
 
+**`docs/GUIA-DE-LA-APP.md` explica, hoja por hoja y en criollo, de dónde sale cada número.** Es la
+puerta de entrada para J y el mejor lugar para entender qué hace la app antes de tocarla.
+
 ## Stack
 
 ```
