@@ -46,3 +46,33 @@ export function cuentaEnGasto(familia: string | null | undefined, codigo3c: stri
   if (FICTICIOS_SET.has(codigo3c)) return false;
   return !FAMILIAS_GASTO_SET.has((familia ?? '').trim().toUpperCase());
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Quién compra qué (Informe de Compras). NO hace falta un campo "responsable" en
+// productos: se deriva de la familia, igual que el `buyerOf()` del Apps Script de J.
+// Literal del informe: "Lautaro = Materias Primas · Fausto = Packaging, Limpieza,
+// Merchandising, Descartables". Lo que no cae en ninguna lista no suma a ningún
+// comprador (servicios, esporádicos, etc.) y queda fuera del informe.
+// ─────────────────────────────────────────────────────────────────────────────
+export const COMPRADORES = ['Lautaro', 'Fausto'] as const;
+export type Comprador = (typeof COMPRADORES)[number];
+
+export const FAMILIAS_POR_COMPRADOR: Record<Comprador, readonly string[]> = {
+  Lautaro: ['MATERIAS PRIMAS'],
+  Fausto: ['PACKAGING', 'LIMPIEZA', 'MERCHANDISING', 'DESCARTABLES'],
+};
+
+const COMPRADOR_POR_FAMILIA = new Map<string, Comprador>();
+for (const comprador of COMPRADORES) {
+  for (const familia of FAMILIAS_POR_COMPRADOR[comprador]) {
+    COMPRADOR_POR_FAMILIA.set(familia.toUpperCase(), comprador);
+  }
+}
+
+// Comprador al que se le imputa esa familia, o null si no le corresponde a nadie.
+export function compradorDeFamilia(familia: string | null | undefined): Comprador | null {
+  return COMPRADOR_POR_FAMILIA.get((familia ?? '').trim().toUpperCase()) ?? null;
+}
+
+// Todas las familias que tienen comprador (para filtrar en SQL).
+export const FAMILIAS_CON_COMPRADOR = [...COMPRADOR_POR_FAMILIA.keys()];

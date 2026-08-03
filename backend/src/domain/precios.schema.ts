@@ -19,24 +19,47 @@ const fechaYmd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Formato esperado YYYY-
 
 const tipoPrecio = z.enum(['COMPRA', 'ACTUALIZACION']);
 
+// `proveedor_id` es opcional pero importa: sin él, la cotización no se puede comparar contra
+// las de otros proveedores y queda fuera del ahorro potencial y del conteo de cobertura.
+// null es válido y significa "no sabemos de quién es" (así entran los precios viejos).
+const proveedorId = z.number().int().positive().nullable();
+
 export const CrearPrecioSchema = z.object({
   producto_3c: z.string().trim().min(1).max(32),
   precio: monto,
   tipo: tipoPrecio.optional(), // default: COMPRA
   vigente_desde: fechaYmd.optional(), // default: hoy
+  proveedor_id: proveedorId.optional(),
 });
 
 export type CrearPrecioInput = z.infer<typeof CrearPrecioSchema>;
 
-// Editar un precio ya cargado (corregir monto, fecha o tipo). Al menos un campo.
+// Editar un precio ya cargado (corregir monto, fecha, tipo o proveedor). Al menos un campo.
 export const EditarPrecioSchema = z
   .object({
     precio: monto.optional(),
     tipo: tipoPrecio.optional(),
     vigente_desde: fechaYmd.optional(),
+    proveedor_id: proveedorId.optional(),
   })
-  .refine((p) => p.precio !== undefined || p.vigente_desde !== undefined || p.tipo !== undefined, {
-    message: 'Nada para editar: mandá precio, tipo y/o vigente_desde',
-  });
+  .refine(
+    (p) =>
+      p.precio !== undefined ||
+      p.vigente_desde !== undefined ||
+      p.tipo !== undefined ||
+      p.proveedor_id !== undefined,
+    { message: 'Nada para editar: mandá precio, tipo, proveedor y/o vigente_desde' },
+  );
 
 export type EditarPrecioInput = z.infer<typeof EditarPrecioSchema>;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Control de precios: la hoja de trabajo del área de compras. Filtra el maestro por
+// prioridad y familia para armar la lista de lo que hay que revisar.
+// ─────────────────────────────────────────────────────────────────────────────
+export const ControlPreciosQuerySchema = z.object({
+  abc: z.enum(['A', 'B', 'C', 'TODOS']).default('A'),
+  familia: z.string().trim().min(1).optional(),
+});
+
+export type ControlPreciosQuery = z.infer<typeof ControlPreciosQuerySchema>;

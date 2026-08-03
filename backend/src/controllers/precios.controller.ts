@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { AppError, badRequest } from '../domain/errors.js';
 import { dec, enviarCsv } from '../lib/csv.js';
-import { CrearPrecioSchema, EditarPrecioSchema } from '../domain/precios.schema.js';
+import { ControlPreciosQuerySchema, CrearPrecioSchema, EditarPrecioSchema } from '../domain/precios.schema.js';
 import {
   crearPrecio,
   editarPrecio,
@@ -11,6 +11,7 @@ import {
   obtenerPreciosVigentes,
   obtenerValorizacionStock,
 } from '../services/precios.service.js';
+import { controlDePrecios } from '../services/control-precios.service.js';
 
 const IdParamSchema = z.object({ id: z.coerce.number().int().positive() });
 const PreciosCsvQuerySchema = z.object({ familia: z.string().trim().min(1).max(64).optional() });
@@ -19,6 +20,16 @@ const ProductoParamSchema = z.object({ codigo: z.string().trim().min(1).max(32) 
 // GET /api/precios — precio vigente por producto (incluye los sin precio).
 export async function getPrecios(_req: Request, res: Response): Promise<void> {
   res.status(200).json(await obtenerPreciosVigentes());
+}
+
+// GET /api/precios/control?abc=A[&familia=] — la hoja de trabajo del área de compras:
+// cada producto con sus cotizaciones y por qué hay que revisarlo.
+export async function getControlPrecios(req: Request, res: Response): Promise<void> {
+  const parsed = ControlPreciosQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    throw badRequest('VALIDACION', z.prettifyError(parsed.error));
+  }
+  res.status(200).json(await controlDePrecios(parsed.data));
 }
 
 // GET /api/precios/export.csv — el precio vigente de cada producto, para Excel.

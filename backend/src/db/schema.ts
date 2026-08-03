@@ -297,3 +297,25 @@ export const inventarioLineas = pgTable(
     uniqueIndex('uq_inv_linea').on(t.inventarioId, t.producto3c),
   ],
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Indicadores mensuales de carga manual: ventas del mes e inflación oficial.
+//
+// No salen de 3c ni de ningún sync — los carga el área de compras a principio de mes
+// (decisión de J, 2026-08-03). Van juntos en una fila porque se cargan juntos, en la misma
+// pantalla y de una sentada; separarlos en dos tablas solo duplicaría el ABM.
+//
+// Los dos campos son nullable a propósito: podés tener la inflación publicada y todavía no
+// el cierre de ventas, o al revés. NULL es "no lo sé", y el informe lo muestra como "—" en
+// vez de inventar un cero.
+// ─────────────────────────────────────────────────────────────────────────────
+export const indicadoresMensuales = pgTable('indicadores_mensuales', {
+  periodo: varchar('periodo', { length: 7 }).primaryKey(), // 'YYYY-MM'
+  ventas: numeric('ventas', { precision: 16, scale: 2 }), // ventas totales del mes
+  // FRACCIÓN, no porcentaje: 0.025 = 2,5%. Igual que todas las variaciones de la app.
+  inflacion: numeric('inflacion', { precision: 8, scale: 6 }),
+  usuarioId: integer('usuario_id')
+    .notNull()
+    .references(() => usuarios.id),
+  actualizadoEn: timestamp('actualizado_en', { withTimezone: true }).notNull().defaultNow(),
+});

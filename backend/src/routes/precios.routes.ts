@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   deletePrecio,
+  getControlPrecios,
   getHistorialPrecios,
   getPrecios,
   getPreciosCsv,
@@ -14,6 +15,8 @@ export const preciosRouter = Router();
 
 // Precios de productos (historial con fecha de vigencia). Todo requiere login.
 preciosRouter.get('/precios', requireAuth, getPrecios);
+// Antes que cualquier ruta con parámetro, para que 'control' no se lea como un id.
+preciosRouter.get('/precios/control', requireAuth, getControlPrecios);
 preciosRouter.get('/precios/export.csv', requireAuth, getPreciosCsv);
 preciosRouter.get('/valorizacion', requireAuth, getValorizacion);
 preciosRouter.get('/productos/:codigo/precios', requireAuth, getHistorialPrecios);
