@@ -2,8 +2,14 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { AppError, badRequest } from '../domain/errors.js';
 import { dec, enviarCsv } from '../lib/csv.js';
-import { ControlPreciosQuerySchema, CrearPrecioSchema, EditarPrecioSchema } from '../domain/precios.schema.js';
 import {
+  ControlarPrecioSchema,
+  ControlPreciosQuerySchema,
+  CrearPrecioSchema,
+  EditarPrecioSchema,
+} from '../domain/precios.schema.js';
+import {
+  controlarPrecio,
   crearPrecio,
   editarPrecio,
   eliminarPrecio,
@@ -48,7 +54,18 @@ export async function getPreciosCsv(req: Request, res: Response): Promise<void> 
   enviarCsv(
     res,
     'precios.csv',
-    ['Codigo', 'Producto', 'Familia', 'Unidad', 'Precio', 'Vigente desde', 'Tipo', 'Proveedor ID', 'Proveedor'],
+    [
+      'Codigo',
+      'Producto',
+      'Familia',
+      'Unidad',
+      'Precio',
+      'Vigente desde',
+      'Tipo',
+      'Controlado',
+      'Proveedor ID',
+      'Proveedor',
+    ],
     filas.map((p) => [
       p.producto_3c,
       p.producto_nombre,
@@ -57,6 +74,7 @@ export async function getPreciosCsv(req: Request, res: Response): Promise<void> 
       p.precio ? dec(p.precio) : '',
       p.vigente_desde ?? '',
       p.tipo ?? '',
+      p.controlado ? 'SI' : '',
       p.proveedor_numero_3c ?? '',
       p.proveedor_nombre ?? '',
     ]),
@@ -102,6 +120,24 @@ export async function putPrecio(req: Request, res: Response): Promise<void> {
     throw badRequest('VALIDACION', z.prettifyError(bodyParsed.error));
   }
   const precio = await editarPrecio(idParsed.data.id, bodyParsed.data);
+  res.status(200).json(precio);
+}
+
+// PUT /api/precios/:id/controlado — marcar/desmarcar el precio controlado del producto.
+// Cualquier usuario logueado, igual que cargar o corregir un precio.
+export async function putPrecioControlado(req: Request, res: Response): Promise<void> {
+  const idParsed = IdParamSchema.safeParse(req.params);
+  if (!idParsed.success) {
+    throw badRequest('VALIDACION', z.prettifyError(idParsed.error));
+  }
+  const bodyParsed = ControlarPrecioSchema.safeParse(req.body);
+  if (!bodyParsed.success) {
+    throw badRequest('VALIDACION', z.prettifyError(bodyParsed.error));
+  }
+  if (!req.user) {
+    throw new AppError('NO_AUTENTICADO', 'Falta autenticación', 401);
+  }
+  const precio = await controlarPrecio(idParsed.data.id, bodyParsed.data, { usuarioId: req.user.id });
   res.status(200).json(precio);
 }
 

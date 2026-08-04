@@ -1,11 +1,12 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { precios, productos, proveedores } from '../db/schema.js';
+import { esControlado, ordenPrecio } from './precio-vigente.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Acceso a datos de precios. Un producto puede tener precio de varios proveedores;
-// el "precio vigente" es el de vigente_desde más reciente <= hoy entre todos ellos
-// (decisión de J: el más nuevo gana). El historial completo alimenta el gráfico.
+// Acceso a datos de precios. Un producto puede tener precio de varios proveedores y
+// varias fechas; cuál de todos es "el precio vigente" lo decide `ordenPrecio()`
+// (ver precio-vigente.ts). El historial completo alimenta el gráfico.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type FilaPrecioVigente = {
@@ -16,14 +17,15 @@ export type FilaPrecioVigente = {
   precio: string | null; // null = producto sin precio cargado
   vigente_desde: string | null;
   tipo: string | null; // 'COMPRA' | 'ACTUALIZACION' del precio vigente
+  controlado: boolean | null; // el precio vigente es el marcado a mano por compras
   precio_id: number | null;
   proveedor_nombre: string | null;
   proveedor_numero_3c: number | null;
 };
 
 // Precio vigente por producto (incluye productos sin precio: precio = null).
-// El LATERAL prioriza la última COMPRA (lo que se pagó); si nunca hubo compra, cae a
-// la última ACTUALIZACION como referencia. precio > 0 (un 0 = sin precio real).
+// El LATERAL aplica la prelación de `ordenPrecio()`: controlado > última compra >
+// última actualización. precio > 0 (un 0 = sin precio real).
 export async function listarPreciosVigentes(): Promise<FilaPrecioVigente[]> {
   const res = await db.execute<FilaPrecioVigente>(
     sql`SELECT
@@ -35,15 +37,15 @@ export async function listarPreciosVigentes(): Promise<FilaPrecioVigente[]> {
           v.vigente_desde::text AS vigente_desde,
           v.tipo AS tipo,
           v.id AS precio_id,
+          v.controlado AS controlado,
           prov.nombre AS proveedor_nombre,
           prov.numero_3c AS proveedor_numero_3c
         FROM productos p
         LEFT JOIN LATERAL (
-          SELECT id, precio, vigente_desde, tipo, proveedor_id
+          SELECT id, precio, vigente_desde, tipo, proveedor_id, ${esControlado()} AS controlado
           FROM precios
           WHERE producto_3c = p.codigo_3c AND vigente_desde <= current_date AND precio > 0
-          -- COMPRA manda sobre ACTUALIZACION; dentro de cada grupo, la más reciente.
-          ORDER BY (tipo = 'COMPRA') DESC, vigente_desde DESC, id DESC
+          ORDER BY ${ordenPrecio()}
           LIMIT 1
         ) v ON TRUE
         LEFT JOIN proveedores prov ON prov.id = v.proveedor_id
@@ -101,6 +103,8 @@ export interface PrecioRow {
   precio: string;
   tipo: string;
   vigente_desde: string;
+  controlado_en: string | null;
+  controlado_por: number | null;
   usuario_id: number;
   creado_en: string;
 }
@@ -112,6 +116,8 @@ const selectPrecio = {
   precio: precios.precio,
   tipo: precios.tipo,
   vigente_desde: precios.vigenteDesde,
+  controlado_en: sql<string | null>`${precios.controladoEn}::text`,
+  controlado_por: precios.controladoPor,
   usuario_id: precios.usuarioId,
   creado_en: sql<string>`${precios.creadoEn}::text`,
 };
@@ -154,6 +160,43 @@ export async function actualizarPrecio(
   if (cambios.vigenteDesde !== undefined) set.vigenteDesde = cambios.vigenteDesde;
   if (cambios.proveedorId !== undefined) set.proveedorId = cambios.proveedorId;
   const [row] = await db.update(precios).set(set).where(eq(precios.id, id)).returning(selectPrecio);
+  return row;
+}
+
+// Marca una fila como EL precio controlado del producto. Transaccional y excluyente: el
+// producto no puede tener dos, así que marcar uno desmarca el anterior en el mismo paso
+// (el índice parcial `uq_precio_controlado_producto` lo garantiza también a nivel DB, pero
+// si desmarcáramos después de marcar el índice explotaría en el medio).
+export async function marcarControlado(id: number, usuarioId: number): Promise<PrecioRow | undefined> {
+  return db.transaction(async (tx) => {
+    const [actual] = await tx
+      .select({ producto3c: precios.producto3c })
+      .from(precios)
+      .where(eq(precios.id, id))
+      .limit(1);
+    if (!actual) return undefined;
+
+    await tx
+      .update(precios)
+      .set({ controladoEn: null, controladoPor: null })
+      .where(and(eq(precios.producto3c, actual.producto3c), sql`${precios.controladoEn} IS NOT NULL`));
+
+    const [row] = await tx
+      .update(precios)
+      .set({ controladoEn: new Date(), controladoPor: usuarioId })
+      .where(eq(precios.id, id))
+      .returning(selectPrecio);
+    return row;
+  });
+}
+
+// Saca la marca: el producto vuelve a la regla automática (última compra).
+export async function desmarcarControlado(id: number): Promise<PrecioRow | undefined> {
+  const [row] = await db
+    .update(precios)
+    .set({ controladoEn: null, controladoPor: null })
+    .where(eq(precios.id, id))
+    .returning(selectPrecio);
   return row;
 }
 

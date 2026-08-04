@@ -189,10 +189,13 @@ export const movimientosAuditoria = pgTable(
 
 // Historial de precios por producto. Una fila = un precio de un proveedor en una fecha,
 // con un TIPO: COMPRA (lo que efectivamente se pagó) o ACTUALIZACION (precio de lista
-// del proveedor). El "precio vigente" es la última COMPRA (decisión de J: la compra es
-// el costo real); si nunca hubo compra, cae a la última actualización como referencia.
-// El gráfico de evolución usa solo las COMPRA. proveedor_id nullable (carga manual).
+// del proveedor). proveedor_id nullable (carga manual).
 // Cargar un precio = fila nueva; corregir = editar/borrar. Audita quién lo cargó (regla #7).
+//
+// Cuál de todas es "el precio del producto" lo decide `ordenPrecio()`
+// (repositories/precio-vigente.ts), que es la ÚNICA definición de la prelación:
+// el precio CONTROLADO a mano gana; si no hay, la última COMPRA; si nunca hubo compra,
+// la última ACTUALIZACION como referencia.
 export const precios = pgTable(
   'precios',
   {
@@ -204,6 +207,12 @@ export const precios = pgTable(
     precio: numeric('precio', { precision: 14, scale: 4 }).notNull(), // ARS, hasta 4 decimales
     tipo: varchar('tipo', { length: 16 }).notNull().default('COMPRA'), // 'COMPRA' | 'ACTUALIZACION'
     vigenteDesde: date('vigente_desde').notNull(), // fecha del precio (compra o actualización)
+    // Marca manual de "este es EL precio de este producto" (decisión de J 2026-08-04: lo que
+    // marca compras es la verdad absoluta, porque tanto una compra como una actualización
+    // pueden ser un error de carga). Es independiente del `tipo`: una ACTUALIZACION marcada
+    // sigue siendo una actualización, pero manda. Uno solo por producto (índice parcial).
+    controladoEn: timestamp('controlado_en', { withTimezone: true }),
+    controladoPor: integer('controlado_por').references(() => usuarios.id),
     usuarioId: integer('usuario_id')
       .notNull()
       .references(() => usuarios.id),
@@ -214,6 +223,10 @@ export const precios = pgTable(
     // Un registro por (producto, proveedor, fecha, tipo): permite compra y actualización
     // el mismo día y varios proveedores; hace idempotente la importación (upsert por esta clave).
     uniqueIndex('uq_precio_prod_prov_fecha_tipo').on(t.producto3c, t.proveedorId, t.vigenteDesde, t.tipo),
+    // Un solo precio controlado por producto: marcar uno nuevo desmarca el anterior.
+    uniqueIndex('uq_precio_controlado_producto')
+      .on(t.producto3c)
+      .where(sql`${t.controladoEn} IS NOT NULL`),
     check('chk_precio_positivo', sql`${t.precio} >= 0`),
   ],
 );

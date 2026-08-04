@@ -53,6 +53,15 @@ export const EditarPrecioSchema = z
 
 export type EditarPrecioInput = z.infer<typeof EditarPrecioSchema>;
 
+// Marcar/desmarcar el precio CONTROLADO de un producto: el que el área de compras eligió
+// a mano como verdad. No toca el `tipo` — una actualización marcada sigue siendo una
+// actualización, pero le gana a la última compra. Uno solo por producto.
+export const ControlarPrecioSchema = z.object({
+  controlado: z.boolean(),
+});
+
+export type ControlarPrecioInput = z.infer<typeof ControlarPrecioSchema>;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Control de precios: la hoja de trabajo del área de compras. Filtra el maestro por
 // prioridad y familia para armar la lista de lo que hay que revisar.

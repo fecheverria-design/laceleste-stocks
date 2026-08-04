@@ -35,6 +35,9 @@ function cot(over: Partial<FilaCotizacion> = {}): FilaCotizacion {
     precio: '1000',
     fecha: '2026-06-10',
     tipo: 'COMPRA',
+    controlado: false,
+    controlado_en: null,
+    controlado_por: null,
     dias: 10,
     ...over,
   };
@@ -43,11 +46,16 @@ function cot(over: Partial<FilaCotizacion> = {}): FilaCotizacion {
 function usado(over: Partial<FilaPrecioUsado> = {}): FilaPrecioUsado {
   return {
     producto_3c: '460',
+    precio_id: 0, // 0 = no coincide con ninguna cotización listada → cae al match por proveedor
     proveedor_id: 1,
     proveedor: 'FUENTES S.A.',
     precio: '1000',
     fecha: '2026-06-10',
     dias: 10,
+    tipo: 'COMPRA',
+    controlado: false,
+    controlado_en: null,
+    controlado_por: null,
     sin_compra: false,
     ...over,
   };
@@ -96,6 +104,63 @@ describe('matriz de precios', () => {
     const matriz = armarMatriz([cot()], [usado({ sin_compra: true })]);
     expect(matriz[0]!.sin_compra).toBe(true);
     expect(armarControl(matriz, indexarSerie([], new Map()), MESES).sin_compra).toHaveLength(1);
+  });
+});
+
+// El precio CONTROLADO: la fila que el área de compras marcó a mano. Le gana a la regla
+// automática y NO cambia la categoría — el caso de J es una actualización marcada porque
+// la compra real fue hace seis meses y todavía queda stock de esa compra.
+describe('precio controlado a mano', () => {
+  it('una ACTUALIZACION marcada es el precio usado y sigue siendo actualización', () => {
+    const marcada = cot({
+      proveedor_id: 2,
+      proveedor: 'OTRO',
+      precio: '1300',
+      tipo: 'ACTUALIZACION',
+      controlado: true,
+      controlado_en: '2026-08-04 10:00:00+00',
+      controlado_por: 'Fausto',
+    });
+    const matriz = armarMatriz(
+      [cot({ proveedor_id: 1, proveedor: 'FUENTES', precio: '1000' }), marcada],
+      [
+        usado({
+          precio_id: marcada.id,
+          proveedor_id: 2,
+          proveedor: 'OTRO',
+          precio: '1300',
+          tipo: 'ACTUALIZACION',
+          controlado: true,
+          controlado_en: '2026-08-04 10:00:00+00',
+          controlado_por: 'Fausto',
+          sin_compra: false,
+        }),
+      ],
+    );
+
+    const fila = matriz[0]!;
+    expect(fila.precio).toBe(1300);
+    expect(fila.controlado).toBe(true);
+    expect(fila.controlado_por).toBe('Fausto');
+    // La marca no le miente a la categoría: sigue diciendo que es una actualización.
+    expect(fila.cotizaciones.find((c) => c.es_usado)!.tipo).toBe('ACTUALIZACION');
+    // Y no se reporta como "sin precio de compra": no es un fallback, es una decisión.
+    expect(fila.sin_compra).toBe(false);
+  });
+
+  it('la fila usada se identifica por id, aunque el proveedor tenga otra cotización', () => {
+    // Mismo proveedor, dos filas: la vieja está marcada, la nueva no. Sin el match por id
+    // las dos quedaban con el tilde de "es el precio que se usa".
+    const vieja = cot({ precio: '900', fecha: '2026-02-01', dias: 180, controlado: true });
+    const nueva = cot({ precio: '1200', fecha: '2026-07-01', dias: 30 });
+    const matriz = armarMatriz(
+      [vieja, nueva],
+      [usado({ precio_id: vieja.id, precio: '900', fecha: '2026-02-01', dias: 180, controlado: true })],
+    );
+
+    const usadas = matriz[0]!.cotizaciones.filter((c) => c.es_usado);
+    expect(usadas).toHaveLength(1);
+    expect(usadas[0]!.precio).toBe(900);
   });
 });
 

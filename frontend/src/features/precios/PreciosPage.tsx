@@ -526,7 +526,18 @@ export function PreciosPage() {
                           <span className="text-slate-900">{money.format(Number(f.precio))}</span>
                         )}
                       </td>
-                      <td className="px-4 py-3">{f.tipo ? <TipoBadge tipo={f.tipo} /> : null}</td>
+                      <td className="px-4 py-3">
+                        {f.tipo ? <TipoBadge tipo={f.tipo} /> : null}
+                        {/* Marcado a mano en Control de precios: manda sobre la categoría. */}
+                        {f.controlado && (
+                          <span
+                            title="Precio marcado a mano en Control de precios: es el que usa la app, sea compra o actualización."
+                            className="ml-1 inline-flex rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200"
+                          >
+                            controlado
+                          </span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-slate-600">
                         {f.vigente_desde ? fechaCorta(f.vigente_desde) : '—'}
                       </td>
