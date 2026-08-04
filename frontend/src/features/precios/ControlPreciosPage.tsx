@@ -12,8 +12,11 @@ import type { AlertaPrecio, ControlPrecios, FilaControlPrecio, TipoPrecio } from
 // cargar la cotización de un proveedor, o marcar cuál es el precio al que se compra.
 // Lo que se toca acá mueve el informe en la siguiente carga, sin reimportar nada.
 //
-// El precio que manda es el último de tipo COMPRA. "Marcar como precio de compra" es el
-// equivalente del tick `Usar` de la planilla.
+// "Usar este precio" es el tick `Usar` de la planilla: marca esa fila como EL precio del
+// producto, sea compra o actualización, y NO le cambia la categoría. Antes elegir un
+// precio obligaba a pasarlo a COMPRA, o sea a mentir sobre qué era; y una actualización
+// legítima —la compra fue hace seis meses y todavía queda stock— no se podía elegir sin
+// eso. Si no hay ninguna marcada sigue mandando la última compra, como siempre.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const ars = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 2 });
@@ -49,6 +52,8 @@ const ETIQUETA_ALERTA: Record<AlertaPrecio, { texto: string; clase: string; ayud
 const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 const mesLargo = (m: string) => `${MESES[Number(m.split('-')[1]) - 1] ?? m} ${m.split('-')[0]}`;
 const hoyYmd = () => new Date().toISOString().slice(0, 10);
+// `controlado_en` viene como timestamp; para el cartelito alcanza el día.
+const fechaCorta = (ts: string) => ts.slice(0, 10).split('-').reverse().join('/');
 
 function Chip({ alerta }: { alerta: AlertaPrecio }) {
   const e = ETIQUETA_ALERTA[alerta];
@@ -241,6 +246,16 @@ function FilaProducto({
         </td>
         <td className="px-4 py-2.5 text-right tabular-nums text-slate-900">
           {item.precio === null ? '—' : ars.format(item.precio)}
+          {item.controlado && (
+            <span
+              title={`Precio marcado a mano${item.controlado_por ? ` por ${item.controlado_por}` : ''}${
+                item.controlado_en ? ` el ${fechaCorta(item.controlado_en)}` : ''
+              }`}
+              className="ml-1 text-emerald-600"
+            >
+              ✓
+            </span>
+          )}
           {item.dias !== null && (
             <span className="block text-xs text-slate-400">hace {item.dias} días</span>
           )}
@@ -329,10 +344,12 @@ function DetalleProducto({ item }: { item: FilaControlPrecio }) {
     onError: (e: Error) => setError(e.message),
   });
 
-  // El "tick Usar" de la planilla: pasar esa cotización a tipo COMPRA. Gana la más
-  // reciente entre las de compra, así que si hay una posterior el precio no cambia.
+  // El "tick Usar" de la planilla. NO cambia la categoría de la fila: una actualización
+  // marcada sigue siendo una actualización, pero pasa a ser EL precio del producto y le
+  // gana a la última compra. Uno solo por producto: marcar otro desmarca el anterior.
   const marcar = useMutation({
-    mutationFn: (precioId: number) => apiPut(`/api/precios/${precioId}`, { tipo: 'COMPRA' }),
+    mutationFn: ({ precioId, controlado }: { precioId: number; controlado: boolean }) =>
+      apiPut(`/api/precios/${precioId}/controlado`, { controlado }),
     onSuccess: invalidar,
     onError: (e: Error) => setError(e.message),
   });
@@ -350,9 +367,13 @@ function DetalleProducto({ item }: { item: FilaControlPrecio }) {
       )}
 
       <div>
-        <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+        <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
           Última cotización de cada proveedor
         </h4>
+        <p className="mb-2 text-xs text-slate-400">
+          El ✓ es el precio que usa la app. «Usar este precio» fija cualquiera de estas filas como el precio del
+          producto —aunque sea una actualización— y no le cambia la categoría. Sin marca manda la última compra.
+        </p>
         {item.cotizaciones.length === 0 ? (
           <p className="text-sm text-slate-500">Sin cotizaciones cargadas.</p>
         ) : (
@@ -384,19 +405,29 @@ function DetalleProducto({ item }: { item: FilaControlPrecio }) {
                     >
                       {c.tipo === 'COMPRA' ? 'compra' : 'actualización'}
                     </span>
+                    {c.controlado && (
+                      <span
+                        title={`Marcado a mano como el precio de este producto${
+                          c.controlado_por ? ` por ${c.controlado_por}` : ''
+                        }${c.controlado_en ? ` el ${fechaCorta(c.controlado_en)}` : ''}`}
+                        className="ml-2 inline-flex rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200"
+                      >
+                        controlado
+                      </span>
+                    )}
                     {!c.vigente && <span className="ml-2 text-xs text-rose-600">vencida</span>}
                   </td>
                   <td className="py-2 text-right">
-                    {!c.es_usado && c.tipo !== 'COMPRA' && (
-                      <button
-                        type="button"
-                        className={CLS_BOTON}
-                        disabled={marcar.isPending}
-                        onClick={() => marcar.mutate(c.precio_id)}
-                      >
-                        Marcar como precio de compra
-                      </button>
-                    )}
+                    {/* Se puede marcar cualquier fila, sea compra o actualización: la marca
+                        es la decisión de compras y le gana a la categoría. */}
+                    <button
+                      type="button"
+                      className={CLS_BOTON}
+                      disabled={marcar.isPending}
+                      onClick={() => marcar.mutate({ precioId: c.precio_id, controlado: !c.controlado })}
+                    >
+                      {c.controlado ? 'Quitar la marca' : 'Usar este precio'}
+                    </button>
                   </td>
                 </tr>
               ))}

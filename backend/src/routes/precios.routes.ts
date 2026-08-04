@@ -8,6 +8,7 @@ import {
   getValorizacion,
   postPrecio,
   putPrecio,
+  putPrecioControlado,
 } from '../controllers/precios.controller.js';
 import { requireAuth } from '../middleware/auth.js';
 
@@ -22,4 +23,6 @@ preciosRouter.get('/valorizacion', requireAuth, getValorizacion);
 preciosRouter.get('/productos/:codigo/precios', requireAuth, getHistorialPrecios);
 preciosRouter.post('/precios', requireAuth, postPrecio);
 preciosRouter.put('/precios/:id', requireAuth, putPrecio);
+// Marcar/desmarcar EL precio del producto (independiente del tipo de la fila).
+preciosRouter.put('/precios/:id/controlado', requireAuth, putPrecioControlado);
 preciosRouter.delete('/precios/:id', requireAuth, deletePrecio);

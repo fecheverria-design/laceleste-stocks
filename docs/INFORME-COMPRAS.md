@@ -27,10 +27,10 @@ pero le faltan los ratios. Objetivos y Plan de acción quedaron para más adelan
 
 ## Las fórmulas
 
-**Precio del mes** = el **precio VIGENTE al cierre de ese mes**: la última fila de `precios` de
-tipo `COMPRA` con `vigente_desde <= fin de mes` (el "tick `Usar`" del script). Si un producto
-nunca tuvo COMPRA, cae a la última `ACTUALIZACION`, igual que el precio vigente del resto de la
-app. **Sale de la tabla `precios`, no de las compras** — por eso corregir un precio a mano en la
+**Precio del mes** = el **precio VIGENTE al cierre de ese mes**: entre las filas de `precios` con
+`vigente_desde <= fin de mes`, la que gana la prelación de `ordenPrecio()` — la controlada a
+mano, si no la última de tipo `COMPRA` (el "tick `Usar`" del script), si no la última
+`ACTUALIZACION`. Es el mismo criterio que el precio vigente del resto de la app. **Sale de la tabla `precios`, no de las compras** — por eso corregir un precio a mano en la
 hoja de Precios mueve el informe en la corrida siguiente, sin reimportar nada.
 
 Al lado se muestra **`precio_pagado`**: el promedio de lo que efectivamente se pagó ese mes
@@ -66,8 +66,9 @@ rojo/verde como las de precio.
 Todo lo que sigue sale de la tabla `precios` y se limita a los productos con
 `clasificacion_abc = 'A'`, igual que la hoja Prioridad del original.
 
-**El precio de compra** ("tick `Usar`") = la última fila de tipo `COMPRA`. Si un producto nunca
-tuvo COMPRA cae a la última `ACTUALIZACION` y se lo reporta en el control de datos.
+**El precio de compra** ("tick `Usar`") = el **controlado a mano** si lo hay; si no, la última
+fila de tipo `COMPRA`. Si un producto nunca tuvo COMPRA cae a la última `ACTUALIZACION` y se lo
+reporta en el control de datos. Ver «El precio controlado» más abajo.
 
 Los umbrales, todos del script y todos exportados como constantes para no repetirlos:
 
@@ -143,9 +144,32 @@ gráfico: o se compró sin registrar el precio, o **la base no tiene el último 
 
 Lo pedido por J (2026-08-03) y verificado con datos reales:
 
-- **El último precio de tipo COMPRA**, sin importar de qué mes sea.
+- **El precio CONTROLADO**, si el área de compras marcó uno a mano. Le gana a todo, sea COMPRA o
+  ACTUALIZACION (agregado 2026-08-04, ver abajo).
+- Si no hay ninguno marcado, **el último precio de tipo COMPRA**, sin importar de qué mes sea.
 - **Si hay varias compras en el mismo mes, la última.** Verificado con BONDIOLA, que en julio
   2026 tiene compras el 03, el 10 y el 19: el informe toma la del **19/07 ($15.442,64)**.
+
+**La prelación completa vive en un solo lugar**: `ordenPrecio()` en
+`repositories/precio-vigente.ts`. Estaba copiada en seis queries (precios vigentes, valorización
+del panel, consumos, matriz del informe, precio usado y serie mensual); ahora las seis la
+importan, así que cambiarla sigue siendo un solo archivo.
+
+### El precio controlado (2026-08-04)
+
+Hasta acá, elegir el precio de un producto en la pantalla de Control lo pasaba a `tipo='COMPRA'`:
+para elegirlo había que mentir sobre qué era, y una actualización legítima no se podía elegir sin
+eso. **Decisión de J:** lo que marca compras es la verdad absoluta —tanto una compra como una
+actualización pueden ser un error de carga—, así que la marca es un campo propio
+(`precios.controlado_en` / `controlado_por`), independiente del tipo, y le gana a la regla
+automática **en todos lados**: precio vigente, valorización del panel, consumos, matriz del
+informe y la serie mensual que alimenta la canasta A, la variación 1/3/6m y la detección de
+saltos. Un índice parcial (`uq_precio_controlado_producto`) garantiza uno solo por producto.
+
+En la serie mensual esto significa que una fila marcada entra **aunque sea ACTUALIZACION**, y que
+dentro de su mes le gana a la compra que hubiera. El resto de los meses sigue igual: solo compras
+reales, y un mes sin compra sigue quedando **sin dato** (comparar contra un precio arrastrado
+daría 0% de variación, y "no compré" no es "no cambió").
 
 Lo hacen `preciosUsadosProductosA` (el precio vigente) y `preciosCompraPorMesCargado` (la serie
 mensual), las dos con `DISTINCT ON ... ORDER BY vigente_desde DESC, id DESC`. El `id DESC`
@@ -202,8 +226,8 @@ ordenada por cantidad de alertas (lo más urgente arriba):
 
 | Alerta | Cuándo | Por qué importa |
 |---|---|---|
-| `SIN_COMPRA` | ningún precio de tipo COMPRA | el informe está usando un fallback |
-| `VENCIDO` | el precio usado tiene más de `DIAS_VENCIDO` | el número que valoriza está viejo |
+| `SIN_COMPRA` | ningún precio de tipo COMPRA **y ninguno controlado** | el informe está usando un fallback |
+| `VENCIDO` | el precio usado tiene más de `DIAS_VENCIDO` (controlado o no) | el número que valoriza está viejo |
 | `POCAS_COTIZACIONES` | menos de `OBJETIVO_COTIZACIONES` proveedores vigentes | no hay con qué comparar |
 | `SALTO` | el precio saltó más de `UMBRAL_SALTO` en un mes | casi siempre dedazo o cambio de unidad |
 | `SIN_PROVEEDOR` | el precio usado no tiene proveedor | queda fuera del ahorro y de la cobertura |
@@ -211,10 +235,16 @@ ordenada por cantidad de alertas (lo más urgente arriba):
 Los umbrales **se importan de `informe-precios.service.ts`**, no se repiten: si cambia el
 objetivo de cotizaciones, cambia en la pantalla y en el informe a la vez.
 
-Desde la fila se puede **cargar una cotización con proveedor** y **marcar cuál es el precio de
-compra** (`PUT /api/precios/:id {tipo:'COMPRA'}`), que es el equivalente del tick `Usar`. Gana
-la COMPRA más reciente, así que marcar una fila vieja no la hace ganar sobre una posterior —
-la pantalla muestra al instante cuál quedó vigente.
+Desde la fila se puede **cargar una cotización con proveedor** y **marcar cuál es el precio del
+producto** (`PUT /api/precios/:id/controlado {controlado:true|false}`), que es el equivalente del
+tick `Usar`. Se puede marcar **cualquier fila, sea COMPRA o ACTUALIZACION**, y la marca **no le
+cambia el `tipo`**. Una sola por producto: marcar otra desmarca la anterior en la misma
+transacción, y sacarle la marca devuelve el producto a la regla automática.
+
+Ojo con el efecto en las alertas: un precio controlado **deja de reportarse como `SIN_COMPRA`**
+(no es un fallback, es una decisión) pero **sigue disparando `VENCIDO`** si tiene más de
+`DIAS_VENCIDO` — decisión explícita de J, porque el caso típico de marcar a mano es justamente
+un precio viejo.
 
 ⚠ **El alta de precios acepta `proveedor_id` desde 2026-08-03.** Antes toda carga manual
 quedaba sin proveedor, y una cotización sin proveedor no se puede comparar contra las de otros:

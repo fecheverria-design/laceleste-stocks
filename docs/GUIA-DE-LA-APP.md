@@ -100,12 +100,23 @@ Los productos sin precio suman cantidad pero no suman costo.
 El historial de precios de cada producto. Cada fila es **un precio, de un proveedor, en una
 fecha**, y tiene un tipo:
 
-- **Compra** — lo que efectivamente se pagó. **Es el que manda.**
-- **Actualización** — precio de lista o cotización. Solo referencia.
+- **Compra** — lo que efectivamente se pagó.
+- **Actualización** — precio de lista o cotización.
 
-**El precio vigente de un producto es su última Compra.** Si nunca tuvo una, se usa la última
-Actualización como respaldo. Esto vale para TODA la app: el Panel, los Consumos y el Informe
-usan el mismo criterio.
+**Cuál de todos es "el precio" del producto se decide en este orden:**
+
+1. **El precio controlado** — el que marcaste a mano en *Control precios*. Le gana a todo.
+2. Si no hay ninguno marcado, **la última Compra**.
+3. Si nunca hubo una compra, **la última Actualización**, como respaldo.
+
+Esto vale para TODA la app: el Panel, los Consumos y el Informe usan el mismo criterio.
+
+**Por qué existe la marca:** una compra puede ser vieja (se compró hace seis meses y todavía
+queda stock de esa compra) y tanto una compra como una actualización pueden estar mal cargadas.
+Marcar un precio es decir *"este es el número, decidido por nosotros"*, y eso vale más que la
+regla automática. La marca **no le cambia la categoría a la fila**: una actualización marcada
+sigue figurando como actualización, pero es la que manda. Hay **una sola por producto**: marcar
+otra desmarca la anterior, y sacándole la marca el producto vuelve a la regla automática.
 
 **De dónde viene:** del import del histórico de precios de 3c (`precios - Precios.csv`), y de lo
 que cargues a mano.
@@ -122,9 +133,18 @@ llega con sus alertas y la lista arranca filtrada por los que tienen alguna.
 | salto de precio | Saltó más de 40% en un mes: casi siempre un error de carga o un cambio de unidad |
 | sin proveedor | El precio usado no tiene proveedor, así que no se puede comparar con otros |
 
-Desde cada fila cargás una cotización con su proveedor, o marcás cuál es el precio de compra
-(el equivalente del tick `Usar` de la planilla). **Lo que corregís acá mueve el informe en la
-próxima carga**, sin reimportar nada.
+Abriendo un producto ves la última cotización de cada proveedor. Desde ahí cargás una nueva con
+su proveedor, o tocás **«Usar este precio»** para fijar cuál es el precio del producto — el
+equivalente del tick `Usar` de la planilla. **Se puede marcar cualquier fila, sea compra o
+actualización**, y la marca no le cambia la categoría. El ✓ verde indica la que está en uso.
+**Lo que corregís acá mueve el informe en la próxima carga**, sin reimportar nada.
+
+Dos detalles de las alertas cuando marcás un precio a mano:
+
+- **«sin precio de compra» se apaga**: si lo marcaste vos no es un respaldo por falta de datos,
+  es una decisión.
+- **«precio vencido» NO se apaga**: aunque lo marques, si tiene más de 90 días lo vas a seguir
+  viendo en la lista. Es a propósito — el caso típico de marcar es justamente un precio viejo.
 
 ### Proveedores
 Cuánto se le compró a cada uno. Sale de las **compras reales importadas de 3c**, no de los

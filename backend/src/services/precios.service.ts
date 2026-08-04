@@ -1,14 +1,16 @@
 import { conflict, notFound } from '../domain/errors.js';
 import { obtenerValorizacion, type Valorizacion } from '../repositories/valorizacion.repository.js';
-import type { CrearPrecioInput, EditarPrecioInput } from '../domain/precios.schema.js';
+import type { ControlarPrecioInput, CrearPrecioInput, EditarPrecioInput } from '../domain/precios.schema.js';
 import {
   actualizarPrecio,
   borrarPrecio,
+  desmarcarControlado,
   existePrecioEnFecha,
   existeProducto,
   insertarPrecio,
   listarHistorialPrecios,
   listarPreciosVigentes,
+  marcarControlado,
   obtenerPrecioPorId,
   type FilaPrecioHistorial,
   type FilaPrecioVigente,
@@ -84,6 +86,23 @@ export async function editarPrecio(id: number, input: EditarPrecioInput): Promis
     vigenteDesde: input.vigente_desde,
     proveedorId: input.proveedor_id,
   });
+  if (!row) throw notFound('PRECIO_NO_ENCONTRADO', `No existe el precio ${id}`);
+  return row;
+}
+
+// PUT /:id/controlado — marcar (o desmarcar) esta fila como EL precio del producto.
+//
+// No cambia el `tipo`: antes, elegir un precio obligaba a pasarlo a COMPRA, o sea a mentir
+// sobre qué era. Acá la marca es un campo aparte que le gana a la categoría, porque tanto
+// una compra como una actualización pueden ser un error de carga (decisión de J).
+export async function controlarPrecio(
+  id: number,
+  input: ControlarPrecioInput,
+  ctx: { usuarioId: number },
+): Promise<PrecioRow> {
+  const row = input.controlado
+    ? await marcarControlado(id, ctx.usuarioId)
+    : await desmarcarControlado(id);
   if (!row) throw notFound('PRECIO_NO_ENCONTRADO', `No existe el precio ${id}`);
   return row;
 }
