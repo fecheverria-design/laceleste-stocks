@@ -5,6 +5,7 @@ import {
   armarCatalogo,
   fechaHoraLocal,
   fechasDeFilas,
+  necesitaCatalogo,
   normalizarArea,
   type FilaExtra,
 } from '../src/db/extras-mapeo.js';
@@ -102,6 +103,52 @@ describe('catálogo articulo_id → codigo_3c (su API no manda el código)', () 
   it('si algún día su API manda codigo_3c, ese gana sobre el catálogo', () => {
     const { grupos } = agruparExtras([fila({ articulo_id: 470470, codigo_3c: '999' })], VENTANA, CATALOGO);
     expect(grupos[0]!.detalle[0]!.producto_3c).toBe('999');
+  });
+
+  // El contrato cambió el 04/08: dejaron de mandar `articulo_id` y empezaron a mandar
+  // `articulo_codigo`, que es el codigo_3c derecho. El sync descartó 87 extras por esto.
+  it('resuelve el producto por articulo_codigo, que es el codigo_3c derecho', () => {
+    // Fila real del origen (03/08): sin articulo_id, con articulo_codigo.
+    const real: FilaExtra = {
+      id: 90,
+      fecha_hora: '2026-07-30T06:41:00.000Z',
+      articulo_codigo: '298',
+      articulo_nombre: 'DESENGRASANTE',
+      area: 'LIMPIEZA',
+      codigo_area: 45,
+      cantidad: '35.00',
+      unidad: '',
+      nota: 'LIMPIEZA TM',
+      usuario: 'sdeposito',
+    };
+    const { grupos, descartes } = agruparExtras([real], VENTANA, new Map());
+    expect(descartes.sinProducto).toBe(0);
+    expect(grupos[0]!.destino_dep_id_3c).toBe(45);
+    expect(grupos[0]!.detalle[0]!.producto_3c).toBe('298');
+    expect(grupos[0]!.detalle[0]!.cantidad_real).toBe(35);
+  });
+
+  it('sin articulo_codigo cae al catálogo por articulo_id (el camino viejo sigue vivo)', () => {
+    const { grupos } = agruparExtras([fila({ articulo_id: 490430, area: 'RECETAS', codigo_area: 49 })], VENTANA, CATALOGO);
+    expect(grupos[0]!.detalle[0]!.producto_3c).toBe('430');
+  });
+
+  it('una fila sin NINGÚN identificador lo dice en el aviso (si no, el descarte queda mudo)', () => {
+    const { grupos, descartes } = agruparExtras(
+      [fila({ articulo_id: null, articulo_nombre: 'ALGO' })],
+      VENTANA,
+      CATALOGO,
+    );
+    expect(grupos).toHaveLength(0);
+    expect([...descartes.articulosSinCatalogo][0]).toContain('no trae ni articulo_codigo ni articulo_id');
+  });
+
+  it('no se sale a pedir el catálogo si todas las filas traen el código derecho', () => {
+    const conCodigo = fila({ articulo_id: null, articulo_codigo: '298' });
+    expect(necesitaCatalogo([conCodigo], VENTANA)).toBe(false);
+    expect(necesitaCatalogo([conCodigo, fila()], VENTANA)).toBe(true);
+    // Una fila fuera de la ventana no obliga a pedirlo.
+    expect(necesitaCatalogo([fila({ fecha_hora: '2026-06-01T10:00:00' })], VENTANA)).toBe(false);
   });
 
   it('el catálogo se acumula entre días y descarta filas sin id o sin código', () => {

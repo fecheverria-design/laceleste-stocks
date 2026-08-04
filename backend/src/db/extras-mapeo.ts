@@ -4,15 +4,28 @@
 // (mismo patrón que sync-maestro.ts).
 
 // Una fila del GET /api/movimientos de la app del compañero: un egreso extra suelto.
-// OJO (verificado 2026-07-31 contra los primeros 11 extras reales): la respuesta NO trae
-// `codigo_3c`. Trae `articulo_id`, que es el id de la fila del catálogo integral
-// (GET /api/abastecimiento/tabla-integral), de donde sale el codigo_3c → ver CatalogoExtras.
-// `codigo_3c` queda como opcional por si algún día lo agregan: si viene, gana.
+//
+// ⚠ EL CONTRATO CAMBIÓ Y NO NOS AVISARON. Dos formas conocidas de identificar el producto:
+//
+//  1. `articulo_codigo` — el codigo_3c DIRECTO. Es lo que manda hoy (verificado 2026-08-04
+//     contra los 87 extras del 03/08: los 76 códigos distintos existen en nuestro maestro).
+//  2. `articulo_id` — el id de la fila del catálogo integral, que hay que resolver contra
+//     GET /api/abastecimiento/tabla-integral (ver CatalogoExtras). Era lo único que mandaban
+//     hasta el 31/07 y se mantiene como fallback.
+//
+// El día que cambiaron de (2) a (3) el sync empezó a descartar el 100% de los extras por
+// "sin producto resoluble" — y sin poder ni listar el id, porque `articulo_id` venía
+// undefined. Por eso ahora los tres campos son opcionales y se prueban en orden: si mañana
+// vuelven a moverlo, el que quede sigue funcionando.
 export interface FilaExtra {
   id: number | string | null;
   fecha_hora: string | null;
-  articulo_id: string | number | null;
+  /** codigo_3c directo, con el nombre que usa su app hoy. Es el camino preferido. */
+  articulo_codigo?: string | number | null;
+  /** codigo_3c directo, por si algún día lo mandan con este nombre. Gana sobre todo. */
   codigo_3c?: string | number | null;
+  /** id de la fila del catálogo integral: hay que resolverlo (fallback histórico). */
+  articulo_id?: string | number | null;
   articulo_nombre: string | null;
   area: string | null;
   codigo_area?: string | number | null;
@@ -20,6 +33,28 @@ export interface FilaExtra {
   unidad: string | null;
   nota: string | null;
   usuario: string | null;
+}
+
+/** El codigo_3c que viene DERECHO en la fila, sin pasar por el catálogo. '' si no hay. */
+export function codigoDirecto(f: FilaExtra): string {
+  for (const v of [f.codigo_3c, f.articulo_codigo]) {
+    const s = v === null || v === undefined ? '' : String(v).trim();
+    if (s !== '') return s;
+  }
+  return '';
+}
+
+/**
+ * ¿Hace falta salir a buscar la tabla integral? Solo si alguna fila de la ventana no trae el
+ * código derecho. Mientras su app mande `articulo_codigo` no se pide, y así una caída de ESE
+ * endpoint deja de poder abortar el sync entero (`fetchCatalogo` lanza a propósito).
+ */
+export function necesitaCatalogo(filas: FilaExtra[], ventana: Set<string>): boolean {
+  return filas.some((f) => {
+    const fh = f.fecha_hora ? fechaHoraLocal(f.fecha_hora) : null;
+    if (!fh || !ventana.has(fh.fecha)) return false;
+    return codigoDirecto(f) === '';
+  });
 }
 
 // articulo_id de su app → codigo_3c del producto. Se arma con la tabla integral de su propia
@@ -227,17 +262,22 @@ export function agruparExtras(
       continue;
     }
 
-    // Producto: si algún día su API manda codigo_3c, gana; hoy hay que resolverlo por el
-    // catálogo integral (articulo_id → codigo_3c). Si no está, se descarta y se avisa CON el
-    // id, para poder ir a buscarlo: nunca se deriva un código de la numeración (regla #1).
-    const codDirecto = f.codigo_3c === null || f.codigo_3c === undefined ? '' : String(f.codigo_3c).trim();
-    const artId = aNumero(f.articulo_id);
+    // Producto: primero el código que viene derecho en la fila (`codigo_3c` /
+    // `articulo_codigo`); si no hay, se resuelve por el catálogo integral (articulo_id →
+    // codigo_3c). Nunca se deriva un código de la numeración (regla #1).
+    const codDirecto = codigoDirecto(f);
+    const artId = aNumero(f.articulo_id ?? null);
     const prod = codDirecto !== '' ? codDirecto : artId !== null ? (catalogo.get(artId) ?? '') : '';
     if (prod === '') {
       descartes.sinProducto++;
-      if (codDirecto === '' && artId !== null) {
-        descartes.articulosSinCatalogo.add(`${artId}${f.articulo_nombre ? ` ${f.articulo_nombre}` : ''}`);
-      }
+      // Se avisa CON el identificador que haya, para poder ir a buscarlo. Si no vino
+      // NINGUNO, el aviso lo dice explícitamente: es la firma de que cambió el contrato de
+      // su API, y sin esto el descarte quedaba mudo (pasó el 04/08).
+      descartes.articulosSinCatalogo.add(
+        artId !== null
+          ? `${artId}${f.articulo_nombre ? ` ${f.articulo_nombre}` : ''}`
+          : `(la fila no trae ni articulo_codigo ni articulo_id)${f.articulo_nombre ? ` ${f.articulo_nombre}` : ''}`,
+      );
       continue;
     }
 

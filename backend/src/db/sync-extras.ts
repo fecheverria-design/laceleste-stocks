@@ -5,6 +5,7 @@ import {
   armarCatalogo,
   fechasDeFilas,
   hoyEnBsAs,
+  necesitaCatalogo,
   type CatalogoExtras,
   type FilaCatalogo,
   type FilaExtra,
@@ -26,13 +27,15 @@ import type { AbastecimientoInput } from '../domain/movimientos.schema.js';
 // Campos que consumimos: fecha_hora, articulo_id (producto), area + codigo_area (destino),
 // cantidad, unidad, nota, usuario. La agrupación vive en extras-mapeo.ts.
 //
-// PRODUCTO (verificado 2026-07-31 contra los primeros extras reales): la respuesta NO trae
-// codigo_3c, trae `articulo_id`, que es el id de la fila del catálogo integral. Por eso antes
-// de agrupar se arma el catálogo articulo_id → codigo_3c pidiendo
-// GET /api/abastecimiento/tabla-integral?fecha=… de cada día que tenga extras (mismo endpoint
-// que usa el sync diario). El código sale de SU dato, no se deriva de la numeración (regla #1).
-// Si el catálogo no se puede traer, el sync ABORTA: sin él todo se descartaría por "sin
-// producto" y encima el modo bajas anularía RINT buenos.
+// PRODUCTO — ⚠ su API ya cambió este campo una vez, sin aviso:
+//   · hasta el 31/07 mandaba `articulo_id` (id de la fila del catálogo integral), que hay que
+//     resolver contra GET /api/abastecimiento/tabla-integral?fecha=… para sacar el codigo_3c;
+//   · desde (al menos) el 03/08 manda `articulo_codigo`, que ES el codigo_3c derecho.
+// El cambio pasó inadvertido y el sync descartó el 100% de los extras del 03/08 (87 filas)
+// por "sin producto resoluble". Se soportan los dos caminos: primero el código directo,
+// después el catálogo. El código sale de SU dato, nunca se deriva de la numeración (regla #1).
+// El catálogo solo se pide si alguna fila NO trae el código derecho; si se pide y falla, el
+// sync ABORTA (sin él todo se descartaría y el modo bajas anularía RINT buenos).
 //
 // AGRUPACIÓN: un RINT por (fecha, área) juntando todos los extras del día de esa área
 // (decisión de J, 2026-07-30: el listado queda legible en vez de decenas de RINT de un
@@ -215,13 +218,20 @@ async function main(): Promise<void> {
 
   const filas = await fetchExtras(baseUrl, token, desde, hasta);
 
-  // Solo se pide el catálogo de los días que efectivamente tienen extras (lo normal es que no
-  // haya ninguno: en ese caso ni se sale a buscarlo).
+  // El catálogo (articulo_id → codigo_3c) solo hace falta si alguna fila NO trae el código
+  // derecho. Desde que su app manda `articulo_codigo` no se pide nunca, y así una caída de
+  // ese endpoint deja de poder abortar el sync (fetchCatalogo lanza a propósito).
   const ventana = new Set(fechas);
   const conExtras = fechasDeFilas(filas, ventana);
-  const catalogo = conExtras.length > 0 ? await fetchCatalogo(baseUrl, token, conExtras) : new Map();
+  const haceFalta = necesitaCatalogo(filas, ventana);
+  const catalogo =
+    conExtras.length > 0 && haceFalta ? await fetchCatalogo(baseUrl, token, conExtras) : new Map();
   if (conExtras.length > 0) {
-    console.log(`  Catálogo: ${catalogo.size} artículo(s) (tabla integral de ${conExtras.join(', ')}).`);
+    console.log(
+      haceFalta
+        ? `  Catálogo: ${catalogo.size} artículo(s) (tabla integral de ${conExtras.join(', ')}).`
+        : '  Catálogo: no hace falta (las filas traen el código de 3c derecho).',
+    );
   }
 
   const { grupos, descartes } = agruparExtras(filas, ventana, catalogo);
