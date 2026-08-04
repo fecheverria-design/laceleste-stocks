@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
+import { ordenPrecio } from './precio-vigente.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Consumo por área: lo que SALE de FABRICA (dep 1) hacia un área de consumo, por
@@ -47,10 +48,10 @@ export async function consumoPorArea(filtros: {
         JOIN ubicaciones ud ON ud.id = m.destino_id
         JOIN productos p ON p.codigo_3c = d.producto_3c
         LEFT JOIN LATERAL (
-          -- precio vigente del producto: última COMPRA > 0 (misma regla que el panel)
+          -- precio vigente del producto (misma prelación que el panel): ver precio-vigente.ts
           SELECT precio FROM precios
           WHERE producto_3c = d.producto_3c AND vigente_desde <= current_date AND precio > 0
-          ORDER BY (tipo = 'COMPRA') DESC, vigente_desde DESC, id DESC LIMIT 1
+          ORDER BY ${ordenPrecio()} LIMIT 1
         ) v ON TRUE
         WHERE ${sql.join(conds, sql` AND `)}
         GROUP BY d.producto_3c, p.nombre, p.unidad_base, ud.id, ud.dep_id_3c, ud.nombre, v.precio

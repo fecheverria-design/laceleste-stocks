@@ -20,7 +20,8 @@ import { ventanaMeses } from './informe.service.js';
 // son PURAS: reciben las filas y devuelven el resultado, para poder testear las reglas
 // con datos de laboratorio. Al final está el orquestador que hace las consultas.
 //
-// El "precio de compra" es la última fila de tipo COMPRA (el tick `Usar` de la planilla).
+// El "precio de compra" es el que gana la prelación de `ordenPrecio()`: el controlado a
+// mano si lo hay, si no la última fila de tipo COMPRA (el tick `Usar` de la planilla).
 // Todas las variaciones se devuelven como FRACCIÓN (0.12 = +12%), igual que el resto del
 // informe; el formateo a % vive en el frontend.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -67,6 +68,10 @@ export interface CotizacionProducto {
   reciente: boolean;
   vigente: boolean;
   es_usado: boolean;
+  /** El área de compras la marcó a mano como EL precio del producto (gana sobre el tipo). */
+  controlado: boolean;
+  controlado_en: string | null;
+  controlado_por: string | null;
 }
 
 export interface FilaMatriz {
@@ -83,6 +88,10 @@ export interface FilaMatriz {
   dias: number | null;
   /** El producto no tiene ningún precio de tipo COMPRA: se está usando un fallback. */
   sin_compra: boolean;
+  /** El precio que se usa es el que compras marcó a mano, no el que salió de la regla. */
+  controlado: boolean;
+  controlado_en: string | null;
+  controlado_por: string | null;
   cotizaciones: CotizacionProducto[];
 }
 
@@ -108,6 +117,16 @@ export function armarMatriz(cotizaciones: FilaCotizacion[], usados: FilaPrecioUs
     const usado = usadoDe.get(producto3c);
     const claveUsada = usado ? claveProveedor(usado.proveedor_id, usado.proveedor) : null;
 
+    // Cuál de las filas listadas es la que se usa. La lista trae UNA por proveedor (la más
+    // reciente, o la controlada si la hay), así que lo normal es encontrarla por id. Si la
+    // fila usada no quedó listada —pasa cuando el proveedor tiene una actualización más
+    // nueva que su propia compra— se cae al proveedor, como venía haciéndose.
+    const usadoListado = usado !== undefined && lista.some((c) => c.id === usado.precio_id);
+    const esUsado = (c: FilaCotizacion): boolean =>
+      usadoListado
+        ? c.id === usado!.precio_id
+        : claveUsada !== null && claveProveedor(c.proveedor_id, c.proveedor) === claveUsada;
+
     const cots: CotizacionProducto[] = lista
       .map((c) => ({
         precio_id: c.id,
@@ -119,7 +138,10 @@ export function armarMatriz(cotizaciones: FilaCotizacion[], usados: FilaPrecioUs
         dias: c.dias,
         reciente: c.dias <= DIAS_RECIENTE,
         vigente: c.dias <= DIAS_VIGENTE,
-        es_usado: claveUsada !== null && claveProveedor(c.proveedor_id, c.proveedor) === claveUsada,
+        es_usado: esUsado(c),
+        controlado: c.controlado,
+        controlado_en: c.controlado_en,
+        controlado_por: c.controlado_por,
       }))
       .sort((a, b) => a.precio - b.precio); // el más barato primero, como en el informe
 
@@ -135,6 +157,9 @@ export function armarMatriz(cotizaciones: FilaCotizacion[], usados: FilaPrecioUs
       fecha: usado?.fecha ?? null,
       dias: usado?.dias ?? null,
       sin_compra: usado?.sin_compra ?? true,
+      controlado: usado?.controlado ?? false,
+      controlado_en: usado?.controlado_en ?? null,
+      controlado_por: usado?.controlado_por ?? null,
       cotizaciones: cots,
     });
   }

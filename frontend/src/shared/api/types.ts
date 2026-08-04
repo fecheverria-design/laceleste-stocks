@@ -230,6 +230,7 @@ export interface PrecioVigente {
   precio: string | null; // numeric(14,4) serializado; null = sin precio cargado
   vigente_desde: string | null; // YYYY-MM-DD
   tipo: TipoPrecio | null; // tipo del precio vigente (COMPRA manda; ACTUALIZACION = fallback)
+  controlado: boolean | null; // el vigente es el marcado a mano en Control de precios
   precio_id: number | null;
   proveedor_nombre: string | null;
   proveedor_numero_3c: number | null;
@@ -395,6 +396,9 @@ export interface CotizacionProducto {
   reciente: boolean; // ≤60 días
   vigente: boolean; // ≤180 días: recién ahí cuenta para el objetivo de 3 cotizaciones
   es_usado: boolean; // es el precio con el que se compra
+  controlado: boolean; // marcado a mano por compras: le gana a la regla automática
+  controlado_en: string | null;
+  controlado_por: string | null; // nombre del usuario que lo marcó
 }
 
 export interface FilaMatriz {
@@ -409,6 +413,9 @@ export interface FilaMatriz {
   fecha: string | null;
   dias: number | null;
   sin_compra: boolean; // no tiene ningún precio tipo COMPRA (usa fallback)
+  controlado: boolean; // el precio que se usa es el marcado a mano
+  controlado_en: string | null;
+  controlado_por: string | null;
   cotizaciones: CotizacionProducto[];
 }
 

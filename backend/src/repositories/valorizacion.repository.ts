@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { PRODUCTOS_FICTICIOS } from '../domain/familias.js';
+import { ordenPrecio } from './precio-vigente.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Valorización del stock = cantidad (stock_actual) × precio vigente del producto.
@@ -19,8 +20,8 @@ const CTE = sql`
     LEFT JOIN LATERAL (
       SELECT precio FROM precios
       WHERE producto_3c = p.codigo_3c AND vigente_desde <= current_date AND precio > 0
-      -- misma regla que el precio vigente: COMPRA manda, luego la más reciente.
-      ORDER BY (tipo = 'COMPRA') DESC, vigente_desde DESC, id DESC LIMIT 1
+      -- misma prelación que en todos lados: ver repositories/precio-vigente.ts.
+      ORDER BY ${ordenPrecio()} LIMIT 1
     ) v ON TRUE
   ),
   base AS (

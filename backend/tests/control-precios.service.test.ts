@@ -19,6 +19,9 @@ function fila(over: Partial<FilaMatriz> = {}): FilaMatriz {
     fecha: '2026-07-20',
     dias: 10,
     sin_compra: false,
+    controlado: false,
+    controlado_en: null,
+    controlado_por: null,
     cotizaciones: [],
     ...over,
   };
@@ -52,6 +55,19 @@ describe('alertas del control de precios', () => {
   it('no avisa por proveedor cuando el producto no tiene precio usado', () => {
     // undefined = no hay fila de precio; el faltante ya lo cubre SIN_COMPRA.
     expect(calcularAlertas(fila(), { ...sano, proveedorUsado: undefined })).not.toContain('SIN_PROVEEDOR');
+  });
+
+  // Decisión de J (2026-08-04): marcar un precio a mano NO apaga el aviso de vencido. El
+  // caso típico es justamente un precio viejo (la compra fue hace seis meses y todavía
+  // queda stock), y quiere seguir viéndolo listado como tal.
+  it('un precio controlado viejo sigue avisando que está vencido', () => {
+    const alertas = calcularAlertas(fila({ dias: 190, controlado: true, sin_compra: false }), sano);
+    expect(alertas).toContain('VENCIDO');
+  });
+
+  // La otra cara: si compras lo marcó, no es un fallback por falta de datos.
+  it('un precio controlado no se reporta como «sin precio de compra»', () => {
+    expect(calcularAlertas(fila({ controlado: true, sin_compra: false }), sano)).not.toContain('SIN_COMPRA');
   });
 
   it('acumula todos los motivos, que es lo que ordena la lista de trabajo', () => {

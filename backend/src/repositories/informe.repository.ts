@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { FAMILIAS_CON_COMPRADOR, FAMILIAS_EXCLUIDAS_GASTO, PRODUCTOS_FICTICIOS } from '../domain/familias.js';
+import { esControlado, ordenPrecio } from './precio-vigente.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Informe de Compras — datos crudos. Devuelve el gasto agregado por
@@ -96,8 +97,8 @@ export async function preciosVigentesPorMes(meses: string[]): Promise<FilaPrecio
                   p.precio::text AS precio,
                   row_number() OVER (
                     PARTITION BY c.mes, p.producto_3c
-                    -- La COMPRA gana siempre sobre la ACTUALIZACION, sea cual sea la fecha.
-                    ORDER BY (p.tipo = 'COMPRA') DESC, p.vigente_desde DESC, p.id DESC
+                    -- Prelación única: controlado > última compra > última actualización.
+                    ORDER BY ${ordenPrecio('p')}
                   ) AS rn
            FROM cierres c
            JOIN precios p ON p.vigente_desde <= c.fin AND p.precio > 0
@@ -176,6 +177,9 @@ export type FilaCotizacion = {
   precio: string;
   fecha: string; // vigente_desde, 'YYYY-MM-DD'
   tipo: string; // 'COMPRA' | 'ACTUALIZACION'
+  controlado: boolean; // el área de compras la marcó como EL precio del producto
+  controlado_en: string | null;
+  controlado_por: string | null; // nombre del usuario que la marcó
   dias: number; // antigüedad de esa cotización, en días
 };
 
@@ -196,31 +200,46 @@ export async function cotizacionesProductos(filtro?: FiltroProductos): Promise<F
                p.precio::text,
                p.vigente_desde::text AS fecha,
                p.tipo,
+               ${esControlado('p')} AS controlado,
+               p.controlado_en::text AS controlado_en,
+               u.nombre AS controlado_por,
                (CURRENT_DATE - p.vigente_desde)::int AS dias
         FROM precios p
         JOIN productos pr ON pr.codigo_3c = p.producto_3c
         LEFT JOIN proveedores pv ON pv.id = p.proveedor_id
+        LEFT JOIN usuarios u ON u.id = p.controlado_por
         WHERE ${condProductos(filtro)}
           AND p.precio > 0
           AND p.producto_3c NOT IN (${sql.join(
             PRODUCTOS_FICTICIOS.map((cod) => sql`${cod}`),
             sql`, `,
           )})
-        ORDER BY p.producto_3c, p.proveedor_id, p.vigente_desde DESC, p.id DESC`,
+        -- Una fila por proveedor: la más reciente. Salvo que haya una CONTROLADA, que gana
+        -- aunque sea vieja — si no, marcar un precio de hace 6 meses lo escondería de la
+        -- pantalla justo cuando es el que manda (y no habría cómo desmarcarlo).
+        ORDER BY p.producto_3c, p.proveedor_id, ${esControlado('p')} DESC, p.vigente_desde DESC, p.id DESC`,
   );
   return res.rows;
 }
 
-// El precio con el que efectivamente se compra (el "tick Usar" de la planilla): la última
-// fila de tipo COMPRA. Si el producto nunca tuvo COMPRA cae a la última ACTUALIZACION y se
-// marca `sin_compra` — el informe lo reporta como control de datos ("sin True").
+// El precio con el que efectivamente se compra (el "tick Usar" de la planilla), según la
+// prelación de `ordenPrecio()`: el CONTROLADO a mano, si no la última COMPRA, si no la
+// última ACTUALIZACION.
+//
+// `sin_compra` = se está usando una actualización porque no quedó otra. Si alguien la marcó
+// como controlada NO es un fallback sino una decisión, así que no se reporta como faltante.
 export type FilaPrecioUsado = {
   producto_3c: string;
+  precio_id: number;
   proveedor_id: number | null;
   proveedor: string | null;
   precio: string;
   fecha: string;
   dias: number;
+  tipo: string;
+  controlado: boolean;
+  controlado_en: string | null;
+  controlado_por: string | null;
   sin_compra: boolean;
 };
 
@@ -228,23 +247,28 @@ export async function preciosUsadosProductos(filtro?: FiltroProductos): Promise<
   const res = await db.execute<FilaPrecioUsado>(
     sql`SELECT DISTINCT ON (p.producto_3c)
                p.producto_3c,
+               p.id AS precio_id,
                p.proveedor_id,
                pv.nombre AS proveedor,
                p.precio::text,
                p.vigente_desde::text AS fecha,
                (CURRENT_DATE - p.vigente_desde)::int AS dias,
-               (p.tipo <> 'COMPRA') AS sin_compra
+               p.tipo,
+               ${esControlado('p')} AS controlado,
+               p.controlado_en::text AS controlado_en,
+               u.nombre AS controlado_por,
+               (p.tipo <> 'COMPRA' AND p.controlado_en IS NULL) AS sin_compra
         FROM precios p
         JOIN productos pr ON pr.codigo_3c = p.producto_3c
         LEFT JOIN proveedores pv ON pv.id = p.proveedor_id
+        LEFT JOIN usuarios u ON u.id = p.controlado_por
         WHERE ${condProductos(filtro)}
           AND p.precio > 0
           AND p.producto_3c NOT IN (${sql.join(
             PRODUCTOS_FICTICIOS.map((cod) => sql`${cod}`),
             sql`, `,
           )})
-        -- La COMPRA gana siempre sobre la ACTUALIZACION, sea cual sea la fecha.
-        ORDER BY p.producto_3c, (p.tipo = 'COMPRA') DESC, p.vigente_desde DESC, p.id DESC`,
+        ORDER BY p.producto_3c, ${ordenPrecio('p')}`,
   );
   return res.rows;
 }
@@ -276,14 +300,17 @@ export async function preciosCompraPorMesCargado(
         FROM precios p
         JOIN productos pr ON pr.codigo_3c = p.producto_3c
         WHERE ${condProductos(filtro)}
-          AND p.tipo = 'COMPRA'
+          -- Compras reales, MÁS el precio controlado a mano: si compras marcó una fila,
+          -- esa es la verdad del producto aunque esté categorizada como actualización.
+          AND (p.tipo = 'COMPRA' OR ${esControlado('p')})
           AND p.precio > 0
           AND to_char(p.vigente_desde, 'YYYY-MM') BETWEEN ${desde} AND ${hasta}
           AND p.producto_3c NOT IN (${sql.join(
             PRODUCTOS_FICTICIOS.map((cod) => sql`${cod}`),
             sql`, `,
           )})
-        ORDER BY 1, 2, p.vigente_desde DESC, p.id DESC`,
+        -- Dentro del mes gana la controlada, y si no la más reciente.
+        ORDER BY 1, 2, ${esControlado('p')} DESC, p.vigente_desde DESC, p.id DESC`,
   );
   return res.rows;
 }
