@@ -485,10 +485,18 @@ export interface Canasta {
 
 // ── Indicadores mensuales de carga manual ────────────────────────────────────
 // `inflacion` viaja como FRACCIÓN (0.021 = 2,1%), igual que el resto de las variaciones.
+export type InflacionModo = 'MENSUAL' | 'ACUMULADA';
+
 export interface IndicadorMensual {
   periodo: string; // YYYY-MM
   ventas: number | null;
+  /** Lo que se cargó, tal cual. Su significado lo da `inflacion_modo`. */
   inflacion: number | null;
+  inflacion_modo: InflacionModo;
+  /** Variación del mes. Derivada si se cargó acumulada. Es la que consume el informe. */
+  inflacion_mensual: number | null;
+  /** Acumulada del año calendario. Derivada si se cargó mensual. */
+  inflacion_acumulada: number | null;
   actualizado_en: string;
 }
 

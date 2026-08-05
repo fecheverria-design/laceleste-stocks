@@ -160,6 +160,11 @@ informe que no salen de ningún lado automáticamente. Se cargan una vez por mes
 informe funciona igual, solo que no puede decirte qué subió por encima de la inflación ni
 comparar la canasta contra el mercado. **La inflación se escribe en porcentaje** (2,1 = 2,1%).
 
+La inflación tiene **dos columnas: mensual y acumulada del año**. Cargá la que tengas a mano y la
+otra se calcula sola (aparece en gris). El acumulado arranca de cero cada enero, así que para
+despejar el mensual de un mes hace falta tener cargado el anterior. Todo el informe usa por
+debajo la **mensual**.
+
 ### Estado
 Muestra si la app y la base están respondiendo. Es distinto del **vigía**, que corre solo todas
 las mañanas en el servidor y avisa si: el sync dejó de traer movimientos, llegó mercadería de un
