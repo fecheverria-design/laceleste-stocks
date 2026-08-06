@@ -73,7 +73,9 @@ export function InformePage() {
   const serie = useMemo(() => {
     const meses = precios.data?.canasta.meses ?? [];
     const porMes = new Map((indicadores.data ?? []).map((i) => [i.periodo, i]));
-    const inflacion = meses.map((m) => porMes.get(m)?.inflacion ?? null);
+    // Siempre la MENSUAL: si se cargó acumulada, el backend ya la descompuso. El informe no
+    // se entera de cómo se tipeó el dato.
+    const inflacion = meses.map((m) => porMes.get(m)?.inflacion_mensual ?? null);
     return {
       meses,
       inflacion,

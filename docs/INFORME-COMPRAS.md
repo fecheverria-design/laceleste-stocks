@@ -182,9 +182,36 @@ Los dos únicos datos del informe que no salen de 3c ni de ningún sync. Viven e
 **Ventas e inflación**: los últimos 24 meses, cada campo se guarda al salir del foco.
 
 ⚠ **La inflación se guarda como FRACCIÓN** (0.021 = 2,1%), igual que todas las variaciones de la
-app. La pantalla la muestra y la recibe en **porcentaje** y hace la conversión, y el schema
-rechaza cualquier valor fuera de ±100% mensual — que es exactamente el error de tipear `2,1`
-donde va `0,021`.
+app. La pantalla la muestra y la recibe en **porcentaje** y hace la conversión.
+
+### Mensual o acumulada: se carga cualquiera de las dos
+
+La tabla tiene **dos columnas de inflación** —*mensual* y *acumulada del año*— y se escribe en la
+que uno tenga a mano; la otra aparece **calculada, en gris**. Lo que se guarda es el número
+tipeado más `inflacion_modo` (`MENSUAL` | `ACUMULADA`), y las dos series se derivan al servir:
+
+```
+ACUMULADA → mensual_m   = (1 + acum_m) / (1 + acum_m-1) − 1
+MENSUAL   → acumulada_m = (1 + acum_m-1) × (1 + mensual_m) − 1
+```
+
+con **base 0 en diciembre del año anterior**: el acumulado del año calendario arranca de cero
+cada enero, así que enero es el único mes donde las dos coinciden. **El informe consume siempre
+`inflacion_mensual`** y no se entera de cómo se cargó el dato.
+
+Si falta un mes, la cadena se corta: de ahí en adelante solo se conoce el dato del modo en que
+vino y el otro queda en `null` hasta el enero siguiente. Derivar salteando un mes daría un
+número más chico que el real sin que se note.
+
+**Por qué el modo es obligatorio junto al número:** hasta el 05/08/2026 había una sola columna y
+qué significaba vivía en un comentario del código. Ese día se cargó la serie acumulada del año
+(2,9 / 5,9 / 9,5 / 12,2 / 14,6 / 17,0) en el campo mensual y nada avisó —el validador solo
+miraba ±100%, y 17% en un mes es posible—, así que el informe comparó la canasta contra una
+inflación mensual del 17% y una ventana de 3 meses de ~40%.
+
+Los límites del validador van por modo: **±100% mensual** (fuera de ahí es un porcentaje mal
+tipeado, el clásico `2,1` donde va `0,021`) y **hasta 1000% acumulado del año** (acá la
+acumulada llegó a 211% en 2023, el techo tiene que dejarla entrar).
 
 **Un mes sin cargar es `null`, nunca cero.** La inflación acumulada de N meses devuelve `null`
 si falta cualquier mes del tramo: acumular salteando un mes da un número más chico que el real

@@ -326,7 +326,12 @@ export const indicadoresMensuales = pgTable('indicadores_mensuales', {
   periodo: varchar('periodo', { length: 7 }).primaryKey(), // 'YYYY-MM'
   ventas: numeric('ventas', { precision: 16, scale: 2 }), // ventas totales del mes
   // FRACCIÓN, no porcentaje: 0.025 = 2,5%. Igual que todas las variaciones de la app.
+  // Es LO QUE SE TIPEÓ; qué significa lo dice `inflacionModo`. La serie mensual que consume
+  // el informe se deriva al servir (ver services/indicadores.service.ts).
   inflacion: numeric('inflacion', { precision: 8, scale: 6 }),
+  // 'MENSUAL' = variación del mes · 'ACUMULADA' = acumulada del año calendario (base 0 en
+  // diciembre del año anterior), que es la otra forma en que la publica el INDEC.
+  inflacionModo: text('inflacion_modo').notNull().default('MENSUAL'),
   usuarioId: integer('usuario_id')
     .notNull()
     .references(() => usuarios.id),

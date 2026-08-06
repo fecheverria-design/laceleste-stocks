@@ -134,6 +134,13 @@
       "when": 1785857262204,
       "tag": "0018_precio_controlado",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1785952693584,
+      "tag": "0019_inflacion_modo",
+      "breakpoints": true
     }
   ]
 }
