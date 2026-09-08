@@ -354,6 +354,19 @@ export interface FilaProductoInforme {
   precio_pagado: number | null; // promedio de lo pagado ese mes, solo referencia
 }
 
+// De dónde sale un número del informe: fuente, recorte, exclusiones y tratamiento del IVA.
+// Lo arma el backend desde las MISMAS constantes que usa la query (domain/procedencia.ts),
+// así que no se escribe nada de esto a mano acá.
+export interface PasoFicha {
+  titulo: string;
+  detalle: string;
+  items?: string[];
+}
+export interface Ficha {
+  titulo: string;
+  pasos: PasoFicha[];
+}
+
 export interface InformeCompradores {
   mes: string;
   mes_anterior: string;
@@ -368,6 +381,7 @@ export interface InformeCompradores {
   por_comprador: Array<{ comprador: Comprador; gasto: number; gasto_anterior: number; var_gasto: number | null }>;
   proveedores: FilaProveedorInforme[];
   productos: FilaProductoInforme[];
+  ficha: Ficha;
 }
 
 export interface SerieProveedor {

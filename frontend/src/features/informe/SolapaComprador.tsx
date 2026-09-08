@@ -1,5 +1,6 @@
 import type { Comprador, InformeCompradores } from '../../shared/api/types';
 import { claseVar, fMjs, mesLargo, pctTxt } from './formato';
+import { FichaProcedencia } from './piezas';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Solapa "Por Comprador": una tarjeta por comprador con su gasto del mes, y adentro las
@@ -64,6 +65,8 @@ function TarjetaComprador({ nombre, informe }: { nombre: Comprador; informe: Inf
         <span className="gl">Gasto del mes</span>
         <span className="gv">{fMjs(resumen.gasto)}</span>
       </div>
+
+      <FichaProcedencia ficha={informe.ficha} />
 
       <div className="gbox-sub">
         <span className="gl2">Solo productos A</span>

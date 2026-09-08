@@ -1,3 +1,4 @@
+import type { Ficha } from '../../shared/api/types';
 import { claseVar, pctTxt } from './formato';
 
 // Piezas visuales chicas del informe: las etiquetas y badges del HTML original.
@@ -26,4 +27,36 @@ export function FamTag({ familia }: { familia: string | null | undefined }) {
 export function ProvBadge({ n }: { n: number }) {
   const clase = n >= 3 ? 'pb-3' : n === 2 ? 'pb-2' : 'pb-1';
   return <span className={`prov-badge ${clase}`}>{n}</span>;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// "¿De dónde sale este número?" — el fundamento de un cálculo, plegado.
+//
+// Va cerrado por defecto: es material de auditoría, no de lectura diaria. El texto NO se
+// escribe acá: lo manda el backend armado con las mismas constantes que usa la query, para
+// que no se desfase cuando cambie una regla (ver backend domain/procedencia.ts).
+// ─────────────────────────────────────────────────────────────────────────────
+export function FichaProcedencia({ ficha }: { ficha: Ficha | undefined }) {
+  if (!ficha) return null;
+  return (
+    <details className="ficha">
+      <summary>¿De dónde sale este número?</summary>
+      <div className="ficha-body">
+        <div className="ficha-tit">{ficha.titulo}</div>
+        {ficha.pasos.map((paso) => (
+          <div className="ficha-paso" key={paso.titulo}>
+            <div className="ficha-paso-tit">{paso.titulo}</div>
+            <p>{paso.detalle}</p>
+            {paso.items && paso.items.length > 0 && (
+              <ul>
+                {paso.items.map((it) => (
+                  <li key={it}>{it}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ))}
+      </div>
+    </details>
+  );
 }
