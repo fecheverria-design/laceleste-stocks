@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../src/db/client.js';
-import { movimientos, movimientos3c, movimientosDetalle, tiposMovimiento } from '../src/db/schema.js';
+import { movimientos, movimientos3c, movimientosAuditoria, movimientosDetalle, tiposMovimiento } from '../src/db/schema.js';
 import { insertarDetalle, resolverUsuarioIntegracion } from '../src/repositories/movimientos.repository.js';
 import { reemplazarPeriodo, tipoDestino } from '../src/db/aplicar-movimientos-3c.js';
 import { cerrarPool, limpiar, sembrarEscenario, type Fixtures } from './helpers/db.js';
@@ -214,6 +214,22 @@ describe('reemplazarPeriodo', () => {
     const [m] = await db.select({ anuladoPor: movimientos.anuladoPor }).from(movimientos).where(eq(movimientos.id, idCompanero));
     expect(m?.anuladoPor).not.toBe(integracion);
     expect(m?.anuladoPor).not.toBeNull();
+  });
+
+  it('la anulación deja historial, no solo los sellos (regla #4)', async () => {
+    const idCompanero = await rintDelCompanero('2026-08-10', [{ producto3c: '460', cantidadReal: '100' }]);
+    await sembrarEspejo([{ fecha: '2026-08-10', numero: 'X 0001-00000001', producto3c: '460', cantidad: '250' }]);
+
+    await reemplazarPeriodo({ desde: '2026-08-01', hasta: '2026-08-31', dry: false });
+
+    const filas = await db
+      .select({ accion: movimientosAuditoria.accion, cambios: movimientosAuditoria.cambios })
+      .from(movimientosAuditoria)
+      .where(eq(movimientosAuditoria.movimientoId, idCompanero));
+    expect(filas).toHaveLength(1);
+    expect(filas[0]?.accion).toBe('ANULACION');
+    // El historial tiene que decir POR QUÉ, no solo que pasó a ANULADO.
+    expect(JSON.stringify(filas[0]?.cambios)).toContain('3c');
   });
 
   it('--dry no escribe: no anula ni crea nada', async () => {

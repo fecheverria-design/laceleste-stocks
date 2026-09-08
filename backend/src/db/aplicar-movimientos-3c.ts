@@ -2,7 +2,12 @@ import { pathToFileURL } from 'node:url';
 import { and, eq, gte, inArray, isNull, lte, sql } from 'drizzle-orm';
 import { db, pool } from './client.js';
 import { movimientos, movimientos3c, productos, tiposMovimiento, ubicaciones } from './schema.js';
-import { generarNro, insertarDetalle, resolverUsuarioIntegracion } from '../repositories/movimientos.repository.js';
+import {
+  generarNro,
+  insertarAuditoria,
+  insertarDetalle,
+  resolverUsuarioIntegracion,
+} from '../repositories/movimientos.repository.js';
 
 // REEMPLAZA los movimientos de un período por los de 3c, que es la información definitiva
 // (decisión de J, 2026-09-08). El sync de la app del compañero da el día en vivo mientras
@@ -274,6 +279,25 @@ export async function reemplazarPeriodo(opts: {
         .update(movimientos)
         .set({ estado: 'ANULADO', anuladoEn: sql`now()`, anuladoPor: anuladorId })
         .where(inArray(movimientos.id, aAnular.map((m) => m.id)));
+      // Regla #4: toda anulación deja historial, no solo los sellos. La anulación de a una
+      // (services/movimientos.service.ts → anularMovimiento) escribe una fila 'ANULACION' en
+      // movimientos_auditoria y esta tiene que hacer lo mismo: si no, en la ficha del
+      // movimiento aparecería ANULADO sin ninguna explicación de por qué.
+      for (const m of aAnular) {
+        await insertarAuditoria(tx, {
+          movimientoId: m.id,
+          usuarioId: anuladorId,
+          accion: 'ANULACION',
+          cambios: [
+            { campo: 'estado', antes: 'CONFIRMADO', despues: 'ANULADO' },
+            {
+              campo: 'motivo',
+              antes: 'registro de la app del compañero',
+              despues: `reemplazado por los movimientos de 3c (${desde} a ${hasta})`,
+            },
+          ],
+        });
+      }
     }
     for (const g of aCrear) {
       const oId = ubicId.get(g.origen);
