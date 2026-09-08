@@ -367,6 +367,13 @@ export interface Ficha {
   pasos: PasoFicha[];
 }
 
+/** Las fichas de una hoja de la app (GET /api/fichas). */
+export interface GrupoFichas {
+  hoja: string;
+  resumen: string;
+  fichas: Ficha[];
+}
+
 export interface InformeCompradores {
   mes: string;
   mes_anterior: string;

@@ -23,6 +23,7 @@ const InformePage = lazy(() => import('./features/informe/InformePage').then((m)
 const ControlPreciosPage = lazy(() =>
   import('./features/precios/ControlPreciosPage').then((m) => ({ default: m.ControlPreciosPage })),
 );
+const FichasPage = lazy(() => import('./features/fichas/FichasPage'));
 
 export function App() {
   return (
@@ -83,6 +84,14 @@ export function App() {
             element={
               <Suspense fallback={<p className="text-slate-500">Cargando informe…</p>}>
                 <InformePage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/como-se-calcula"
+            element={
+              <Suspense fallback={null}>
+                <FichasPage />
               </Suspense>
             }
           />
