@@ -1,7 +1,10 @@
-import { pool } from './client.js';
+import { eq } from 'drizzle-orm';
+import { db, pool } from './client.js';
+import { productos, ubicaciones } from './schema.js';
 import { consultarProxy } from './tresc-proxy.js';
 import { interpretarCompras } from './compras-lectura.js';
 import { persistirCompras } from './import-compras.js';
+import { aplicarInventario } from './import-inventario.js';
 
 // Sincroniza datos desde 3c EN VIVO, reemplazando los exports CSV que se bajaban a mano de
 // Firefox. 3c corre sobre Oracle y NO tiene API REST; se lee por el proxy SQL de solo lectura
@@ -12,20 +15,27 @@ import { persistirCompras } from './import-compras.js';
 //
 // Fuentes:
 //   compras     → proxy, vista V_COMP_PRECIOS_CPRA (ventana rodante de N días) → import:compras
-//   [pendiente] existencias / precios / movimientos → servlet SqlToExcel (.xls); se agregan
-//                cuando esté el lector de .xls y (movimientos) confirmado el feed rolling.
+//   stock       → proxy, vista V_LACELESTE_STOCK (la FOTO del stock de 3c) → import:inventario
+//   [pendiente] precios → servlet SqlToExcel (.xls); falta el lector de .xls.
+//   movimientos → NO se automatiza: J los importa a mano 1× por semana (decisión 2026-09-08).
 //
 // Idempotente: correr cada hora re-trae la ventana solapada y NO duplica (compras upsertea por
 // (numero, producto_3c, renglon)). Por eso NO hay que calcular fechas en cada corrida: se pide
 // SIEMPRE los últimos N días y el upsert absorbe lo repetido.
 //
 // Uso:
-//   npm run sync:3c                       (todas las fuentes implementadas, ventana 14 días)
+//   npm run sync:3c                       (fuentes por defecto, ventana 14 días)
 //   npm run sync:3c -- --dias=30 --dry
 //   npm run sync:3c -- --fuente=compras   (una sola fuente)
+//   npm run sync:3c -- --fuente=stock     (pisa el stock con la foto de 3c)
+//
+// `stock` NO está en las fuentes por defecto a propósito: aplicar la foto reescribe el stock
+// de la app (genera RECUENTOS), así que se pide explícito hasta que se decida ponerlo en el
+// cron horario. Ver docs/IMPORTACION-3C.md.
 
-const FUENTES_DISPONIBLES = ['compras'] as const;
+const FUENTES_DISPONIBLES = ['compras', 'stock'] as const;
 type Fuente = (typeof FUENTES_DISPONIBLES)[number];
+const FUENTES_POR_DEFECTO: Fuente[] = ['compras'];
 
 interface Args {
   dry: boolean;
@@ -36,7 +46,7 @@ interface Args {
 function parseArgs(argv: string[]): Args {
   let dry = false;
   let dias = 14;
-  let fuentes: Fuente[] = [...FUENTES_DISPONIBLES];
+  let fuentes: Fuente[] = [...FUENTES_POR_DEFECTO];
   for (const a of argv) {
     if (a === '--dry') dry = true;
     else if (a.startsWith('--dias=')) {
@@ -111,11 +121,91 @@ async function syncCompras(dias: number, dry: boolean): Promise<void> {
   console.log(`  ✔ ${escritos} renglón(es) de compra importados/actualizados.`);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// STOCK — la FOTO de 3c (V_LACELESTE_STOCK). 3c es la fuente de verdad del stock
+// (Opción A, decisión de J 2026-09-04): la foto se aplica como RECUENTO y deja el stock
+// parado exacto en lo que dice 3c. Se reusa aplicarInventario() → mismo camino que el
+// conteo físico: genera movimientos INVENTARIO contra el balde 101, auditable.
+//
+// Alcance: SOLO los depósitos que la app ya lleva (`lleva_stock`). 3c tiene 36 depósitos
+// con existencias (PAÑOL, UNIFORMES, ADMINISTRACIÓN…) que la app deliberadamente no
+// stockea; traerlos sería un cambio de alcance, no un sync.
+//
+// Es AUTORITATIVA (--exclusivo): un producto con stock en la app que la foto no lista
+// queda en 0. Por eso los guardas de abajo: una foto vacía o cortada borraría el stock.
+const MINIMO_FILAS_FOTO = 500;
+
+function queryStock(): string {
+  return `SELECT ARTICU_ID, DEPOSITOS_ID, STOCK_ACTUAL
+    FROM LACELESTE.V_LACELESTE_STOCK
+    ORDER BY DEPOSITOS_ID, ARTICU_ID`;
+}
+
+async function syncStock(dry: boolean): Promise<void> {
+  console.log(`▶ Stock 3c ${dry ? '(DRY-RUN) ' : ''}— foto V_LACELESTE_STOCK`);
+  const filas = await consultarProxy(queryStock());
+  const datos = filas.slice(1).filter((f) => f.length >= 3);
+  if (datos.length < MINIMO_FILAS_FOTO) {
+    throw new Error(
+      `La foto de 3c trajo solo ${datos.length} fila(s) (mínimo esperado ${MINIMO_FILAS_FOTO}). ` +
+        'Aplicarla borraría stock: se aborta.',
+    );
+  }
+
+  // Depósitos que la app lleva + productos del maestro: la foto NO crea ni depósitos ni
+  // productos (regla #1: los códigos son de 3c, pero el alta al maestro es su propio paso,
+  // con nombre y rubro de verdad — acá no tenemos la denominación).
+  const depsApp = new Set(
+    (
+      await db
+        .select({ depId3c: ubicaciones.depId3c })
+        .from(ubicaciones)
+        .where(eq(ubicaciones.llevaStock, true))
+    ).map((u) => u.depId3c),
+  );
+  const prodsApp = new Set((await db.select({ c: productos.codigo3c }).from(productos)).map((p) => p.c));
+
+  const conocidas: string[][] = [];
+  const depsFuera = new Set<number>();
+  const prodsFuera = new Set<string>();
+  for (const f of datos) {
+    const prod = (f[0] ?? '').trim();
+    const dep = Number((f[1] ?? '').trim());
+    const cant = (f[2] ?? '').trim();
+    if (!prod || !Number.isInteger(dep)) continue;
+    if (!depsApp.has(dep)) {
+      depsFuera.add(dep);
+      continue;
+    }
+    if (!prodsApp.has(prod)) {
+      prodsFuera.add(prod);
+      continue;
+    }
+    conocidas.push([String(dep), prod, cant]);
+  }
+
+  console.log(
+    `  Foto: ${datos.length} fila(s) · ${conocidas.length} en depósitos que la app lleva ` +
+      `· ${depsFuera.size} depósito(s) de 3c fuera de alcance · ${prodsFuera.size} producto(s) sin alta en el maestro`,
+  );
+  if (prodsFuera.size > 0) {
+    console.log(`  ⚠ Sin alta (no se tocan, corré import:productos): ${[...prodsFuera].join(', ')}`);
+  }
+  if (conocidas.length === 0) throw new Error('La foto no dejó ninguna fila aplicable: se aborta.');
+
+  await aplicarInventario([['DEPOSITO', '3C', 'STOCK'], ...conocidas], {
+    dry,
+    exclusivo: true,
+    etiqueta: 'foto de 3c (V_LACELESTE_STOCK)',
+  });
+}
+
 async function main(): Promise<void> {
   const { dry, dias, fuentes } = parseArgs(process.argv.slice(2));
   console.log(`▶ Sync 3c ${dry ? '(DRY-RUN) ' : ''}· fuentes: ${fuentes.join(', ')}`);
   for (const f of fuentes) {
     if (f === 'compras') await syncCompras(dias, dry);
+    if (f === 'stock') await syncStock(dry);
   }
   console.log(`\n${dry ? 'DRY-RUN — nada se escribió.' : '✔ Sync 3c completo.'}`);
 }

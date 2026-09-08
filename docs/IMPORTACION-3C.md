@@ -81,6 +81,32 @@ UNIMED, AÑO, MES`). El separador (`,` `;` `tab`) se autodetecta.
 
 ---
 
+## `sync:3c -- --fuente=stock [--dry]` — la FOTO de stock de 3c, en vivo
+
+Misma mecánica que `import:inventario --exclusivo`, pero la foto no viene de un CSV bajado a
+mano: se lee **en vivo** de `LACELESTE.V_LACELESTE_STOCK` por el proxy SQL. 3c es la fuente de
+verdad del stock (Opción A, decisión de J 2026-09-04) y esa vista **se refresca sola**
+(verificado el 2026-09-08: 34 claves cambiaron entre dos lecturas separadas 17 h).
+
+- En esa vista, `ARTICU_ID` **es el `codigo_3c`** del producto (≠ `V_ARTICULO`/`V_COMP_PRECIOS_CPRA`,
+  donde `ARTICU_ID` es el id interno de Oracle).
+- **Alcance: solo los depósitos con `lleva_stock`.** 3c tiene 36 depósitos con existencias
+  (AJUSTES 101, PAÑOL, UNIFORMES, ADMINISTRACIÓN, Panadería…) que la app no stockea a
+  propósito; traerlos sería ampliar el alcance, no sincronizar.
+- **No crea productos ni depósitos.** Un código de la foto que no está en el maestro se avisa
+  y se saltea (el alta va por `import:productos`, con nombre y rubro de verdad).
+- Es **autoritativa**: lo que la app tiene y la foto no lista queda en 0. Por eso aborta si la
+  foto trae menos de 500 filas o si no queda ninguna fila aplicable — una lectura cortada
+  borraría stock.
+- **No está en las fuentes por defecto**: `npm run sync:3c` sigue trayendo solo compras. La foto
+  se pide explícita (`--fuente=stock`) hasta decidir si va al cron horario.
+
+⚠ Sigue valiendo el modo de falla de toda foto: si la app tiene una recepción que 3c todavía no
+cargó, la foto la borra. Bajo Opción A eso es *la decisión* (3c manda), pero si el número
+aparece raro, ese es el primer sospechoso.
+
+---
+
 ## `import:precios -- <archivo> [--dry]`
 
 Histórico de precios. Columnas: `ID (producto), PRECIO_UNITARIO, PERSONAS_ID (proveedor),
