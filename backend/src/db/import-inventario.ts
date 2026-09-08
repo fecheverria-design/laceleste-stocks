@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { eq, inArray, sql } from 'drizzle-orm';
 import { db, pool } from './client.js';
 import { movimientos, productos, tiposMovimiento, ubicaciones } from './schema.js';
@@ -79,9 +80,16 @@ function extrasExclusivo(
   return extras;
 }
 
-async function main(archivo: string, dry: boolean, exclusivo: boolean): Promise<void> {
-  const filas = parseDelimited(readFileSync(archivo, 'utf8'));
-  if (filas.length < 2) throw new Error('El archivo no tiene filas de datos (¿solo encabezado?).');
+// Aplica una foto de stock (filas ya parseadas: encabezado + datos) como RECUENTO.
+// Vive aparte del CLI para poder alimentarla desde otra fuente sin pasar por un archivo:
+// hoy la usan `import:inventario` (CSV a mano) y `sync:3c --fuente=stock` (la foto en vivo
+// de 3c por el proxy SQL). No cierra el pool: eso es del que la llama.
+export async function aplicarInventario(
+  filas: string[][],
+  opts: { dry: boolean; exclusivo: boolean; etiqueta: string },
+): Promise<void> {
+  const { dry, exclusivo, etiqueta } = opts;
+  if (filas.length < 2) throw new Error('La foto no tiene filas de datos (¿solo encabezado?).');
 
   // Resuelve columnas por nombre, tolerando alias (3c cambia el encabezado del código
   // de producto entre exports: "3C" vs "ARTICULO" vs "ARTICU_ID"…).
@@ -172,7 +180,7 @@ async function main(archivo: string, dry: boolean, exclusivo: boolean): Promise<
       else salidas++;
     }
     console.log('── PLAN (--dry, no se escribió nada) ──────────────────────────');
-    console.log(`Archivo: ${archivo}`);
+    console.log(`Fuente: ${etiqueta}`);
     console.log(`Fecha del inventario: ${fecha}`);
     console.log(`Depósitos en el archivo (${depsArchivo.length}): ${depsArchivo.join(', ')}`);
     console.log(`  · ya existen como ubicación: ${depsArchivo.length - depsFaltantes.length}`);
@@ -184,7 +192,6 @@ async function main(archivo: string, dry: boolean, exclusivo: boolean): Promise<
     if (baldesEnArchivo) console.log(`⚠ ${baldesEnArchivo} fila(s) de baldes virtuales (101/102) ignoradas.`);
     if (descartadas) console.log(`⚠ ${descartadas} fila(s) descartadas (sin depósito/producto/stock válido).`);
     console.log('Para aplicarlo: corré el mismo comando SIN --dry.');
-    await pool.end();
     return;
   }
 
@@ -256,7 +263,6 @@ async function main(archivo: string, dry: boolean, exclusivo: boolean): Promise<
   console.log(`  Movimientos de inventario (recuento): ${movsCreados} (+${renglonesEntrada} renglones entrada / −${renglonesSalida} salida / ${sinCambio} ya estaban en su valor).`);
   if (descartadas) console.log(`  ⚠ ${descartadas} fila(s) descartadas (sin depósito/producto/stock válido).`);
   if (baldesEnArchivo) console.log(`  ⚠ ${baldesEnArchivo} fila(s) de baldes virtuales (101/102) ignoradas.`);
-  await pool.end();
 }
 
 // Lee el stock del sistema para las ubicaciones dadas → mapa "ubicId:producto" → cantidad.
@@ -305,16 +311,23 @@ async function tipoInventarioId(): Promise<number> {
   return _inventarioId;
 }
 
-const argv = process.argv.slice(2);
-const dry = argv.includes('--dry');
-const exclusivo = argv.includes('--exclusivo');
-const archivo = argv.find((a) => !a.startsWith('--'));
-if (!archivo) {
-  console.error('Uso: npm run import:inventario -- <archivo.csv|tsv> [--dry] [--exclusivo]');
-  process.exit(1);
-}
+// Solo corre como CLI (import:inventario). Cuando otro módulo importa aplicarInventario(),
+// este bloque NO se ejecuta (import.meta.url ≠ argv[1]).
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const argv = process.argv.slice(2);
+  const dry = argv.includes('--dry');
+  const exclusivo = argv.includes('--exclusivo');
+  const archivo = argv.find((a) => !a.startsWith('--'));
+  if (!archivo) {
+    console.error('Uso: npm run import:inventario -- <archivo.csv|tsv> [--dry] [--exclusivo]');
+    process.exit(1);
+  }
 
-main(archivo, dry, exclusivo).catch((err: unknown) => {
-  console.error('❌ Error importando inventario:', err);
-  process.exit(1);
-});
+  const filas = parseDelimited(readFileSync(archivo, 'utf8'));
+  aplicarInventario(filas, { dry, exclusivo, etiqueta: archivo })
+    .catch((err: unknown) => {
+      console.error('❌ Error importando inventario:', err);
+      process.exitCode = 1;
+    })
+    .finally(() => pool.end());
+}

@@ -1,9 +1,10 @@
 import { readFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { sql } from 'drizzle-orm';
 import { db, pool } from './client.js';
 import { compras, productos, proveedores } from './schema.js';
 import { parseDelimited } from './csv.js';
-import { interpretarCompras } from './compras-lectura.js';
+import { interpretarCompras, type FilaCompra } from './compras-lectura.js';
 import { resolverUsuarioIntegracion } from '../repositories/movimientos.repository.js';
 
 // Importa las COMPRAS reales a proveedores (base del gasto por proveedor). Una fila = un
@@ -24,28 +25,16 @@ import { resolverUsuarioIntegracion } from '../repositories/movimientos.reposito
 // AJUSTE DE SALDO, GASTOS SOCIOS, IMPUESTOS, GASTOS BANCARIOS — ver domain/familias.ts):
 // no entran al gasto por proveedor.
 
-async function main(archivo: string, dry: boolean): Promise<void> {
-  const filas = parseDelimited(readFileSync(archivo, 'utf8'));
-  const { registros, saltadas, excluidasFamilia } = interpretarCompras(filas);
-
+// Escribe los renglones ya interpretados: auto-crea productos/proveedores faltantes y hace
+// el upsert idempotente en `compras`. Vive aparte de main() (que lee el archivo) para que el
+// sync en vivo desde 3c (sync-3c.ts) reuse EXACTAMENTE la misma persistencia. Devuelve la
+// cantidad de renglones escritos. No cierra el pool (lo hace quien la llama).
+export async function persistirCompras(registros: FilaCompra[]): Promise<number> {
   const prods = new Map<string, { codigo3c: string; nombre: string; unidadBase: string; familia: string | null }>();
   const provs = new Map<number, { numero3c: number; nombre: string }>();
   for (const r of registros) {
     if (!prods.has(r.producto3c)) prods.set(r.producto3c, { codigo3c: r.producto3c, nombre: r.nombre, unidadBase: 'UN', familia: r.familia || null });
     if (!provs.has(r.proveedorNum)) provs.set(r.proveedorNum, { numero3c: r.proveedorNum, nombre: r.proveedorNombre });
-  }
-
-  const gastoTotal = registros.reduce((a, r) => a + r.precioTotal, 0);
-  console.log(
-    `Filas: ${filas.length - 1} · compras válidas: ${registros.length} · saltadas: ${saltadas} · excluidas por familia (no compra real): ${excluidasFamilia} · productos: ${prods.size} · proveedores: ${provs.size} · gasto neto total: $${gastoTotal.toLocaleString('es-AR')}`,
-  );
-  if (dry) {
-    console.log('— DRY RUN: no se escribió nada. Muestra (primeras 5):');
-    for (const r of registros.slice(0, 5)) {
-      console.log(`  ${r.fecha} ${r.numero} · ${r.producto3c} ${r.nombre} · ${r.proveedorNombre} · ${r.cantidad} × $${r.precioUnitario} = $${r.precioTotal} (${r.familia})`);
-    }
-    await pool.end();
-    return;
   }
 
   const usuarioId = await resolverUsuarioIntegracion();
@@ -105,19 +94,44 @@ async function main(archivo: string, dry: boolean): Promise<void> {
       });
     escritos += lote.length;
   }
+  return escritos;
+}
 
+async function main(archivo: string, dry: boolean): Promise<void> {
+  const filas = parseDelimited(readFileSync(archivo, 'utf8'));
+  const { registros, saltadas, excluidasFamilia } = interpretarCompras(filas);
+
+  const productosUnicos = new Set(registros.map((r) => r.producto3c)).size;
+  const proveedoresUnicos = new Set(registros.map((r) => r.proveedorNum)).size;
+  const gastoTotal = registros.reduce((a, r) => a + r.precioTotal, 0);
+  console.log(
+    `Filas: ${filas.length - 1} · compras válidas: ${registros.length} · saltadas: ${saltadas} · excluidas por familia (no compra real): ${excluidasFamilia} · productos: ${productosUnicos} · proveedores: ${proveedoresUnicos} · gasto neto total: $${gastoTotal.toLocaleString('es-AR')}`,
+  );
+  if (dry) {
+    console.log('— DRY RUN: no se escribió nada. Muestra (primeras 5):');
+    for (const r of registros.slice(0, 5)) {
+      console.log(`  ${r.fecha} ${r.numero} · ${r.producto3c} ${r.nombre} · ${r.proveedorNombre} · ${r.cantidad} × $${r.precioUnitario} = $${r.precioTotal} (${r.familia})`);
+    }
+    await pool.end();
+    return;
+  }
+
+  const escritos = await persistirCompras(registros);
   console.log(`✔ Compras importadas/actualizadas: ${escritos}. Productos/proveedores faltantes auto-creados, familia seteada.`);
   await pool.end();
 }
 
-const archivo = process.argv[2];
-const dry = process.argv.includes('--dry');
-if (!archivo) {
-  console.error('Uso: npm run import:compras -- <archivo.csv|tsv> [--dry]');
-  process.exit(1);
+// Solo corre main() cuando se invoca como CLI (import:compras). Cuando otro módulo hace
+// `import { persistirCompras }`, este bloque NO se ejecuta (import.meta.url ≠ argv[1]).
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const archivo = process.argv[2];
+  const dry = process.argv.includes('--dry');
+  if (!archivo) {
+    console.error('Uso: npm run import:compras -- <archivo.csv|tsv> [--dry]');
+    process.exit(1);
+  }
+  main(archivo, dry).catch((err: unknown) => {
+    console.error('❌ Error importando compras:', err);
+    process.exit(1);
+  });
 }
-
-main(archivo, dry).catch((err: unknown) => {
-  console.error('❌ Error importando compras:', err);
-  process.exit(1);
-});

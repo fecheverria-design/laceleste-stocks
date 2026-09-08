@@ -29,6 +29,7 @@
     "sync:abastecimientos": "tsx src/db/sync-abastecimientos.ts",
     "sync:recepciones": "tsx src/db/sync-recepciones.ts",
     "sync:extras": "tsx src/db/sync-extras.ts",
+    "sync:3c": "tsx src/db/sync-3c.ts",
     "health-check": "tsx src/db/health-check.ts"
   },
   "dependencies": {
