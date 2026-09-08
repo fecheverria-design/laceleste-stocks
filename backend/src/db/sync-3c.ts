@@ -5,6 +5,7 @@ import { consultarProxy } from './tresc-proxy.js';
 import { interpretarCompras } from './compras-lectura.js';
 import { persistirCompras } from './import-compras.js';
 import { aplicarInventario } from './import-inventario.js';
+import { importarProductos } from './import-productos.js';
 
 // Sincroniza datos desde 3c EN VIVO, reemplazando los exports CSV que se bajaban a mano de
 // Firefox. 3c corre sobre Oracle y NO tiene API REST; se lee por el proxy SQL de solo lectura
@@ -14,6 +15,7 @@ import { aplicarInventario } from './import-inventario.js';
 // SOLO LECTURA sobre 3c. 3c sigue siendo la fuente de verdad; acá solo consolidamos.
 //
 // Fuentes:
+//   productos   → proxy, vista V_ARTICULO (el maestro: nombre, unidad, rubro) → import:productos
 //   compras     → proxy, vista V_COMP_PRECIOS_CPRA (ventana rodante de N días) → import:compras
 //   stock       → proxy, vista V_LACELESTE_STOCK (la FOTO del stock de 3c) → import:inventario
 //   [pendiente] precios → servlet SqlToExcel (.xls); falta el lector de .xls.
@@ -33,9 +35,11 @@ import { aplicarInventario } from './import-inventario.js';
 // de la app (genera RECUENTOS), así que se pide explícito hasta que se decida ponerlo en el
 // cron horario. Ver docs/IMPORTACION-3C.md.
 
-const FUENTES_DISPONIBLES = ['compras', 'stock'] as const;
+// El orden importa: productos primero, porque compras y la foto de stock necesitan que el
+// maestro tenga el código (ninguna de las dos inventa productos).
+const FUENTES_DISPONIBLES = ['productos', 'compras', 'stock'] as const;
 type Fuente = (typeof FUENTES_DISPONIBLES)[number];
-const FUENTES_POR_DEFECTO: Fuente[] = ['compras'];
+const FUENTES_POR_DEFECTO: Fuente[] = ['productos', 'compras'];
 
 interface Args {
   dry: boolean;
@@ -100,6 +104,46 @@ function queryCompras(dias: number): string {
     ) pb ON pb.ID = v.ARTICU_ID
     WHERE TRUNC(v.FECHA) >= TRUNC(SYSDATE) - ${dias}
     ORDER BY v.DOC_ID ASC, v.ID ASC`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PRODUCTOS — el maestro de 3c (V_ARTICULO). Reemplaza el export a mano que había que
+// bajar de Firefox cada vez que daban de alta un artículo. En ESTA vista `ID` es el
+// codigo_3c (1 = AJUSTE CENTAVO, 10 = BOLSA RESIDUOS…), no un id interno.
+//
+// Pisa nombre, unidad, familia y subfamilia (3c manda, regla #1) pero NO toca las columnas
+// que son enriquecimiento propio de la app (presentación de compra, unidades por bulto,
+// clasificación ABC, información): al no venir en las filas, el upsert las conserva.
+const MINIMO_PRODUCTOS = 500;
+
+function queryProductos(): string {
+  return `SELECT ID, DENOMINACION, UMEDIDA, FAMILIA_DESCR, SUBFAM_DESCR
+    FROM LACELESTE.V_ARTICULO
+    ORDER BY ID`;
+}
+
+async function syncProductos(dry: boolean): Promise<void> {
+  console.log(`▶ Productos 3c ${dry ? '(DRY-RUN) ' : ''}— maestro V_ARTICULO`);
+  const filas = await consultarProxy(queryProductos());
+  const datos = filas.slice(1).filter((f) => (f[0] ?? '').trim() !== '');
+  if (datos.length < MINIMO_PRODUCTOS) {
+    throw new Error(
+      `El maestro de 3c trajo solo ${datos.length} producto(s) (mínimo esperado ${MINIMO_PRODUCTOS}): se aborta.`,
+    );
+  }
+
+  const existentes = new Set((await db.select({ c: productos.codigo3c }).from(productos)).map((p) => p.c));
+  const nuevos = datos.filter((f) => !existentes.has((f[0] ?? '').trim()));
+  console.log(`  Maestro 3c: ${datos.length} producto(s) · ${nuevos.length} sin alta en la app`);
+  for (const f of nuevos.slice(0, 20)) {
+    console.log(`    ${dry ? '[dry] ' : ''}+ ${f[0]} ${f[1]} (${f[3] ?? 'sin familia'} / ${f[4] ?? '-'}) · ${f[2] ?? 'UNIDAD'}`);
+  }
+  if (nuevos.length > 20) console.log(`    … y ${nuevos.length - 20} más.`);
+  if (dry) return;
+
+  // Encabezados que entiende import:productos (ver sus alias).
+  const cabecera = ['3C', 'PRODUCTOS', 'UNIDAD', 'FAMILIA', 'SUBFAMILIA'];
+  await importarProductos([cabecera, ...datos.map((f) => f.slice(0, 5))]);
 }
 
 async function syncCompras(dias: number, dry: boolean): Promise<void> {
@@ -204,6 +248,7 @@ async function main(): Promise<void> {
   const { dry, dias, fuentes } = parseArgs(process.argv.slice(2));
   console.log(`▶ Sync 3c ${dry ? '(DRY-RUN) ' : ''}· fuentes: ${fuentes.join(', ')}`);
   for (const f of fuentes) {
+    if (f === 'productos') await syncProductos(dry);
     if (f === 'compras') await syncCompras(dias, dry);
     if (f === 'stock') await syncStock(dry);
   }

@@ -81,6 +81,25 @@ UNIMED, AÑO, MES`). El separador (`,` `;` `tab`) se autodetecta.
 
 ---
 
+## `sync:3c -- --fuente=productos [--dry]` — el maestro de 3c, en vivo
+
+Reemplaza el export de productos que había que bajar a mano cada vez que daban un artículo de
+alta. Lee `LACELESTE.V_ARTICULO` por el proxy y lo pasa por `import:productos` (mismos alias de
+encabezado), así que la lógica de upsert es una sola.
+
+- En **esta** vista `ID` **es el `codigo_3c`** (1 = AJUSTE CENTAVO, 10 = BOLSA RESIDUOS…).
+  Tiene además una columna `ARTICU_ID` que viene vacía: no es esa.
+- Pisa **nombre, unidad, familia y subfamilia** (3c manda, regla #1).
+- **NO toca el enriquecimiento propio de la app**: presentación de compra, unidades por bulto,
+  clasificación ABC e información se conservan, porque esas columnas no vienen en las filas y
+  el upsert las mantiene con `COALESCE`. Verificado el 2026-09-08 sobre 1.196 productos: los
+  contadores de esas 4 columnas quedaron idénticos.
+- Aborta si el maestro trae menos de 500 productos (lectura cortada).
+- Va **en las fuentes por defecto**, antes de compras: ni compras ni la foto de stock crean
+  productos, así que el maestro tiene que ir primero.
+
+---
+
 ## `sync:3c -- --fuente=stock [--dry]` — la FOTO de stock de 3c, en vivo
 
 Misma mecánica que `import:inventario --exclusivo`, pero la foto no viene de un CSV bajado a
