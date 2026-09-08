@@ -10,6 +10,7 @@ import { consumosRouter } from './consumos.routes.js';
 import { proveedoresRouter } from './proveedores.routes.js';
 import { informeRouter } from './informe.routes.js';
 import { indicadoresRouter } from './indicadores.routes.js';
+import { fichasRouter } from './fichas.routes.js';
 
 // Router raíz de la API. Se monta bajo /api en app.ts.
 export const apiRouter = Router();
@@ -25,3 +26,4 @@ apiRouter.use(consumosRouter);
 apiRouter.use(proveedoresRouter);
 apiRouter.use(informeRouter);
 apiRouter.use(indicadoresRouter);
+apiRouter.use(fichasRouter);

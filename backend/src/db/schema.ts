@@ -337,3 +337,48 @@ export const indicadoresMensuales = pgTable('indicadores_mensuales', {
     .references(() => usuarios.id),
   actualizadoEn: timestamp('actualizado_en', { withTimezone: true }).notNull().defaultNow(),
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ESPEJO de los movimientos de 3c.
+//
+// Lo que el encargado de depósito cargó en 3c, tal cual, para poder comparar contra lo que
+// la app del compañero dice que se despachó (medición de desempeño pedida por J el
+// 2026-09-08: no mide si despachó lo que se le pidió, mide si lo que sacó quedó registrado).
+//
+// ⚠ Es una tabla ESPEJO, NO movimientos de la app: no toca stock, no tiene correlativo
+// propio y no entra a `stock_actual`. Antes esto no se podía —cargar los movimientos de 3c
+// junto con los sincronizados descontaba el stock dos veces, por eso el procedimiento era
+// "anular lo sincronizado antes de importar"—. Desde el 2026-09-08 el stock lo fija la foto
+// de 3c cada hora, así que los movimientos de 3c ya no le hacen falta a nadie para stock:
+// pueden vivir al costado, solo para auditoría y para esta medición.
+//
+// Sin FK a `productos` ni a `ubicaciones` a propósito: es un espejo fiel de lo que dice 3c,
+// aunque traiga un código que todavía no dimos de alta. Si le pusiéramos FK, un artículo
+// nuevo tiraría abajo la importación entera.
+export const movimientos3c = pgTable(
+  'movimientos_3c',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    fecha: date('fecha').notNull(),
+    // Número de 3c, ej. 'X 0001-00005991'. Se repite por cada renglón del documento.
+    numero: varchar('numero', { length: 64 }).notNull(),
+    // Renglón dentro del documento: 3c no lo numera, lo asigna el importador por orden de
+    // aparición. Junto con (numero, producto) hace la clave que evita duplicar al reimportar.
+    renglon: integer('renglon').notNull().default(1),
+    // Rint / ReMe / Fcpr / NCC, tal cual viene de 3c (sin traducir a nuestros tipos).
+    tipoDoc: varchar('tipo_doc', { length: 16 }).notNull(),
+    origenDep3c: integer('origen_dep_3c'),
+    destinoDep3c: integer('destino_dep_3c'),
+    producto3c: varchar('producto_3c', { length: 32 }).notNull(),
+    cantidad: numeric('cantidad', { precision: 14, scale: 4 }).notNull(),
+    unidad: varchar('unidad', { length: 16 }),
+    // Usuario de 3c que cargó el documento, cuando el export lo trae.
+    usuario3c: varchar('usuario_3c', { length: 64 }),
+    importadoEn: timestamp('importado_en', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('uq_mov3c_numero_producto_renglon').on(t.numero, t.producto3c, t.renglon),
+    index('idx_mov3c_fecha').on(t.fecha),
+    index('idx_mov3c_destino').on(t.destinoDep3c),
+  ],
+);

@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { FAMILIAS_CON_COMPRADOR, FAMILIAS_EXCLUIDAS_GASTO, PRODUCTOS_FICTICIOS } from '../domain/familias.js';
+import type { CoberturaCompras } from '../domain/procedencia.js';
 import { esControlado, ordenPrecio } from './precio-vigente.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -143,6 +144,47 @@ export async function gastoMensualPorProveedor(desde: string, hasta: string): Pr
 }
 
 // Meses con compras cargadas (para el selector del informe), más nuevo primero.
+// Qué sabe la app de la tabla `compras` ahora mismo: cuánto hay cargado, hasta qué fecha
+// llega y cuántos renglones quedaron sin IVA reconstruido. Alimenta la ficha de procedencia
+// (domain/procedencia.ts) para que diga datos reales y no una descripción escrita a mano.
+//
+// ⚠ `sin_iva` cuenta SOLO los renglones que de verdad entran al gasto del informe (mismos
+// filtros que gastoPorMesProveedorProducto). Contarlos todos era mentir: al 08/09 hay 33
+// renglones con total_con_iva NULL y los 33 son de familias excluidas (servicios, logística,
+// ajustes de saldo), así que no achican ningún total. La ficha avisaría de un problema que
+// no existe, que es exactamente lo que este módulo tiene que evitar.
+export async function coberturaCompras(): Promise<CoberturaCompras> {
+  const res = await db.execute<{ renglones: number; desde: string | null; hasta: string | null; sin_iva: number }>(
+    sql`SELECT count(*)::int AS renglones,
+               to_char(min(c.fecha), 'DD/MM/YYYY') AS desde,
+               to_char(max(c.fecha), 'DD/MM/YYYY') AS hasta,
+               count(*) FILTER (
+                 WHERE c.total_con_iva IS NULL
+                   AND c.producto_3c NOT IN (${sql.join(
+                     PRODUCTOS_FICTICIOS.map((cod) => sql`${cod}`),
+                     sql`, `,
+                   )})
+                   AND upper(COALESCE(p.familia, '')) NOT IN (${sql.join(
+                     FAMILIAS_EXCLUIDAS_GASTO.map((f) => sql`${f}`),
+                     sql`, `,
+                   )})
+                   AND upper(COALESCE(p.familia, '')) IN (${sql.join(
+                     FAMILIAS_CON_COMPRADOR.map((f) => sql`${f}`),
+                     sql`, `,
+                   )})
+               )::int AS sin_iva
+        FROM compras c
+        LEFT JOIN productos p ON p.codigo_3c = c.producto_3c`,
+  );
+  const r = res.rows[0];
+  return {
+    renglones: r?.renglones ?? 0,
+    desde: r?.desde ?? null,
+    hasta: r?.hasta ?? null,
+    sin_iva: r?.sin_iva ?? 0,
+  };
+}
+
 export async function mesesConCompras(): Promise<string[]> {
   const res = await db.execute<{ mes: string }>(
     sql`SELECT DISTINCT to_char(fecha, 'YYYY-MM') AS mes FROM compras ORDER BY 1 DESC`,

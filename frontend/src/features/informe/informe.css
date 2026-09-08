@@ -761,3 +761,63 @@
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+/* Ficha de procedencia: el fundamento de un cálculo, plegado. Discreta a propósito —
+   se consulta cuando un número no cierra, no se lee todos los días. */
+.inf .ficha {
+  margin-top: 12px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: var(--track);
+}
+.inf .ficha > summary {
+  cursor: pointer;
+  padding: 7px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--teal);
+  list-style: none;
+  user-select: none;
+}
+.inf .ficha > summary::-webkit-details-marker {
+  display: none;
+}
+.inf .ficha > summary::before {
+  content: '▸ ';
+}
+.inf .ficha[open] > summary::before {
+  content: '▾ ';
+}
+.inf .ficha[open] > summary {
+  border-bottom: 1px dashed var(--border);
+}
+.inf .ficha-body {
+  padding: 10px 12px 12px;
+}
+.inf .ficha-tit {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 8px;
+}
+.inf .ficha-paso + .ficha-paso {
+  margin-top: 10px;
+}
+.inf .ficha-paso-tit {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.inf .ficha-paso p {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--ink2);
+}
+.inf .ficha-paso ul {
+  margin: 5px 0 0;
+  padding-left: 18px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ink2);
+}
