@@ -23,6 +23,7 @@
     "import:proveedores": "tsx src/db/import-proveedores.ts",
     "import:ubicaciones": "tsx src/db/import-ubicaciones.ts",
     "import:movimientos": "tsx src/db/import-movimientos.ts",
+    "import:movimientos3c": "tsx src/db/import-movimientos-3c.ts",
     "import:inventario": "tsx src/db/import-inventario.ts",
     "import:precios": "tsx src/db/import-precios.ts",
     "import:compras": "tsx src/db/import-compras.ts",
@@ -39,6 +40,7 @@
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
     "pg": "^8.21.0",
+    "xlsx": "^0.18.5",
     "zod": "^4.4.3"
   },
   "devDependencies": {
