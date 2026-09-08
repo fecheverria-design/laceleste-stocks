@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { sql } from 'drizzle-orm';
 import { db, pool } from './client.js';
 import { productos } from './schema.js';
@@ -16,6 +17,9 @@ import { parseDelimited } from './csv.js';
 //   informacion         ← INFORMACION
 // Idempotente: upsert por codigo_3c. Columnas ausentes NO pisan lo ya cargado (COALESCE).
 // Uso: npm run import:productos -- <archivo.csv|tsv>
+//
+// La misma función la alimenta `sync:3c --fuente=productos` desde la vista V_ARTICULO por el
+// proxy (armando las filas con estos mismos encabezados), así el maestro se mantiene solo.
 
 // es-AR: coma decimal, punto de miles. Devuelve null si vacío/ inválido.
 function parseNumero(s: string | undefined): number | null {
@@ -26,9 +30,10 @@ function parseNumero(s: string | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-async function main(archivo: string): Promise<void> {
-  const filas = parseDelimited(readFileSync(archivo, 'utf8'));
-  if (filas.length < 2) throw new Error('El archivo no tiene filas de datos (¿solo encabezado?).');
+// Importa un maestro de productos ya parseado (encabezado + filas). Vive aparte del CLI para
+// poder alimentarlo desde otra fuente sin pasar por un archivo. No cierra el pool.
+export async function importarProductos(filas: string[][]): Promise<number> {
+  if (filas.length < 2) throw new Error('El maestro no tiene filas de datos (¿solo encabezado?).');
 
   const norm = filas[0]!.map((h) => h.trim().toUpperCase());
   // Índice de la 1ª columna cuyo encabezado matchea alguno de los nombres (exacto).
@@ -123,16 +128,21 @@ async function main(archivo: string): Promise<void> {
       `Con bulto (U>1): ${conBulto}${iU < 0 ? ' (⚠ sin columna U)' : ''}. ` +
       `Saltados (sin ID o nombre): ${saltados}.`,
   );
-  await pool.end();
+  return registros.length;
 }
 
-const archivo = process.argv[2];
-if (!archivo) {
-  console.error('Uso: npm run import:productos -- <archivo.csv|tsv>');
-  process.exit(1);
+// Solo corre como CLI (import:productos). Cuando otro módulo importa importarProductos(),
+// este bloque NO se ejecuta (import.meta.url ≠ argv[1]).
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const archivo = process.argv[2];
+  if (!archivo) {
+    console.error('Uso: npm run import:productos -- <archivo.csv|tsv>');
+    process.exit(1);
+  }
+  importarProductos(parseDelimited(readFileSync(archivo, 'utf8')))
+    .catch((err: unknown) => {
+      console.error('❌ Error importando productos:', err);
+      process.exitCode = 1;
+    })
+    .finally(() => pool.end());
 }
-
-main(archivo).catch((err: unknown) => {
-  console.error('❌ Error importando productos:', err);
-  process.exit(1);
-});
