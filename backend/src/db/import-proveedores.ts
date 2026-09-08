@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { sql } from 'drizzle-orm';
 import { db, pool } from './client.js';
 import { proveedores } from './schema.js';
@@ -15,9 +16,11 @@ function limpiar(v: string | undefined): string | null {
   return t === '' || t === '-' ? null : t;
 }
 
-async function main(archivo: string): Promise<void> {
-  const filas = parseDelimited(readFileSync(archivo, 'utf8'));
-  if (filas.length < 2) throw new Error('El archivo no tiene filas de datos (¿solo encabezado?).');
+// Importa un maestro de proveedores ya parseado (encabezado + filas). Vive aparte del CLI
+// para poder alimentarlo desde otra fuente: hoy lo usan `import:proveedores` (CSV) y
+// `sync:3c --fuente=proveedores` (la vista LC_V_PROVEEDORES). No cierra el pool.
+export async function importarProveedores(filas: string[][]): Promise<number> {
+  if (filas.length < 2) throw new Error('El maestro no tiene filas de datos (¿solo encabezado?).');
 
   // Resuelve columnas por nombre, aceptando variantes de 3c ("ID PROVEEDOR" / "NUMERO").
   const h = filas[0]!;
@@ -62,16 +65,20 @@ async function main(archivo: string): Promise<void> {
   console.log(
     `✔ Proveedores importados/actualizados: ${registros.length}. Saltados (sin NUMERO o NOMBRE): ${saltados}.`,
   );
-  await pool.end();
+  return registros.length;
 }
 
-const archivo = process.argv[2];
-if (!archivo) {
-  console.error('Uso: npm run import:proveedores -- <archivo.csv|tsv>');
-  process.exit(1);
+// Solo corre como CLI (import:proveedores).
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const archivo = process.argv[2];
+  if (!archivo) {
+    console.error('Uso: npm run import:proveedores -- <archivo.csv|tsv>');
+    process.exit(1);
+  }
+  importarProveedores(parseDelimited(readFileSync(archivo, 'utf8')))
+    .catch((err: unknown) => {
+      console.error('❌ Error importando proveedores:', err);
+      process.exitCode = 1;
+    })
+    .finally(() => pool.end());
 }
-
-main(archivo).catch((err: unknown) => {
-  console.error('❌ Error importando proveedores:', err);
-  process.exit(1);
-});

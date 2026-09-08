@@ -100,6 +100,20 @@ encabezado), así que la lógica de upsert es una sola.
 
 ---
 
+## `sync:3c -- --fuente=proveedores [--dry]` — el maestro de proveedores, en vivo
+
+Lee `LACELESTE.LC_V_PROVEEDORES` y lo pasa por `import:proveedores`. Antes solo se creaban
+los proveedores que aparecían en la ventana de compras, así que uno dado de alta hace poco y
+sin compras recientes no existía en la app (al 2026-09-08 faltaban 24, casi todos personas con
+numeración 7657+).
+
+- ⚠ En esa vista **el nombre está en `APELLIDO`**; la columna `NOMBRE` viene vacía. Es el mismo
+  gotcha que en la query de compras.
+- El **CUIT usa `0`** como placeholder de "no cargado" → se manda vacío para que quede `null`.
+- Aborta si trae menos de 500 proveedores. Va en las fuentes por defecto.
+
+---
+
 ## `sync:3c -- --fuente=stock [--dry]` — la FOTO de stock de 3c, en vivo
 
 Misma mecánica que `import:inventario --exclusivo`, pero la foto no viene de un CSV bajado a
@@ -117,8 +131,12 @@ verdad del stock (Opción A, decisión de J 2026-09-04) y esa vista **se refresc
 - Es **autoritativa**: lo que la app tiene y la foto no lista queda en 0. Por eso aborta si la
   foto trae menos de 500 filas o si no queda ninguna fila aplicable — una lectura cortada
   borraría stock.
-- **No está en las fuentes por defecto**: `npm run sync:3c` sigue trayendo solo compras. La foto
-  se pide explícita (`--fuente=stock`) hasta decidir si va al cron horario.
+- **No está en las fuentes por defecto**: `npm run sync:3c` trae productos, proveedores y
+  compras. La foto se pide explícita (`--fuente=stock`) — y así corre en el cron horario.
+- Los movimientos que genera llevan **`Foto 3c <fecha>`** en observaciones (el conteo físico a
+  mano dice `Inventario <fecha>`), para distinguir en la hoja de Movimientos lo que vino de 3c
+  de lo que vino de la app del compañero. Decisión de J 2026-09-08: prefiere verlos marcados
+  antes que filtrados.
 
 ⚠ Sigue valiendo el modo de falla de toda foto: si la app tiene una recepción que 3c todavía no
 cargó, la foto la borra. Bajo Opción A eso es *la decisión* (3c manda), pero si el número
@@ -126,7 +144,7 @@ aparece raro, ese es el primer sospechoso.
 
 ---
 
-## `import:precios -- <archivo> [--dry]`
+## `import:precios -- <archivo> [--dry] [--controlado]`
 
 Histórico de precios. Columnas: `ID (producto), PRECIO_UNITARIO, PERSONAS_ID (proveedor),
 PROVEEDORES (nombre), FECHA, TIPO (COMPRA|ACTUALIZACION)`.
@@ -136,6 +154,22 @@ PROVEEDORES (nombre), FECHA, TIPO (COMPRA|ACTUALIZACION)`.
 - **El gráfico de evolución usa solo las `COMPRA`.**
 - **`$0` = "sin precio"** (placeholder de 3c; se ignora para el vigente y la valorización).
 - Idempotente por `(producto, proveedor, fecha, tipo)`.
+
+
+### `--controlado` — marcar de una lo que compras controló en el mes
+
+Además de importarlos, marca cada precio como **EL precio controlado** de su producto: el que
+le gana a todo en la prelación (controlado > última COMPRA > última ACTUALIZACION, ver
+`repositories/precio-vigente.ts`). Sirve para cargar de un saque lo controlado del mes en vez
+de marcarlo a mano de a uno en la hoja de Control de precios.
+
+- Solo puede haber **UN controlado por producto** (índice parcial `uq_precio_controlado_producto`).
+  Si el archivo trae varias filas del mismo producto, **gana la de fecha más nueva** (a igualdad,
+  la última del archivo) y se avisa cuántas quedaron sin marcar. Las demás se importan igual,
+  solo que sin la marca.
+- Desmarca el controlado anterior de esos productos, misma semántica que el botón de la hoja.
+- Todo en una transacción.
+- Probalo con `--dry` primero: dice cuántos se van a marcar antes de tocar nada.
 
 ---
 
