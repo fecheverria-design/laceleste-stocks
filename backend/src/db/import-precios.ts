@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { sql } from 'drizzle-orm';
 import { db, pool } from './client.js';
 import { precios, productos, proveedores } from './schema.js';
@@ -16,7 +17,17 @@ import { resolverUsuarioIntegracion } from '../repositories/movimientos.reposito
 //   FAMILIA / AÑO / MES / RESPONSABLE se ignoran.
 //
 // Idempotente: upsert por (producto_3c, proveedor_id, vigente_desde, tipo). Auto-crea
-// productos y proveedores faltantes. Uso: npm run import:precios -- <archivo> [--dry]
+// productos y proveedores faltantes.
+//
+// Uso: npm run import:precios -- <archivo> [--dry] [--controlado]
+//
+// --controlado: además de importarlos, MARCA cada precio como EL precio controlado de su
+// producto (el que le gana a todo en la prelación, ver repositories/precio-vigente.ts). Es
+// para cargar de una lo que compras controló en el mes, sin marcarlo a mano de a uno en la
+// hoja de Control de precios. Como solo puede haber UN controlado por producto (índice
+// parcial `uq_precio_controlado_producto`), si el archivo trae varias filas del mismo
+// producto gana la de fecha más nueva, y se avisa cuántas quedaron afuera. Desmarca el
+// controlado anterior de esos productos, igual que hace la hoja.
 
 function parseFecha(s: string): string | null {
   const m = s.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
@@ -37,7 +48,7 @@ function normalizarTipo(s: string): 'COMPRA' | 'ACTUALIZACION' {
   return t.startsWith('ACTUALIZ') ? 'ACTUALIZACION' : 'COMPRA';
 }
 
-interface FilaPrecio {
+export interface FilaPrecio {
   producto3c: string;
   nombre: string;
   proveedorNum: number;
@@ -47,7 +58,19 @@ interface FilaPrecio {
   vigenteDesde: string;
 }
 
-async function main(archivo: string, dry: boolean): Promise<void> {
+// De todas las filas del archivo, cuál se marca como controlada por producto: solo puede
+// haber UNA (índice parcial `uq_precio_controlado_producto`). Gana la de fecha más nueva;
+// a igualdad de fecha, la última del archivo. Aparte para poder testearla sin DB.
+export function unoPorProducto(registros: FilaPrecio[]): Map<string, FilaPrecio> {
+  const elegidos = new Map<string, FilaPrecio>();
+  for (const r of registros) {
+    const previa = elegidos.get(r.producto3c);
+    if (previa === undefined || r.vigenteDesde >= previa.vigenteDesde) elegidos.set(r.producto3c, r);
+  }
+  return elegidos;
+}
+
+async function main(archivo: string, dry: boolean, controlado: boolean): Promise<void> {
   const filas = parseDelimited(readFileSync(archivo, 'utf8'));
   if (filas.length < 2) throw new Error('El archivo no tiene filas de datos (¿solo encabezado?).');
 
@@ -108,6 +131,14 @@ async function main(archivo: string, dry: boolean): Promise<void> {
   console.log(
     `Filas: ${filas.length - 1} · válidas: ${registros.length} (compras: ${compras}, actualizaciones: ${registros.length - compras}) · saltadas: ${saltados} · productos: ${prods.size} · proveedores: ${provs.size}`,
   );
+  const aControlar = controlado ? unoPorProducto(registros) : new Map<string, FilaPrecio>();
+  if (controlado) {
+    console.log(
+      `  --controlado: se marcarán ${aControlar.size} precio(s), uno por producto` +
+        (registros.length > aControlar.size ? ` (${registros.length - aControlar.size} fila(s) del archivo comparten producto y NO se marcan)` : ''),
+    );
+  }
+
   if (dry) {
     console.log('— DRY RUN: no se escribió nada. Muestra (primeras 5):');
     for (const r of registros.slice(0, 5)) {
@@ -159,17 +190,61 @@ async function main(archivo: string, dry: boolean): Promise<void> {
   }
 
   console.log(`✔ Precios importados/actualizados: ${escritos} (compras: ${compras}). Productos/proveedores faltantes auto-creados.`);
+
+  if (controlado && aControlar.size > 0) {
+    const marcados = await marcarControlados([...aControlar.values()], idPorNumero, usuarioId);
+    console.log(`✔ Precios marcados como CONTROLADOS: ${marcados} (uno por producto; le ganan a cualquier compra posterior).`);
+  }
   await pool.end();
 }
 
-const archivo = process.argv[2];
-const dry = process.argv.includes('--dry');
-if (!archivo) {
-  console.error('Uso: npm run import:precios -- <archivo.csv|tsv> [--dry]');
-  process.exit(1);
+// Marca las filas dadas como EL precio controlado de su producto, en UNA transacción:
+// primero desmarca el controlado anterior de esos productos (solo puede haber uno) y
+// después marca el nuevo. Es la misma semántica que el botón de la hoja de Control de
+// precios (repositories/precios.repository.ts → marcarControlado).
+async function marcarControlados(
+  filas: FilaPrecio[],
+  idPorNumero: Map<number, number>,
+  usuarioId: number,
+): Promise<number> {
+  return db.transaction(async (tx) => {
+    const codigos = filas.map((f) => f.producto3c);
+    for (let i = 0; i < codigos.length; i += 500) {
+      const lote = codigos.slice(i, i + 500);
+      await tx.execute(
+        sql`UPDATE precios SET controlado_en = NULL, controlado_por = NULL
+            WHERE controlado_en IS NOT NULL
+              AND producto_3c IN (${sql.join(lote.map((c) => sql`${c}`), sql`, `)})`,
+      );
+    }
+    let n = 0;
+    for (const f of filas) {
+      const provId = idPorNumero.get(f.proveedorNum) ?? null;
+      const res = await tx.execute(
+        sql`UPDATE precios SET controlado_en = now(), controlado_por = ${usuarioId}
+            WHERE producto_3c = ${f.producto3c}
+              AND proveedor_id IS NOT DISTINCT FROM ${provId}
+              AND vigente_desde = ${f.vigenteDesde}
+              AND tipo = ${f.tipo}`,
+      );
+      n += res.rowCount ?? 0;
+    }
+    return n;
+  });
 }
 
-main(archivo, dry).catch((err: unknown) => {
-  console.error('❌ Error importando precios:', err);
-  process.exit(1);
-});
+// Solo corre como CLI (import:precios). Cuando un test o algún módulo importa
+// unoPorProducto(), este bloque NO se ejecuta (import.meta.url ≠ argv[1]).
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const archivo = process.argv.slice(2).find((a) => !a.startsWith('--'));
+  const dry = process.argv.includes('--dry');
+  const controlado = process.argv.includes('--controlado');
+  if (!archivo) {
+    console.error('Uso: npm run import:precios -- <archivo.csv|tsv> [--dry] [--controlado]');
+    process.exit(1);
+  }
+  main(archivo, dry, controlado).catch((err: unknown) => {
+    console.error('❌ Error importando precios:', err);
+    process.exit(1);
+  });
+}

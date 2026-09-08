@@ -86,9 +86,13 @@ function extrasExclusivo(
 // de 3c por el proxy SQL). No cierra el pool: eso es del que la llama.
 export async function aplicarInventario(
   filas: string[][],
-  opts: { dry: boolean; exclusivo: boolean; etiqueta: string },
+  opts: { dry: boolean; exclusivo: boolean; etiqueta: string; origen?: string },
 ): Promise<void> {
   const { dry, exclusivo, etiqueta } = opts;
+  // Encabeza las observaciones del movimiento para que en la hoja de Movimientos se vea
+  // de un vistazo de dónde salió el ajuste: un conteo físico a mano ('Inventario') o la
+  // foto de 3c ('Foto 3c'), que es lo que corre por cron.
+  const origen = opts.origen ?? 'Inventario';
   if (filas.length < 2) throw new Error('La foto no tiene filas de datos (¿solo encabezado?).');
 
   // Resuelve columnas por nombre, tolerando alias (3c cambia el encabezado del código
@@ -243,12 +247,12 @@ export async function aplicarInventario(
       }
     }
     if (entradas.length > 0) {
-      await crearRecuento(usuarioId, fecha, anio, aIdAjustes, uid, entradas, `Inventario ${fecha} (entrada dep ${dep})`);
+      await crearRecuento(usuarioId, fecha, anio, aIdAjustes, uid, entradas, `${origen} ${fecha} (entrada dep ${dep})`);
       movsCreados++;
       renglonesEntrada += entradas.length;
     }
     if (salidas.length > 0) {
-      await crearRecuento(usuarioId, fecha, anio, uid, aIdAjustes, salidas, `Inventario ${fecha} (salida dep ${dep})`);
+      await crearRecuento(usuarioId, fecha, anio, uid, aIdAjustes, salidas, `${origen} ${fecha} (salida dep ${dep})`);
       movsCreados++;
       renglonesSalida += salidas.length;
     }
@@ -257,7 +261,7 @@ export async function aplicarInventario(
   // 8) Refrescar stock final.
   await db.execute(sql`REFRESH MATERIALIZED VIEW stock_actual`);
 
-  console.log(`✔ Inventario inicial cargado (fecha ${fecha}).`);
+  console.log(`✔ ${origen} aplicado (fecha ${fecha}).`);
   console.log(`  Depósitos con stock activado: ${depsArchivo.length} (${depsArchivo.join(', ')}).`);
   console.log(`  Productos creados: ${prodFaltantes.length}. Ubicaciones creadas: ${depsFaltantes.length}${!balde101Existe ? ' (+ balde AJUSTES)' : ''}.`);
   console.log(`  Movimientos de inventario (recuento): ${movsCreados} (+${renglonesEntrada} renglones entrada / −${renglonesSalida} salida / ${sinCambio} ya estaban en su valor).`);

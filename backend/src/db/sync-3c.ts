@@ -1,11 +1,12 @@
 import { eq } from 'drizzle-orm';
 import { db, pool } from './client.js';
-import { productos, ubicaciones } from './schema.js';
+import { productos, proveedores, ubicaciones } from './schema.js';
 import { consultarProxy } from './tresc-proxy.js';
 import { interpretarCompras } from './compras-lectura.js';
 import { persistirCompras } from './import-compras.js';
 import { aplicarInventario } from './import-inventario.js';
 import { importarProductos } from './import-productos.js';
+import { importarProveedores } from './import-proveedores.js';
 
 // Sincroniza datos desde 3c EN VIVO, reemplazando los exports CSV que se bajaban a mano de
 // Firefox. 3c corre sobre Oracle y NO tiene API REST; se lee por el proxy SQL de solo lectura
@@ -16,6 +17,7 @@ import { importarProductos } from './import-productos.js';
 //
 // Fuentes:
 //   productos   → proxy, vista V_ARTICULO (el maestro: nombre, unidad, rubro) → import:productos
+//   proveedores → proxy, vista LC_V_PROVEEDORES (el maestro de proveedores) → import:proveedores
 //   compras     → proxy, vista V_COMP_PRECIOS_CPRA (ventana rodante de N días) → import:compras
 //   stock       → proxy, vista V_LACELESTE_STOCK (la FOTO del stock de 3c) → import:inventario
 //   [pendiente] precios → servlet SqlToExcel (.xls); falta el lector de .xls.
@@ -37,9 +39,9 @@ import { importarProductos } from './import-productos.js';
 
 // El orden importa: productos primero, porque compras y la foto de stock necesitan que el
 // maestro tenga el código (ninguna de las dos inventa productos).
-const FUENTES_DISPONIBLES = ['productos', 'compras', 'stock'] as const;
+const FUENTES_DISPONIBLES = ['productos', 'proveedores', 'compras', 'stock'] as const;
 type Fuente = (typeof FUENTES_DISPONIBLES)[number];
-const FUENTES_POR_DEFECTO: Fuente[] = ['productos', 'compras'];
+const FUENTES_POR_DEFECTO: Fuente[] = ['productos', 'proveedores', 'compras'];
 
 interface Args {
   dry: boolean;
@@ -104,6 +106,50 @@ function queryCompras(dias: number): string {
     ) pb ON pb.ID = v.ARTICU_ID
     WHERE TRUNC(v.FECHA) >= TRUNC(SYSDATE) - ${dias}
     ORDER BY v.DOC_ID ASC, v.ID ASC`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROVEEDORES — el maestro de 3c (LC_V_PROVEEDORES). Antes solo se creaban los que
+// aparecían en la ventana de compras, así que un proveedor dado de alta hace poco y sin
+// compras recientes no existía en la app (al 2026-09-08 faltaban 24, casi todos personas
+// con numeración 7657+).
+//
+// OJO: en esta vista el nombre está en APELLIDO (NOMBRE viene vacío), igual que en la
+// query de compras. Y el CUIT usa '0' como placeholder de "no cargado".
+const MINIMO_PROVEEDORES = 500;
+
+function queryProveedores(): string {
+  return `SELECT PERSONAS_ID, APELLIDO, CUIT
+    FROM LACELESTE.LC_V_PROVEEDORES
+    ORDER BY PERSONAS_ID`;
+}
+
+async function syncProveedores(dry: boolean): Promise<void> {
+  console.log(`▶ Proveedores 3c ${dry ? '(DRY-RUN) ' : ''}— maestro LC_V_PROVEEDORES`);
+  const filas = await consultarProxy(queryProveedores());
+  const datos = filas.slice(1).filter((f) => (f[0] ?? '').trim() !== '' && (f[1] ?? '').trim() !== '');
+  if (datos.length < MINIMO_PROVEEDORES) {
+    throw new Error(
+      `El maestro de proveedores trajo solo ${datos.length} fila(s) (mínimo esperado ${MINIMO_PROVEEDORES}): se aborta.`,
+    );
+  }
+
+  const existentes = new Set(
+    (await db.select({ n: proveedores.numero3c }).from(proveedores))
+      .map((p) => p.n)
+      .filter((n): n is number => n !== null),
+  );
+  const nuevos = datos.filter((f) => !existentes.has(Number((f[0] ?? '').trim())));
+  console.log(`  Maestro 3c: ${datos.length} proveedor(es) · ${nuevos.length} sin alta en la app`);
+  for (const f of nuevos.slice(0, 20)) console.log(`    ${dry ? '[dry] ' : ''}+ ${f[0]} ${f[1]}`);
+  if (nuevos.length > 20) console.log(`    … y ${nuevos.length - 20} más.`);
+  if (dry) return;
+
+  // Encabezados que entiende import:proveedores. El CUIT '0' de 3c se manda vacío para
+  // que quede en null y no como un cuit falso.
+  const cabecera = ['NUMERO', 'NOMBRE', 'CUIT'];
+  const cuerpo = datos.map((f) => [f[0] ?? '', f[1] ?? '', (f[2] ?? '').trim() === '0' ? '' : (f[2] ?? '')]);
+  await importarProveedores([cabecera, ...cuerpo]);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -241,6 +287,9 @@ async function syncStock(dry: boolean): Promise<void> {
     dry,
     exclusivo: true,
     etiqueta: 'foto de 3c (V_LACELESTE_STOCK)',
+    // Encabeza las observaciones del movimiento: en la hoja de Movimientos se distingue
+    // a simple vista lo que vino de 3c de lo que vino de la app del compañero.
+    origen: 'Foto 3c',
   });
 }
 
@@ -249,6 +298,7 @@ async function main(): Promise<void> {
   console.log(`▶ Sync 3c ${dry ? '(DRY-RUN) ' : ''}· fuentes: ${fuentes.join(', ')}`);
   for (const f of fuentes) {
     if (f === 'productos') await syncProductos(dry);
+    if (f === 'proveedores') await syncProveedores(dry);
     if (f === 'compras') await syncCompras(dias, dry);
     if (f === 'stock') await syncStock(dry);
   }
