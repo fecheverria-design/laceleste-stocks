@@ -28,7 +28,7 @@ import { generarNro, insertarDetalle, resolverUsuarioIntegracion } from '../repo
 // 3c, con sus fechas y sus números de documento.
 //
 // Uso:
-//   npm run movimientos3c:aplicar -- --desde=2026-08-05 --hasta=2026-09-07 [--dry]
+//   npm run movimientos3c:aplicar -- --desde=2026-08-05 --hasta=2026-09-07 [--dry] [--usuario=mail]
 //
 // ⚠ NO incluir el día en curso: 3c todavía no lo tiene cargado y se anularía lo del
 // compañero sin nada que lo reemplace.
@@ -50,6 +50,7 @@ interface Args {
   hasta: string;
   dry: boolean;
   tipos: string[];
+  usuario?: string;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -57,8 +58,10 @@ function parseArgs(argv: string[]): Args {
   let hasta: string | undefined;
   let dry = false;
   let tipos = ['Rint'];
+  let usuario: string | undefined;
   for (const a of argv) {
     if (a === '--dry') dry = true;
+    else if (a.startsWith('--usuario=')) usuario = a.slice('--usuario='.length).trim();
     else if (a.startsWith('--desde=')) desde = a.slice('--desde='.length);
     else if (a.startsWith('--hasta=')) hasta = a.slice('--hasta='.length);
     else if (a.startsWith('--tipos=')) tipos = a.slice('--tipos='.length).split(',').map((t) => t.trim()).filter(Boolean);
@@ -75,13 +78,42 @@ function parseArgs(argv: string[]): Args {
         'compañero sin nada que lo reemplace. Usá --hasta=ayer.',
     );
   }
-  return { desde, hasta, dry, tipos };
+  return { desde, hasta, dry, tipos, usuario };
 }
 
 /** Código de tipos_movimiento para un renglón del espejo, con la regla del balde 101. */
 export function tipoDestino(tipoDoc: string, origen: number | null, destino: number | null): string | null {
   if (origen === DEP_AJUSTES || destino === DEP_AJUSTES) return 'AJUSTE';
   return TIPO_MAP[tipoDoc.trim().toUpperCase()] ?? null;
+}
+
+/**
+ * Quién queda como autor de la anulación. NUNCA el usuario de integración: el sync revive
+ * sus propias bajas y desharía el reemplazo (ver el comentario en reemplazarPeriodo).
+ * Toma el ADMIN que se le pase por email, o el primer ADMIN humano que haya.
+ */
+export async function resolverAnuladorHumano(usuarioIntegracionId: number, email?: string): Promise<number> {
+  const { usuarios } = await import('./schema.js');
+  const filas = await db
+    .select({ id: usuarios.id, email: usuarios.email, rol: usuarios.rol })
+    .from(usuarios)
+    .where(eq(usuarios.rol, 'ADMIN'));
+  const humanos = filas.filter((u) => u.id !== usuarioIntegracionId);
+  if (email !== undefined) {
+    const elegido = humanos.find((u) => u.email.toLowerCase() === email.toLowerCase());
+    if (elegido === undefined) {
+      throw new Error(`No hay un ADMIN humano con el email ${email} (los que hay: ${humanos.map((u) => u.email).join(', ') || 'ninguno'}).`);
+    }
+    return elegido.id;
+  }
+  const primero = humanos[0];
+  if (primero === undefined) {
+    throw new Error(
+      'No hay ningún usuario ADMIN humano para atribuirle la anulación. Anular con el usuario de ' +
+        'integración haría que el sync reviva los movimientos y deshaga el reemplazo.',
+    );
+  }
+  return primero.id;
 }
 
 interface Grupo {
@@ -111,6 +143,8 @@ export async function reemplazarPeriodo(opts: {
   hasta: string;
   dry: boolean;
   tipos?: string[];
+  /** Email del ADMIN a quien se le atribuye la anulación. Por defecto, el primer ADMIN humano. */
+  usuario?: string;
 }): Promise<ResultadoReemplazo> {
   const { desde, hasta, dry } = opts;
   const tipos = opts.tipos ?? ['Rint'];
@@ -224,13 +258,21 @@ export async function reemplazarPeriodo(opts: {
   const usuarioId = await resolverUsuarioIntegracion();
   if (usuarioId === undefined) throw new Error('Falta el usuario de integración (corré db:seed).');
 
+  // ⚠ La anulación NO puede ir a nombre del usuario de integración. El sync del compañero
+  // distingue "baja propia" (anulado_por = ese usuario) de anulación humana: la propia la
+  // REVIVE en la siguiente corrida (services/movimientos.service.ts). Si anuláramos con él,
+  // el sync desharía el reemplazo dentro de la hora y el stock quedaría descontado dos veces.
+  // Importar 3c es además una decisión humana, así que atribuirla a una persona es lo
+  // correcto también semánticamente (regla #4: la anulación humana manda y no se revive).
+  const anuladorId = await resolverAnuladorHumano(usuarioId, opts.usuario);
+
   // ── 3) Todo junto: o queda el período reemplazado entero, o no se toca nada. Un corte a
   // la mitad dejaría el stock con lo del compañero anulado y lo de 3c sin cargar.
   await db.transaction(async (tx) => {
     if (aAnular.length > 0) {
       await tx
         .update(movimientos)
-        .set({ estado: 'ANULADO', anuladoEn: sql`now()`, anuladoPor: usuarioId })
+        .set({ estado: 'ANULADO', anuladoEn: sql`now()`, anuladoPor: anuladorId })
         .where(inArray(movimientos.id, aAnular.map((m) => m.id)));
     }
     for (const g of aCrear) {

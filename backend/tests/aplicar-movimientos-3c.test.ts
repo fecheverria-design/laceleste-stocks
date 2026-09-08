@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../src/db/client.js';
 import { movimientos, movimientos3c, movimientosDetalle, tiposMovimiento } from '../src/db/schema.js';
-import { insertarDetalle } from '../src/repositories/movimientos.repository.js';
+import { insertarDetalle, resolverUsuarioIntegracion } from '../src/repositories/movimientos.repository.js';
 import { reemplazarPeriodo, tipoDestino } from '../src/db/aplicar-movimientos-3c.js';
 import { cerrarPool, limpiar, sembrarEscenario, type Fixtures } from './helpers/db.js';
 
@@ -37,11 +37,13 @@ async function rintDelCompanero(fecha: string, renglones: { producto3c: string; 
       confirmadoEn: sql`now()`,
     })
     .returning({ id: movimientos.id });
-  await insertarDetalle(
-    db,
-    cab!.id,
-    renglones.map((r) => ({ ...r, unidad: 'KG' })),
-  );
+  await db.transaction(async (tx) => {
+    await insertarDetalle(
+      tx,
+      cab!.id,
+      renglones.map((r) => ({ ...r, unidad: 'KG' })),
+    );
+  });
   return cab!.id;
 }
 
@@ -84,7 +86,9 @@ async function cargarStockInicial(producto3c: string, cantidad: string): Promise
       confirmadoEn: sql`now()`,
     })
     .returning({ id: movimientos.id });
-  await insertarDetalle(db, cab!.id, [{ producto3c, cantidadReal: cantidad, unidad: 'KG' }]);
+  await db.transaction(async (tx) => {
+    await insertarDetalle(tx, cab!.id, [{ producto3c, cantidadReal: cantidad, unidad: 'KG' }]);
+  });
   await db.execute(sql`REFRESH MATERIALIZED VIEW stock_actual`);
 }
 
@@ -198,6 +202,18 @@ describe('reemplazarPeriodo', () => {
     expect(r.creados).toBe(1);
     expect(r.renglones).toBe(1);
     expect(r.productosSinAlta).toEqual(['9999']);
+  });
+
+  it('⚠ la anulación NO queda a nombre del usuario de integración (el sync la reviviría)', async () => {
+    const idCompanero = await rintDelCompanero('2026-08-10', [{ producto3c: '460', cantidadReal: '100' }]);
+    await sembrarEspejo([{ fecha: '2026-08-10', numero: 'X 0001-00000001', producto3c: '460', cantidad: '250' }]);
+    const integracion = await resolverUsuarioIntegracion();
+
+    await reemplazarPeriodo({ desde: '2026-08-01', hasta: '2026-08-31', dry: false });
+
+    const [m] = await db.select({ anuladoPor: movimientos.anuladoPor }).from(movimientos).where(eq(movimientos.id, idCompanero));
+    expect(m?.anuladoPor).not.toBe(integracion);
+    expect(m?.anuladoPor).not.toBeNull();
   });
 
   it('--dry no escribe: no anula ni crea nada', async () => {
