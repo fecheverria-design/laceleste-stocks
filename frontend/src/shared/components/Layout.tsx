@@ -12,6 +12,7 @@ const tabs = [
   { to: '/control-precios', label: 'Control precios' },
   { to: '/proveedores', label: 'Proveedores' },
   { to: '/informe', label: 'Informe' },
+  { to: '/como-se-calcula', label: 'Cómo se calcula' },
   { to: '/health', label: 'Estado' },
 ];
 

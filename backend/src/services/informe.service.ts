@@ -1,5 +1,7 @@
 import { compradorDeFamilia, type Comprador } from '../domain/familias.js';
+import { fichaGasto, type Ficha } from '../domain/procedencia.js';
 import {
+  coberturaCompras,
   gastoMensualPorProveedor,
   gastoPorMesProveedorProducto,
   mesesConCompras,
@@ -74,6 +76,8 @@ export interface InformeCompradores {
   por_comprador: Array<{ comprador: Comprador; gasto: number; gasto_anterior: number; var_gasto: number | null }>;
   proveedores: FilaProveedorInforme[];
   productos: FilaProductoInforme[];
+  /** De dónde sale el número: fuente, recorte, exclusiones y tratamiento del IVA. */
+  ficha: Ficha;
 }
 
 function num(s: string | null | undefined): number {
@@ -137,7 +141,9 @@ export function armarInforme(
   mes: string,
   mesAnterior: string,
   comprador?: Comprador,
-): InformeCompradores {
+  // Devuelve el informe SIN ficha: armarInforme() es pura (se testea sin DB) y la ficha
+  // necesita la cobertura de `compras`, que sí es una consulta. La agrega el service.
+): Omit<InformeCompradores, 'ficha'> {
   const precioDe = indicePrecios(precios);
   const productos = new Map<string, { info: FilaGastoMes; actual: Acumulado; previo: Acumulado }>();
   const proveedores = new Map<string, { id: number | null; nombre: string; actual: Acumulado; previo: Acumulado }>();
@@ -266,11 +272,23 @@ export function armarInforme(
 
 export async function informePorComprador(mes: string, comprador?: Comprador): Promise<InformeCompradores> {
   const anterior = mesAnteriorDe(mes);
-  const [filas, precios] = await Promise.all([
+  const [filas, precios, cobertura] = await Promise.all([
     gastoPorMesProveedorProducto([mes, anterior]),
     preciosVigentesPorMes([mes, anterior]),
+    coberturaCompras(),
   ]);
-  return armarInforme(filas, precios, mes, anterior, comprador);
+  const informe = armarInforme(filas, precios, mes, anterior, comprador);
+  return {
+    ...informe,
+    ficha: fichaGasto({
+      mes,
+      comprador,
+      renglonesDelMes: informe.resumen.renglones,
+      proveedores: informe.resumen.proveedores,
+      productos: informe.resumen.productos,
+      cobertura,
+    }),
+  };
 }
 
 export async function mesesDisponibles(): Promise<string[]> {
