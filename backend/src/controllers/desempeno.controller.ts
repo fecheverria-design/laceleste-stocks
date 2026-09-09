@@ -11,6 +11,7 @@ const ETIQUETA: Record<string, string> = {
   DIFIERE: 'Difiere',
   SOLO_3C: 'Solo en 3c (no pasó por la app)',
   SOLO_APP: 'Solo en la app (3c no lo tiene)',
+  SIN_SUGERIDO: 'Sin sugerido (no se puede juzgar)',
 };
 
 // Fecha local YYYY-MM-DD con offset de días.
@@ -33,6 +34,7 @@ export async function getDesempeno(req: Request, res: Response): Promise<void> {
     await obtenerDesempeno({
       desde: parsed.data.desde,
       hasta: parsed.data.hasta,
+      base: parsed.data.base,
       hoy: ymd(0),
       ayer: ymd(-1),
     }),
@@ -49,18 +51,32 @@ export async function getDesempenoCsv(req: Request, res: Response): Promise<void
   const datos = await obtenerDesempeno({
     desde: parsed.data.desde,
     hasta: parsed.data.hasta,
+    base: parsed.data.base,
     hoy: ymd(0),
     ayer: ymd(-1),
   });
   enviarCsv(
     res,
     `desempeno-${datos.desde}-a-${datos.hasta}.csv`,
-    ['Area', 'Producto 3c', 'Producto', 'Unidad', 'App', '3c', 'Diferencia', 'Bulto', 'Dif. en bultos', 'Resultado'],
+    [
+      'Area',
+      'Producto 3c',
+      'Producto',
+      'Unidad',
+      'Sugerido',
+      'App (real)',
+      '3c',
+      'Diferencia',
+      'Bulto',
+      'Dif. en bultos',
+      'Resultado',
+    ],
     datos.items.map((i) => [
       i.area_nombre,
       i.producto_3c,
       i.producto_nombre,
       i.unidad_base ?? '',
+      i.cantidad_sugerida,
       i.cantidad_app,
       i.cantidad_3c,
       i.diferencia,

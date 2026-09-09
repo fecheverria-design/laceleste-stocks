@@ -579,7 +579,10 @@ export interface FilaHistorial {
 }
 
 // ── Desempeño del depósito (app del compañero vs 3c) ─────────────────────────
-export type Clasificacion = 'EXACTO' | 'DENTRO_BULTO' | 'DIFIERE' | 'SOLO_3C' | 'SOLO_APP';
+export type Clasificacion = 'EXACTO' | 'DENTRO_BULTO' | 'DIFIERE' | 'SOLO_3C' | 'SOLO_APP' | 'SIN_SUGERIDO';
+
+/** Contra qué punta de la app se compara lo que 3c registró. */
+export type BaseDesempeno = 'SUGERIDO' | 'REAL';
 
 export interface ItemDesempeno {
   area_dep_3c: number;
@@ -588,12 +591,15 @@ export interface ItemDesempeno {
   producto_nombre: string;
   unidad_base: string | null;
   unidades_por_bulto: number | null;
+  cantidad_sugerida: number;
   cantidad_app: number;
   cantidad_3c: number;
-  diferencia: number; // app − 3c
+  cantidad_comparada: number;
+  diferencia: number; // comparada − 3c
   diferencia_bultos: number | null;
   renglones_app: number;
   renglones_3c: number;
+  renglones_sin_sugerido: number;
   clasificacion: Clasificacion;
 }
 
@@ -605,6 +611,8 @@ export interface ResumenDesempeno {
   exactos: number;
   dentro_bulto: number;
   difieren: number;
+  sin_sugerido: number;
+  comparables: number;
   fidelidad_pct: number | null;
   solo_3c: number;
   solo_app: number;
@@ -618,6 +626,7 @@ export interface AreaDesempeno extends ResumenDesempeno {
 export interface Desempeno {
   desde: string;
   hasta: string;
+  base: BaseDesempeno;
   espejo: { desde: string; hasta: string; renglones: number } | null;
   aviso: string | null;
   total: ResumenDesempeno;

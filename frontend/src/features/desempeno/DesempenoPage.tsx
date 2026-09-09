@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiGet, descargarArchivo } from '../../shared/api/client';
-import type { Clasificacion, Desempeno, ItemDesempeno } from '../../shared/api/types';
+import type { BaseDesempeno, Clasificacion, Desempeno, ItemDesempeno } from '../../shared/api/types';
 import { BarraFiltros, Campo, type ChipFiltro } from '../../shared/components/filtros';
 import { IconoDescarga, IconoLupa } from '../../shared/components/iconos';
 import { CLS_BOTON, CLS_INPUT, Paginacion, ThOrden } from '../../shared/components/tabla';
@@ -20,7 +20,23 @@ const ETIQUETAS: Record<Clasificacion, string> = {
   DIFIERE: 'Difiere',
   SOLO_3C: 'No pasó por la app',
   SOLO_APP: '3c no lo tiene',
+  SIN_SUGERIDO: 'Sin sugerido',
 };
+
+// Las dos preguntas que puede responder la hoja. Son distintas y conviene tenerlas separadas:
+// una mide el despacho contra lo pedido, la otra la calidad del registro.
+const BASES: { valor: BaseDesempeno; label: string; ayuda: string }[] = [
+  {
+    valor: 'SUGERIDO',
+    label: 'Lo que había que abastecer',
+    ayuda: 'Compara el sugerido de la app contra lo que 3c dice que salió: ¿se despachó lo pedido?',
+  },
+  {
+    valor: 'REAL',
+    label: 'Lo que la app dice que se despachó',
+    ayuda: 'Compara el real de la app contra 3c: ¿lo que se registró de un lado coincide con el otro?',
+  },
+];
 
 const COLORES: Record<Clasificacion, string> = {
   EXACTO: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
@@ -28,6 +44,7 @@ const COLORES: Record<Clasificacion, string> = {
   DIFIERE: 'bg-amber-50 text-amber-700 ring-amber-200',
   SOLO_3C: 'bg-rose-50 text-rose-700 ring-rose-200',
   SOLO_APP: 'bg-slate-100 text-slate-600 ring-slate-200',
+  SIN_SUGERIDO: 'bg-slate-100 text-slate-500 ring-slate-200',
 };
 
 function Marca({ clasificacion }: { clasificacion: Clasificacion }) {
@@ -42,11 +59,12 @@ function Marca({ clasificacion }: { clasificacion: Clasificacion }) {
 
 const pct = (n: number | null) => (n === null ? '—' : `${nf.format(n)}%`);
 
-type Columna = 'producto' | 'area' | 'app' | 'tresc' | 'diferencia';
+type Columna = 'producto' | 'area' | 'sugerido' | 'app' | 'tresc' | 'diferencia';
 
 export function DesempenoPage() {
   const [desde, setDesde] = useState('');
   const [hasta, setHasta] = useState('');
+  const [base, setBase] = useState<BaseDesempeno>('SUGERIDO');
   const [texto, setTexto] = useState('');
   const [area, setArea] = useState('');
   const [resultado, setResultado] = useState<'' | Clasificacion>('');
@@ -59,12 +77,12 @@ export function DesempenoPage() {
     const p = new URLSearchParams();
     if (desde) p.set('desde', desde);
     if (hasta) p.set('hasta', hasta);
-    const s = p.toString();
-    return s ? `?${s}` : '';
-  }, [desde, hasta]);
+    p.set('base', base);
+    return `?${p.toString()}`;
+  }, [desde, hasta, base]);
 
   const { data, isLoading, isError, error } = useQuery({
-    queryKey: ['desempeno', desde, hasta],
+    queryKey: ['desempeno', desde, hasta, base],
     queryFn: () => apiGet<Desempeno>(`/api/desempeno${qs}`),
   });
 
@@ -80,6 +98,7 @@ export function DesempenoPage() {
     const valor = (i: ItemDesempeno): number | string => {
       if (orden === 'producto') return i.producto_nombre;
       if (orden === 'area') return i.area_nombre;
+      if (orden === 'sugerido') return i.cantidad_sugerida;
       if (orden === 'app') return i.cantidad_app;
       if (orden === 'tresc') return i.cantidad_3c;
       return Math.abs(i.diferencia);
@@ -149,6 +168,31 @@ export function DesempenoPage() {
         }
       />
 
+      {/* Qué se compara contra 3c. Es la primera decisión que hay que tomar al mirar la hoja:
+          cambia la pregunta que responden los números de abajo. */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <span className="text-sm text-slate-500">Comparar 3c contra:</span>
+        <div className="inline-flex rounded-lg border border-slate-300 bg-white p-0.5">
+          {BASES.map((b) => (
+            <button
+              key={b.valor}
+              type="button"
+              title={b.ayuda}
+              onClick={() => {
+                setBase(b.valor);
+                setPage(1);
+              }}
+              className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                base === b.valor ? 'bg-sky-600 text-white' : 'text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              {b.label}
+            </button>
+          ))}
+        </div>
+        <span className="text-xs text-slate-400">{BASES.find((b) => b.valor === base)?.ayuda}</span>
+      </div>
+
       {isLoading && <p className="text-slate-500">Cargando…</p>}
       {isError && <p className="text-rose-600">{(error as Error).message}</p>}
 
@@ -168,9 +212,15 @@ export function DesempenoPage() {
               tono="celeste"
             />
             <Tarjeta
-              etiqueta="Fidelidad"
+              etiqueta={base === 'SUGERIDO' ? 'Se despachó lo pedido' : 'Fidelidad del registro'}
               valor={pct(total?.fidelidad_pct ?? null)}
-              detalle={`${nf.format((total?.exactos ?? 0) + (total?.dentro_bulto ?? 0))} coinciden (${nf.format(total?.dentro_bulto ?? 0)} por tolerancia de bulto)`}
+              detalle={
+                `${nf.format((total?.exactos ?? 0) + (total?.dentro_bulto ?? 0))} de ${nf.format(total?.comparables ?? 0)} coinciden ` +
+                `(${nf.format(total?.dentro_bulto ?? 0)} por tolerancia de bulto)` +
+                (base === 'SUGERIDO' && (total?.sin_sugerido ?? 0) > 0
+                  ? ` · ${nf.format(total?.sin_sugerido ?? 0)} sin sugerido quedan afuera`
+                  : '')
+              }
               tono="ok"
             />
             <Tarjeta
@@ -197,6 +247,12 @@ export function DesempenoPage() {
           <p className="mb-5 text-xs text-slate-500">
             Se compara por (área, producto) en todo el período, nunca por día: el egreso de la tarde que se carga al
             día siguiente no es un error. La diferencia que entra en un bulto entero cuenta como bien abastecido.{' '}
+            {base === 'SUGERIDO' && (
+              <>
+                Los renglones sin sugerido —los extras, y todo lo anterior a agosto de 2026— no se juzgan: aparecen
+                como «sin sugerido» y quedan fuera del porcentaje.{' '}
+              </>
+            )}
             <strong className="font-medium text-slate-600">
               La cobertura mide qué parte de la operación pasa por la app del compañero, no el acierto del encargado.
             </strong>
@@ -351,8 +407,11 @@ export function DesempenoPage() {
                         <ThOrden campo="area" orden={orden} dir={dir} onOrdenar={ordenar}>
                           Área
                         </ThOrden>
+                        <ThOrden campo="sugerido" orden={orden} dir={dir} onOrdenar={ordenar} alineado="der">
+                          Sugerido
+                        </ThOrden>
                         <ThOrden campo="app" orden={orden} dir={dir} onOrdenar={ordenar} alineado="der">
-                          App
+                          App (real)
                         </ThOrden>
                         <ThOrden campo="tresc" orden={orden} dir={dir} onOrdenar={ordenar} alineado="der">
                           3c
@@ -377,7 +436,18 @@ export function DesempenoPage() {
                             </p>
                           </td>
                           <td className="px-4 py-2.5 text-slate-600">{i.area_nombre}</td>
-                          <td className="px-4 py-2.5 text-right tabular-nums text-slate-600">
+                          <td
+                            className={`px-4 py-2.5 text-right tabular-nums ${
+                              base === 'SUGERIDO' ? 'font-medium text-slate-800' : 'text-slate-500'
+                            }`}
+                          >
+                            {i.cantidad_sugerida === 0 ? '—' : nf.format(i.cantidad_sugerida)}
+                          </td>
+                          <td
+                            className={`px-4 py-2.5 text-right tabular-nums ${
+                              base === 'REAL' ? 'font-medium text-slate-800' : 'text-slate-500'
+                            }`}
+                          >
                             {nf.format(i.cantidad_app)}
                           </td>
                           <td className="px-4 py-2.5 text-right tabular-nums text-slate-600">

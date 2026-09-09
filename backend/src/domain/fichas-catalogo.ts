@@ -283,9 +283,12 @@ export function catalogoFichas(ctx: ContextoFichas): GrupoFichas[] {
       {
         titulo: 'Qué se compara exactamente',
         detalle:
-          'Lo que la app del compañero dice que se despachó (la CANTIDAD REAL de sus remitos) contra lo que el ' +
-          'encargado cargó en 3c. No es sugerido contra real: no mide si despachó lo que se le pidió, mide si lo ' +
-          'que salió del depósito quedó registrado igual en las dos puntas.',
+          'Siempre contra lo que el encargado cargó en 3c, y del lado de la app se elige contra qué. Son dos ' +
+          'preguntas distintas y dan distinto: contra el SUGERIDO se mide si se despachó lo que había que ' +
+          'despachar (la pregunta operativa); contra el REAL se mide si lo que la app registró coincide con lo ' +
+          'que se cargó en 3c (la pregunta de calidad del dato). El sugerido solo se captura desde agosto de ' +
+          '2026 y los extras no lo traen: esos renglones se marcan «sin sugerido» y quedan fuera del ' +
+          'porcentaje, en vez de contarse como si se hubiera pedido cero.',
       },
       {
         titulo: 'De dónde sale cada lado',

@@ -38,6 +38,10 @@ export type FilaCruce = {
   unidad_base: string | null;
   unidades_por_bulto: string | null;
   cantidad_app: string;
+  /** Lo que la app dijo que HABÍA que abastecer. Solo se captura desde agosto de 2026. */
+  cantidad_sugerida: string;
+  /** Renglones de la app sin sugerido (los extras no lo tienen): sin esto el sugerido miente. */
+  renglones_sin_sugerido: number;
   cantidad_3c: string;
   renglones_app: number;
   renglones_3c: number;
@@ -47,7 +51,10 @@ export async function cruceAppContra3c(filtros: { desde: string; hasta: string }
   const res = await db.execute<FilaCruce>(
     sql`WITH app AS (
           SELECT ud.dep_id_3c AS area_dep_3c, d.producto_3c,
-                 sum(d.cantidad_real) AS cantidad, count(*)::int AS renglones
+                 sum(d.cantidad_real) AS cantidad,
+                 sum(d.cantidad_sugerida) AS sugerida,
+                 count(*) FILTER (WHERE d.cantidad_sugerida IS NULL)::int AS sin_sugerido,
+                 count(*)::int AS renglones
           FROM movimientos_detalle d
           JOIN movimientos m ON m.id = d.movimiento_id
           JOIN tipos_movimiento tm ON tm.id = m.tipo_id
@@ -78,6 +85,8 @@ export async function cruceAppContra3c(filtros: { desde: string; hasta: string }
                p.unidad_base,
                p.unidades_por_bulto::text AS unidades_por_bulto,
                coalesce(a.cantidad, 0)::text AS cantidad_app,
+               coalesce(a.sugerida, 0)::text AS cantidad_sugerida,
+               coalesce(a.sin_sugerido, 0) AS renglones_sin_sugerido,
                coalesce(t.cantidad, 0)::text AS cantidad_3c,
                coalesce(a.renglones, 0) AS renglones_app,
                coalesce(t.renglones, 0) AS renglones_3c

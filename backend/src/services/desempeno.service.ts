@@ -10,6 +10,12 @@ import { cruceAppContra3c, ventanaEspejo, type FilaCruce } from '../repositories
 // significa nada. La cobertura habla del circuito (hay áreas que no usan la app del
 // compañero en absoluto); la fidelidad, de la cantidad cargada.
 //
+// La FIDELIDAD se puede medir contra dos cosas, y son preguntas distintas (`Base`):
+//   SUGERIDO → ¿despachó lo que había que despachar? (lo que la app dijo que había que
+//              abastecer contra lo que 3c dice que salió). Es la pregunta operativa.
+//   REAL     → ¿lo que la app registró coincide con lo que se cargó en 3c? Es la pregunta
+//              de calidad del dato: mide el registro, no el despacho.
+//
 // ⚠ Lo que este cruce NO es: un puntaje de la persona. Medido en agosto, la cobertura de
 // registro en 3c es excelente y lo que falta está casi siempre del lado de la app.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -17,7 +23,10 @@ import { cruceAppContra3c, ventanaEspejo, type FilaCruce } from '../repositories
 // Las cantidades son numeric(12,3) / numeric(14,4): por debajo de esto es ruido de redondeo.
 const EPSILON = 0.001;
 
-export type Clasificacion = 'EXACTO' | 'DENTRO_BULTO' | 'DIFIERE' | 'SOLO_3C' | 'SOLO_APP';
+/** Contra qué se compara lo que 3c registró. */
+export type Base = 'SUGERIDO' | 'REAL';
+
+export type Clasificacion = 'EXACTO' | 'DENTRO_BULTO' | 'DIFIERE' | 'SOLO_3C' | 'SOLO_APP' | 'SIN_SUGERIDO';
 
 export interface ItemDesempeno {
   area_dep_3c: number;
@@ -26,12 +35,18 @@ export interface ItemDesempeno {
   producto_nombre: string;
   unidad_base: string | null;
   unidades_por_bulto: number | null;
+  /** Lo que la app dijo que había que abastecer (0 si no lo capturó). */
+  cantidad_sugerida: number;
+  /** Lo que la app dice que se despachó realmente. */
   cantidad_app: number;
   cantidad_3c: number;
-  diferencia: number; // app − 3c (positivo = la app tiene de más)
+  /** La punta de la app con la que se comparó, según la base elegida. */
+  cantidad_comparada: number;
+  diferencia: number; // comparada − 3c (positivo = la app dice más que 3c)
   diferencia_bultos: number | null; // la misma diferencia medida en bultos
   renglones_app: number;
   renglones_3c: number;
+  renglones_sin_sugerido: number;
   clasificacion: Clasificacion;
 }
 
@@ -43,7 +58,10 @@ export interface ResumenDesempeno {
   exactos: number;
   dentro_bulto: number;
   difieren: number;
-  fidelidad_pct: number | null; // (exactos + dentro_bulto) / registradas
+  /** Registradas que no se pueden juzgar: la app las tiene pero sin sugerido. */
+  sin_sugerido: number;
+  comparables: number; // exactos + dentro_bulto + difieren
+  fidelidad_pct: number | null; // (exactos + dentro_bulto) / comparables
   solo_3c: number;
   solo_app: number;
 }
@@ -56,6 +74,8 @@ export interface AreaDesempeno extends ResumenDesempeno {
 export interface Desempeno {
   desde: string;
   hasta: string;
+  /** Contra qué punta de la app se comparó 3c. */
+  base: Base;
   espejo: { desde: string; hasta: string; renglones: number } | null;
   // El período pedido se sale de lo que cubre el espejo → lo que "falta" ahí no es que no
   // se haya cargado en 3c, es que el export todavía no se importó.
@@ -67,12 +87,22 @@ export interface Desempeno {
 
 // Clasifica un (área, producto). La tolerancia de bulto es regla de J: si la diferencia
 // entra en un bulto entero, cuenta como bien abastecido — nadie despacha huevos sueltos.
-export function clasificar(cantidadApp: number, cantidad3c: number, unidadesPorBulto: number | null): Clasificacion {
-  const hayApp = cantidadApp > EPSILON;
-  const hay3c = cantidad3c > EPSILON;
+//
+// La COBERTURA se mide siempre contra `cantidadApp` (¿la app registró este despacho?), aunque
+// la fidelidad se juzgue contra el sugerido: que un renglón no tenga sugerido no significa que
+// no haya pasado por la app. Por eso SIN_SUGERIDO es una categoría propia y no un "solo 3c".
+export function clasificar(
+  cantidades: { app: number; sugerida: number; tresC: number },
+  unidadesPorBulto: number | null,
+  base: Base,
+): Clasificacion {
+  const hayApp = cantidades.app > EPSILON;
+  const hay3c = cantidades.tresC > EPSILON;
   if (!hayApp && hay3c) return 'SOLO_3C';
   if (hayApp && !hay3c) return 'SOLO_APP';
-  const dif = Math.abs(cantidadApp - cantidad3c);
+  if (base === 'SUGERIDO' && cantidades.sugerida <= EPSILON) return 'SIN_SUGERIDO';
+  const comparada = base === 'SUGERIDO' ? cantidades.sugerida : cantidades.app;
+  const dif = Math.abs(comparada - cantidades.tresC);
   if (dif <= EPSILON) return 'EXACTO';
   if (unidadesPorBulto !== null && unidadesPorBulto > 1 && dif <= unidadesPorBulto) return 'DENTRO_BULTO';
   return 'DIFIERE';
@@ -87,6 +117,8 @@ function resumenVacio(): ResumenDesempeno {
     exactos: 0,
     dentro_bulto: 0,
     difieren: 0,
+    sin_sugerido: 0,
+    comparables: 0,
     fidelidad_pct: null,
     solo_3c: 0,
     solo_app: 0,
@@ -101,6 +133,7 @@ function acumular(r: ResumenDesempeno, item: ItemDesempeno): void {
   if (item.clasificacion === 'EXACTO') r.exactos++;
   if (item.clasificacion === 'DENTRO_BULTO') r.dentro_bulto++;
   if (item.clasificacion === 'DIFIERE') r.difieren++;
+  if (item.clasificacion === 'SIN_SUGERIDO') r.sin_sugerido++;
 }
 
 function redondear(n: number): number {
@@ -108,19 +141,29 @@ function redondear(n: number): number {
 }
 
 function cerrar<T extends ResumenDesempeno>(r: T): T {
-  r.registradas = r.exactos + r.dentro_bulto + r.difieren;
+  r.comparables = r.exactos + r.dentro_bulto + r.difieren;
+  // Registradas = pasó por las dos puntas, aunque no se pueda juzgar la cantidad.
+  r.registradas = r.comparables + r.sin_sugerido;
   r.cobertura_pct = r.en_3c === 0 ? null : redondear((r.registradas / r.en_3c) * 100);
-  r.fidelidad_pct = r.registradas === 0 ? null : redondear(((r.exactos + r.dentro_bulto) / r.registradas) * 100);
+  r.fidelidad_pct = r.comparables === 0 ? null : redondear(((r.exactos + r.dentro_bulto) / r.comparables) * 100);
   return r;
 }
 
 // Arma los items desde las filas crudas. Pura: sin DB, se testea sola.
-export function armarItems(filas: FilaCruce[]): ItemDesempeno[] {
+export function armarItems(filas: FilaCruce[], base: Base): ItemDesempeno[] {
   return filas.map((f) => {
     const cantidadApp = Number(f.cantidad_app);
+    const cantidadSugerida = Number(f.cantidad_sugerida);
     const cantidad3c = Number(f.cantidad_3c);
     const bulto = f.unidades_por_bulto === null ? null : Number(f.unidades_por_bulto);
-    const diferencia = cantidadApp - cantidad3c;
+    const clasificacion = clasificar(
+      { app: cantidadApp, sugerida: cantidadSugerida, tresC: cantidad3c },
+      bulto,
+      base,
+    );
+    // Contra el sugerido, una combinación sin sugerido no tiene diferencia que mostrar.
+    const comparada = base === 'SUGERIDO' ? cantidadSugerida : cantidadApp;
+    const diferencia = comparada - cantidad3c;
     return {
       area_dep_3c: f.area_dep_3c,
       // Un depósito de 3c sin alta en la app igual tiene que verse: es justamente el aviso
@@ -130,13 +173,16 @@ export function armarItems(filas: FilaCruce[]): ItemDesempeno[] {
       producto_nombre: f.producto_nombre ?? `${f.producto_3c} (sin alta en el maestro)`,
       unidad_base: f.unidad_base,
       unidades_por_bulto: bulto,
+      cantidad_sugerida: cantidadSugerida,
       cantidad_app: cantidadApp,
       cantidad_3c: cantidad3c,
+      cantidad_comparada: comparada,
       diferencia: Math.round(diferencia * 1000) / 1000,
       diferencia_bultos: bulto !== null && bulto > 1 ? Math.round((diferencia / bulto) * 100) / 100 : null,
       renglones_app: f.renglones_app,
       renglones_3c: f.renglones_3c,
-      clasificacion: clasificar(cantidadApp, cantidad3c, bulto),
+      renglones_sin_sugerido: f.renglones_sin_sugerido,
+      clasificacion,
     };
   });
 }
@@ -181,19 +227,22 @@ export function avisoDeVentana(
 export async function obtenerDesempeno(filtros: {
   desde?: string;
   hasta?: string;
+  base?: Base;
   hoy: string;
   ayer: string;
 }): Promise<Desempeno> {
+  const base = filtros.base ?? 'SUGERIDO';
   const espejo = await ventanaEspejo();
   const desde = filtros.desde ?? espejo?.desde ?? filtros.ayer;
   const topeEspejo = espejo && espejo.hasta < filtros.ayer ? espejo.hasta : filtros.ayer;
   const hasta = filtros.hasta ?? topeEspejo;
   const filas = await cruceAppContra3c({ desde, hasta });
-  const items = armarItems(filas);
+  const items = armarItems(filas, base);
   const { total, areas } = resumir(items);
   return {
     desde,
     hasta,
+    base,
     espejo,
     aviso: avisoDeVentana(desde, hasta, espejo, filtros.hoy),
     total,
