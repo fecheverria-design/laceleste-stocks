@@ -32,6 +32,12 @@ export interface ContextoFichas {
   stock: { filas: number; depositosConStock: number; ultimaFoto: string | null };
   precios: { filas: number; controlados: number };
   movimientos: { confirmados: number; desde: string | null; hasta: string | null; deTresC: number };
+  /** El cruce de desempeño, con SUS constantes reales (llegan por parámetro, regla #3). */
+  desempeno: {
+    depOrigen: number;
+    baldes: readonly number[];
+    espejo: { desde: string | null; hasta: string | null; renglones: number };
+  };
   umbrales: {
     diasVigente: number;
     diasFresca: number;
@@ -51,7 +57,7 @@ function listaEs(items: readonly string[]): string {
 }
 
 export function catalogoFichas(ctx: ContextoFichas): GrupoFichas[] {
-  const { compras, renglonesUltimoMes, productos, proveedores, stock, precios, movimientos, umbrales } = ctx;
+  const { compras, renglonesUltimoMes, productos, proveedores, stock, precios, movimientos, desempeno, umbrales } = ctx;
 
   const fichaStock: Ficha = {
     titulo: 'La cantidad que ves en Stock',
@@ -271,6 +277,61 @@ export function catalogoFichas(ctx: ContextoFichas): GrupoFichas[] {
     ],
   };
 
+  const fichaDesempeno: Ficha = {
+    titulo: 'La cobertura y la fidelidad del depósito',
+    pasos: [
+      {
+        titulo: 'Qué se compara exactamente',
+        detalle:
+          'Lo que la app del compañero dice que se despachó (la CANTIDAD REAL de sus remitos) contra lo que el ' +
+          'encargado cargó en 3c. No es sugerido contra real: no mide si despachó lo que se le pidió, mide si lo ' +
+          'que salió del depósito quedó registrado igual en las dos puntas.',
+      },
+      {
+        titulo: 'De dónde sale cada lado',
+        detalle:
+          `La app: los remitos internos que entraron por el sync del compañero, o sea los que NO tienen número de ` +
+          `3c —los que sí lo tienen vinieron de 3c y compararlos sería comparar 3c contra sí mismo. Cuentan también ` +
+          `los que quedaron ANULADOS por el reemplazo semanal: siguen siendo la constancia de lo que la app ` +
+          `registró. 3c: el espejo del export de movimientos, que se importa una vez por semana` +
+          (desempeno.espejo.desde !== null
+            ? ` y hoy cubre del ${desempeno.espejo.desde} al ${desempeno.espejo.hasta} ` +
+              `(${n(desempeno.espejo.renglones)} renglones).`
+            : ' (todavía no hay ninguno importado).'),
+      },
+      {
+        titulo: 'Por período, nunca por día',
+        detalle:
+          'Se suma todo lo del rango por (área, producto) antes de comparar. Si se cruzara por fecha exacta, el ' +
+          'egreso de la tarde que se carga al día siguiente daría dos errores —uno de más y uno de menos— cuando ' +
+          'en realidad está bien. Medido sobre agosto, cruzar por día daba 213 casos de "la app tiene de más" y ' +
+          'por período 9.',
+      },
+      {
+        titulo: 'Qué se deja afuera',
+        detalle:
+          `Solo se miran los egresos del depósito ${desempeno.depOrigen} (FABRICA) hacia las áreas. Quedan afuera ` +
+          `los baldes virtuales ${listaEs(desempeno.baldes.map(String))}: lo que los toca es un ajuste o una ` +
+          `recepción, no un abastecimiento. Y el día en curso también: 3c todavía no lo tiene.`,
+      },
+      {
+        titulo: 'Cuándo una diferencia cuenta como buena',
+        detalle:
+          'Cuando entra en un bulto entero (`unidades_por_bulto` del maestro). Es regla de J: nadie despacha ' +
+          'huevos sueltos, así que el redondeo al bulto no es un error de carga. Sin bulto cargado, solo cuenta ' +
+          'la coincidencia exacta.',
+      },
+      {
+        titulo: 'Qué NO dice este número',
+        detalle:
+          'La cobertura no es el acierto del encargado. Mide qué parte de la operación pasa por la app del ' +
+          'compañero, y hay áreas —Locales, por ejemplo— que no la usan en absoluto: eso aparece como "no ' +
+          'registrado" y no es algo que él haya dejado de cargar. La fidelidad, en cambio, sí habla de la ' +
+          'cantidad cargada, pero solo sobre lo que pasó por las dos puntas.',
+      },
+    ],
+  };
+
   const mesUltimaCompra =
     compras.hasta !== null ? `${compras.hasta.slice(6, 10)}-${compras.hasta.slice(3, 5)}` : '';
 
@@ -282,6 +343,11 @@ export function catalogoFichas(ctx: ContextoFichas): GrupoFichas[] {
       fichas: [fichaMovimientos],
     },
     { hoja: 'Panel', resumen: 'La foto del día: cuánta plata hay parada en stock.', fichas: [fichaValorizacion] },
+    {
+      hoja: 'Desempeño del depósito',
+      resumen: 'Cuánto de lo que se despacha pasa por la app del compañero, y si la cantidad coincide con 3c.',
+      fichas: [fichaDesempeno],
+    },
     { hoja: 'Consumos', resumen: 'Qué consume cada área y cuánto cuesta.', fichas: [fichaConsumos] },
     { hoja: 'Artículos', resumen: 'El maestro de productos.', fichas: [fichaArticulos] },
     { hoja: 'Proveedores', resumen: 'A quién le compramos y cuánto.', fichas: [fichaProveedores] },

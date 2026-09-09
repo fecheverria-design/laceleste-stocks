@@ -577,3 +577,50 @@ export interface FilaHistorial {
   cambios: CambioAuditoria[];
   creado_en: string;
 }
+
+// ── Desempeño del depósito (app del compañero vs 3c) ─────────────────────────
+export type Clasificacion = 'EXACTO' | 'DENTRO_BULTO' | 'DIFIERE' | 'SOLO_3C' | 'SOLO_APP';
+
+export interface ItemDesempeno {
+  area_dep_3c: number;
+  area_nombre: string;
+  producto_3c: string;
+  producto_nombre: string;
+  unidad_base: string | null;
+  unidades_por_bulto: number | null;
+  cantidad_app: number;
+  cantidad_3c: number;
+  diferencia: number; // app − 3c
+  diferencia_bultos: number | null;
+  renglones_app: number;
+  renglones_3c: number;
+  clasificacion: Clasificacion;
+}
+
+export interface ResumenDesempeno {
+  combinaciones: number;
+  en_3c: number;
+  registradas: number;
+  cobertura_pct: number | null;
+  exactos: number;
+  dentro_bulto: number;
+  difieren: number;
+  fidelidad_pct: number | null;
+  solo_3c: number;
+  solo_app: number;
+}
+
+export interface AreaDesempeno extends ResumenDesempeno {
+  area_dep_3c: number;
+  area_nombre: string;
+}
+
+export interface Desempeno {
+  desde: string;
+  hasta: string;
+  espejo: { desde: string; hasta: string; renglones: number } | null;
+  aviso: string | null;
+  total: ResumenDesempeno;
+  areas: AreaDesempeno[];
+  items: ItemDesempeno[];
+}

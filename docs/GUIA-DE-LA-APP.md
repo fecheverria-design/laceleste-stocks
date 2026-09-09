@@ -96,6 +96,30 @@ excluyendo lo que va a otros depósitos y a los baldes. Muestra el total, el **p
 (el total dividido por las semanas del período) y el **costo** valorizado al precio vigente.
 Los productos sin precio suman cantidad pero no suman costo.
 
+### Desempeño del depósito
+Cruza **lo que la app del compañero dice que se despachó** contra **lo que el encargado cargó
+en 3c**, por (área, producto) en el período. Da dos números, no uno:
+
+- **Cobertura** — de lo que 3c registró, qué parte pasó también por la app.
+- **Fidelidad** — de lo que pasó por las dos puntas, qué parte coincide en cantidad.
+
+Detalles que hacen que el número signifique algo:
+- Se compara **por período, nunca por día**: el egreso de la tarde que se carga al día
+  siguiente daría dos errores (uno de más y uno de menos) cuando en realidad está bien.
+- La diferencia que **entra en un bulto entero** cuenta como bien abastecido (nadie despacha
+  huevos sueltos). Sin bulto cargado en el maestro, solo cuenta la coincidencia exacta.
+- El lado de la app son los remitos **sin número de 3c** (los que sí lo tienen vinieron de 3c:
+  compararlos sería comparar 3c contra sí mismo). Cuentan también los que quedaron **anulados**
+  por el reemplazo semanal: siguen siendo la constancia de lo que la app registró.
+- El lado de 3c sale del **export de movimientos que se importa 1× por semana**. Si pedís un
+  período que se pasa de lo importado, la hoja te avisa: ahí lo que figura como "no registrado"
+  puede ser export faltante y no falta de carga.
+- Se miran solo los egresos de Fábrica a las áreas; los baldes (101 ajustes, 102 proveedores)
+  quedan afuera.
+
+⚠ **La cobertura no es el acierto del encargado.** Mide qué parte de la operación pasa por la
+app del compañero, y hay áreas —Locales, por ejemplo— que directamente no la usan.
+
 ### Precios
 El historial de precios de cada producto. Cada fila es **un precio, de un proveedor, en una
 fecha**, y tiene un tipo:
