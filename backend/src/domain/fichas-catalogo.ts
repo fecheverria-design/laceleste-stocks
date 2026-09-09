@@ -1,3 +1,10 @@
+import {
+  SESGO_DIAS_MINIMOS,
+  SESGO_PROPORCION,
+  TOLERANCIA_ABSOLUTA,
+  TOLERANCIA_RELATIVA,
+  UNIDADES_FRACCIONABLES,
+} from './abastecimiento.js';
 import { FAMILIAS_EXCLUIDAS_GASTO, PRODUCTOS_FICTICIOS } from './familias.js';
 import { fichaGasto, fichaPrecio, type CoberturaCompras, type Ficha } from './procedencia.js';
 
@@ -37,6 +44,8 @@ export interface ContextoFichas {
     depOrigen: number;
     baldes: readonly number[];
     espejo: { desde: string | null; hasta: string | null; renglones: number };
+    /** Áreas que usan la app del compañero: las únicas que se miden. */
+    areasMedidas: readonly number[];
   };
   umbrales: {
     diasVigente: number;
@@ -277,6 +286,53 @@ export function catalogoFichas(ctx: ContextoFichas): GrupoFichas[] {
     ],
   };
 
+  const fichaAbastecimiento: Ficha = {
+    titulo: 'El porcentaje de "bien abastecido"',
+    pasos: [
+      {
+        titulo: 'Qué compara',
+        detalle:
+          'El PEDIDO (lo que la app del compañero dijo que había que abastecer) contra el DESPACHO (lo que se ' +
+          'cargó como abastecido realmente), por día, área y producto. Las dos cantidades salen del MISMO ' +
+          'renglón, así que no hay corrimiento de fecha ni problema de cobertura: es la única comparación limpia ' +
+          'que tenemos. Contra 3c no se puede medir día por día — sobre jul-sep 2026, el 64% de los casos no ' +
+          'tiene contraparte el mismo día.',
+      },
+      {
+        titulo: 'Cuándo una diferencia NO cuenta como error',
+        detalle:
+          `Cuando la explica alguna razón legítima, y cuáles valen depende de la unidad de medida. ` +
+          `1) El redondeo a la pieza entera: si el pedido son 15 kg y el salame viene de 8, mandar 8 o 16 está ` +
+          `bien. 2) Una tolerancia del ${Math.round(TOLERANCIA_RELATIVA * 100)}%, PERO solo en lo que se pesa o ` +
+          `se corta (${listaEs(UNIDADES_FRACCIONABLES)}): en unidades enteras un porcentaje perdonaría cientos ` +
+          `de bolsas. 3) Una diferencia de ${TOLERANCIA_ABSOLUTA} unidad o menos, siempre — un pedido de 6 y un ` +
+          `despacho de 5 no es un error aunque en porcentaje sea mucho.`,
+      },
+      {
+        titulo: 'Qué queda afuera del porcentaje',
+        detalle:
+          `Los renglones SIN pedido (los extras): tratarlos como "pidió 0" convertiría cada extra en un ` +
+          `despacho de más gigante. Y los productos con SESGO SISTEMÁTICO: los que fallan al menos el ` +
+          `${Math.round(SESGO_PROPORCION * 100)}% de los días —con un mínimo de ${SESGO_DIAS_MINIMOS}— siempre ` +
+          `para el mismo lado. Nadie se equivoca 45 de 46 veces en la misma dirección: ahí lo que está mal es el ` +
+          `sugerido, no el despacho, y van a su propia lista para recalibrarlos.`,
+      },
+      {
+        titulo: 'Qué áreas se miden',
+        detalle:
+          `Solo las que trabajan con la app del compañero (dep ${listaEs(desempeno.areasMedidas.map(String))}). ` +
+          `Las demás no la usan y aparecían como si nunca se les hubiera abastecido nada.`,
+      },
+      {
+        titulo: 'La última palabra la tiene la persona',
+        detalle:
+          'Cada caso marcado se puede revisar de a uno con un check "estuvo bien" / "estuvo mal", y esa marca le ' +
+          'GANA a la regla en el porcentaje. Queda guardada con quién la hizo y cuándo. La regla propone; el que ' +
+          'conoce el caso decide.',
+      },
+    ],
+  };
+
   const fichaDesempeno: Ficha = {
     titulo: 'La cobertura y la fidelidad del depósito',
     pasos: [
@@ -348,8 +404,8 @@ export function catalogoFichas(ctx: ContextoFichas): GrupoFichas[] {
     { hoja: 'Panel', resumen: 'La foto del día: cuánta plata hay parada en stock.', fichas: [fichaValorizacion] },
     {
       hoja: 'Desempeño del depósito',
-      resumen: 'Cuánto de lo que se despacha pasa por la app del compañero, y si la cantidad coincide con 3c.',
-      fichas: [fichaDesempeno],
+      resumen: 'Si se despachó lo que había que despachar, y cuánto de lo que se mueve pasa por la app.',
+      fichas: [fichaAbastecimiento, fichaDesempeno],
     },
     { hoja: 'Consumos', resumen: 'Qué consume cada área y cuánto cuesta.', fichas: [fichaConsumos] },
     { hoja: 'Artículos', resumen: 'El maestro de productos.', fichas: [fichaArticulos] },

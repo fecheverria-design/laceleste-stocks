@@ -382,3 +382,35 @@ export const movimientos3c = pgTable(
     index('idx_mov3c_destino').on(t.destinoDep3c),
   ],
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Revisión manual de un abastecimiento (decisión de J 2026-09-09).
+//
+// La regla automática (horma / tolerancia según unidad) PROPONE; la persona DISPONE. Cada
+// caso marcado se puede revisar de a uno y decir "esto estuvo bien" o "esto estuvo mal", y
+// esa marca le gana a la regla en el indicador. Sin esto, cada producto mal parametrizado
+// obliga a discutir el número entero en vez de corregir el caso.
+//
+// La clave del caso es (fecha, área, producto): la misma unidad de análisis del cruce, así
+// la revisión sobrevive a que se recalcule el reporte.
+// ─────────────────────────────────────────────────────────────────────────────
+export const abastecimientoRevisiones = pgTable(
+  'abastecimiento_revisiones',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    fecha: date('fecha').notNull(),
+    areaDep3c: integer('area_dep_3c').notNull(),
+    producto3c: varchar('producto_3c', { length: 32 }).notNull(),
+    veredicto: varchar('veredicto', { length: 8 }).notNull(), // 'BIEN' | 'MAL'
+    nota: text('nota'),
+    usuarioId: integer('usuario_id')
+      .notNull()
+      .references(() => usuarios.id),
+    revisadoEn: timestamp('revisado_en', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // Una sola revisión vigente por caso: revisar de nuevo pisa la anterior.
+    uniqueIndex('uq_abast_revision').on(t.fecha, t.areaDep3c, t.producto3c),
+    index('idx_abast_revision_fecha').on(t.fecha),
+  ],
+);

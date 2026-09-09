@@ -633,3 +633,72 @@ export interface Desempeno {
   areas: AreaDesempeno[];
   items: ItemDesempeno[];
 }
+
+// ── ¿Despachó lo que había que despachar? ────────────────────────────────────
+export type VeredictoManual = 'BIEN' | 'MAL';
+export type ResultadoAbastecimiento = 'CUMPLE' | 'DE_MAS' | 'DE_MENOS';
+/** Qué razón legítima explica la diferencia. null = ninguna, queda marcada. */
+export type MotivoAbastecimiento = 'EXACTO' | 'HORMA' | 'RELATIVA' | 'ABSOLUTA' | null;
+
+export interface CasoAbastecimiento {
+  fecha: string;
+  area_dep_3c: number;
+  area_nombre: string;
+  producto_3c: string;
+  producto_nombre: string;
+  unidad_base: string | null;
+  presentacion_compra: string | null;
+  unidades_por_bulto: number | null;
+  pedido: number;
+  despacho: number;
+  diferencia: number;
+  diferencia_pct: number | null;
+  piso: number;
+  techo: number;
+  resultado: ResultadoAbastecimiento;
+  motivo: MotivoAbastecimiento;
+  revision: { veredicto: VeredictoManual; nota: string | null; por: string | null; cuando: string | null } | null;
+  bien: boolean;
+  recalibrar: boolean;
+}
+
+export interface ProductoARecalibrar {
+  area_dep_3c: number;
+  area_nombre: string;
+  producto_3c: string;
+  producto_nombre: string;
+  unidad_base: string | null;
+  presentacion_compra: string | null;
+  unidades_por_bulto: number | null;
+  dias: number;
+  marcados: number;
+  sesgo: 'DE_MAS' | 'DE_MENOS';
+  ratio_medio: number;
+  desvio: number;
+}
+
+export interface ResumenAbastecimiento {
+  casos: number;
+  bien: number;
+  de_mas: number;
+  de_menos: number;
+  bien_pct: number | null;
+  revisados: number;
+  pendientes_de_revisar: number;
+  casos_recalibrar: number;
+}
+
+export interface AreaAbastecimiento extends ResumenAbastecimiento {
+  area_dep_3c: number;
+  area_nombre: string;
+}
+
+export interface Abastecimiento {
+  desde: string;
+  hasta: string;
+  tolerancias: { relativa: number; absoluta: number };
+  total: ResumenAbastecimiento;
+  areas: AreaAbastecimiento[];
+  casos: CasoAbastecimiento[];
+  recalibrar: ProductoARecalibrar[];
+}

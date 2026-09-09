@@ -97,28 +97,42 @@ excluyendo lo que va a otros depósitos y a los baldes. Muestra el total, el **p
 Los productos sin precio suman cantidad pero no suman costo.
 
 ### Desempeño del depósito
-Cruza **lo que la app del compañero dice que se despachó** contra **lo que el encargado cargó
-en 3c**, por (área, producto) en el período. Da dos números, no uno:
+Tiene dos solapas, y responden preguntas distintas.
 
-- **Cobertura** — de lo que 3c registró, qué parte pasó también por la app.
-- **Fidelidad** — de lo que pasó por las dos puntas, qué parte coincide en cantidad.
+**Abastecimiento — ¿se despachó lo que había que despachar?**
+Compara el **pedido** (lo que la app del compañero dijo que había que abastecer) contra el
+**despacho** (lo que se cargó como abastecido), por **día, área y producto**. Las dos cantidades
+salen del mismo renglón, así que no hay corrimiento de fecha: es la comparación limpia.
 
-Detalles que hacen que el número signifique algo:
-- Se compara **por período, nunca por día**: el egreso de la tarde que se carga al día
-  siguiente daría dos errores (uno de más y uno de menos) cuando en realidad está bien.
-- La diferencia que **entra en un bulto entero** cuenta como bien abastecido (nadie despacha
-  huevos sueltos). Sin bulto cargado en el maestro, solo cuenta la coincidencia exacta.
-- El lado de la app son los remitos **sin número de 3c** (los que sí lo tienen vinieron de 3c:
-  compararlos sería comparar 3c contra sí mismo). Cuentan también los que quedaron **anulados**
-  por el reemplazo semanal: siguen siendo la constancia de lo que la app registró.
-- El lado de 3c sale del **export de movimientos que se importa 1× por semana**. Si pedís un
-  período que se pasa de lo importado, la hoja te avisa: ahí lo que figura como "no registrado"
-  puede ser export faltante y no falta de carga.
-- Se miran solo los egresos de Fábrica a las áreas; los baldes (101 ajustes, 102 proveedores)
-  quedan afuera.
+Una diferencia se marca **solo si no la explica ninguna razón legítima**, y cuáles valen depende
+de la **unidad de medida**:
+- **Redondeo a la pieza entera.** Si el pedido son 15 kg y el salame viene de 8, mandar 8 o 16
+  está bien. Si el pedido no llega a una pieza, lo único que la pieza justifica es mandar el
+  bulto cerrado (un bulto de 2.000 bolsas no justifica despachar 40: se abre y se cuentan).
+- **Tolerancia del 10%, solo en lo que se pesa o se corta** (KG, L, M). En unidades enteras no
+  se aplica: un 10% de un pedido de 3.600 bolsas serían 360 bolsas perdonadas.
+- **Una unidad de diferencia**, siempre. Pedir 6 y mandar 5 no es un error, aunque en porcentaje
+  sea mucho.
 
-⚠ **La cobertura no es el acierto del encargado.** Mide qué parte de la operación pasa por la
-app del compañero, y hay áreas —Locales, por ejemplo— que directamente no la usan.
+Quedan **afuera del porcentaje**: los renglones sin pedido (los extras, que si no aparecerían
+como despachos de más gigantes) y los **productos con sesgo sistemático** — los que fallan el 80%
+de los días o más, siempre para el mismo lado. Nadie se equivoca 45 de 46 veces en la misma
+dirección: ahí lo que está mal es el sugerido, y van a una lista propia para recalibrarlos.
+
+Se miden **solo las áreas que usan la app**: Panadería, Pastelería, Recetas y Sandwichería.
+
+⭐ **La última palabra la tenés vos.** Cada caso marcado se revisa de a uno con un check «estuvo
+bien» / «estuvo mal» y una nota. Esa marca **le gana a la regla** en el porcentaje y queda
+guardada con tu nombre y la fecha. La regla propone; el que conoce el caso decide.
+
+**Contra 3c — ¿cuánto de lo que se mueve pasa por la app?**
+Cruza lo que la app registró contra el espejo del export de movimientos de 3c, por (área,
+producto) **en el período** (nunca por día: el egreso de la tarde que se carga al día siguiente
+no es un error). Da dos números: **cobertura** (de lo que 3c registró, qué parte pasó también por
+la app) y **fidelidad** (de lo que pasó por las dos, qué parte coincide en cantidad).
+
+⚠ **La cobertura no es el acierto del encargado**: mide qué parte de la operación pasa por la app
+del compañero, y hay áreas —Locales, por ejemplo— que directamente no la usan.
 
 ### Precios
 El historial de precios de cada producto. Cada fila es **un precio, de un proveedor, en una
