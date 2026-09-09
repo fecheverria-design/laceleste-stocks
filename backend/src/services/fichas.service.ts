@@ -1,6 +1,8 @@
 import { catalogoFichas, type GrupoFichas } from '../domain/fichas-catalogo.js';
 import { coberturaCompras } from '../repositories/informe.repository.js';
 import { datosFichas } from '../repositories/fichas.repository.js';
+import { BALDES, DEP_FABRICA } from '../repositories/desempeno.repository.js';
+import { AREAS_MEDIDAS } from '../repositories/abastecimiento.repository.js';
 import {
   ANCLA_CANASTA,
   DIAS_FRESCA,
@@ -26,6 +28,8 @@ export async function fichasPorHoja(): Promise<GrupoFichas[]> {
     stock: datos.stock,
     precios: datos.precios,
     movimientos: datos.movimientos,
+    // Las mismas constantes que filtran el cruce, no una copia escrita a mano.
+    desempeno: { depOrigen: DEP_FABRICA, baldes: BALDES, espejo: datos.espejo3c, areasMedidas: AREAS_MEDIDAS },
     umbrales: {
       diasVigente: DIAS_VIGENTE,
       diasFresca: DIAS_FRESCA,

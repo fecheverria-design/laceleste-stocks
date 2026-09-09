@@ -10,6 +10,8 @@ export interface DatosFichas {
   stock: { filas: number; depositosConStock: number; ultimaFoto: string | null };
   precios: { filas: number; controlados: number };
   movimientos: { confirmados: number; desde: string | null; hasta: string | null; deTresC: number };
+  /** Ventana que cubre el espejo de movimientos de 3c (el export semanal). */
+  espejo3c: { desde: string | null; hasta: string | null; renglones: number };
   renglonesUltimoMes: number;
 }
 
@@ -28,6 +30,9 @@ export async function datosFichas(): Promise<DatosFichas> {
     movs_desde: string | null;
     movs_hasta: string | null;
     movs_de_3c: number;
+    espejo_desde: string | null;
+    espejo_hasta: string | null;
+    espejo_renglones: number;
     renglones_ultimo_mes: number;
   }>(sql`
     SELECT
@@ -46,6 +51,9 @@ export async function datosFichas(): Promise<DatosFichas> {
       (SELECT to_char(min(fecha), 'DD/MM/YYYY') FROM movimientos WHERE estado = 'CONFIRMADO') AS movs_desde,
       (SELECT to_char(max(fecha), 'DD/MM/YYYY') FROM movimientos WHERE estado = 'CONFIRMADO') AS movs_hasta,
       (SELECT count(*)::int FROM movimientos WHERE estado = 'CONFIRMADO' AND nro_3c IS NOT NULL) AS movs_de_3c,
+      (SELECT to_char(min(fecha), 'DD/MM/YYYY') FROM movimientos_3c WHERE tipo_doc = 'Rint') AS espejo_desde,
+      (SELECT to_char(max(fecha), 'DD/MM/YYYY') FROM movimientos_3c WHERE tipo_doc = 'Rint') AS espejo_hasta,
+      (SELECT count(*)::int FROM movimientos_3c WHERE tipo_doc = 'Rint') AS espejo_renglones,
       (SELECT count(*)::int FROM compras
         WHERE to_char(fecha, 'YYYY-MM') = (SELECT to_char(max(fecha), 'YYYY-MM') FROM compras)) AS renglones_ultimo_mes
   `);
@@ -64,6 +72,11 @@ export async function datosFichas(): Promise<DatosFichas> {
       desde: r?.movs_desde ?? null,
       hasta: r?.movs_hasta ?? null,
       deTresC: r?.movs_de_3c ?? 0,
+    },
+    espejo3c: {
+      desde: r?.espejo_desde ?? null,
+      hasta: r?.espejo_hasta ?? null,
+      renglones: r?.espejo_renglones ?? 0,
     },
     renglonesUltimoMes: r?.renglones_ultimo_mes ?? 0,
   };
