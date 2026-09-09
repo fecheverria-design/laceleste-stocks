@@ -8,6 +8,7 @@ const tabs = [
   { to: '/articulos', label: 'Artículos' },
   { to: '/inventarios', label: 'Inventarios' },
   { to: '/consumos', label: 'Consumos' },
+  { to: '/desempeno', label: 'Desempeño' },
   { to: '/precios', label: 'Precios' },
   { to: '/control-precios', label: 'Control precios' },
   { to: '/proveedores', label: 'Proveedores' },
