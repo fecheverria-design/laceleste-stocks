@@ -132,6 +132,30 @@ npm -w backend run sync:recepciones -- --desde=2026-06-20 --hasta=2026-06-30
 npm -w backend run sync:extras -- --fecha=2026-07-30 --dry
 ```
 
+## Falta un depósito (el movimiento no entra)
+
+En 3c **no hay vista de depósitos**: las únicas son de artículos, precios, stock, proveedores y
+movimientos. Cuando La Celeste abre un acopio nuevo en un proveedor, ese depósito aparece recién
+como origen/destino de un movimiento, y hasta darlo de alta acá el renglón no se puede
+materializar. El nombre sale de `V_MOVIMIENTOS_LA_CELESTE` (`ORIGEN_DENOMINACION` /
+`DESTINO_DENOMINACION`) o del `.xls` del espejo.
+
+```bash
+# Ver qué hay (los acopios en proveedor son la serie 200+)
+npm -w backend run ubicaciones -- listar --desde 200
+
+# Darlo de alta (idempotente por dep_id_3c: repetirlo actualiza, no duplica)
+npm -w backend run ubicaciones -- alta --dep 225 --nombre "GRUPO PACK S.R.L" --tipo DEPOSITO --stock
+```
+
+En el server, lo mismo adentro del contenedor:
+
+```bash
+pct exec 105 -- bash -lc 'cd /opt/laceleste && docker compose -f docker-compose.prod.yml exec -T backend npm -w backend run ubicaciones -- listar --desde 200'
+```
+
+`--stock` = el depósito lleva stock propio. Las áreas nunca lo llevan (consumen, no almacenan).
+
 ## Ajustes
 
 - **Cambiar la frecuencia** (ej. cada 30 min): editar `<Interval>PT1H</Interval>` →
