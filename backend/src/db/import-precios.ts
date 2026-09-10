@@ -229,6 +229,16 @@ async function main(archivo: string, dry: boolean, controlado: boolean): Promise
   }
 
   if (dry) {
+    if (desdeUsar) {
+      // Para contarlas hay que cruzar contra la DB. Los proveedores nuevos todavía no
+      // existen, así que sus filas no matchean y el número puede quedar apenas corto.
+      const provRows = await db.select({ id: proveedores.id, numero3c: proveedores.numero3c }).from(proveedores);
+      const idPorNumero = new Map<number, number>();
+      for (const p of provRows) if (p.numero3c !== null) idPorNumero.set(p.numero3c, p.id);
+      await sembrarTemporales(registros, idPorNumero);
+      const n = await contarComprasSinTilde();
+      console.log(`  solo el tilde es COMPRA: ${n} compra(s) sin tilde de esos productos pasarían a ACTUALIZACION.`);
+    }
     console.log('— DRY RUN: no se escribió nada. Muestra (primeras 5):');
     for (const r of registros.slice(0, 5)) {
       console.log(`  ${r.producto3c} ${r.nombre} · ${r.tipo} $${r.precio} · ${r.vigenteDesde} · ${r.proveedorNombre}`);
@@ -280,11 +290,105 @@ async function main(archivo: string, dry: boolean, controlado: boolean): Promise
 
   console.log(`✔ Precios importados/actualizados: ${escritos} (compras: ${compras}). Productos/proveedores faltantes auto-creados.`);
 
+  // La regla de J: la única compra es la que él tildó. Va ANTES de marcar los controlados
+  // porque cambia qué filas son COMPRA, y la marca elige entre esas.
+  if (desdeUsar) {
+    await sembrarTemporales(registros, idPorNumero);
+    const { degradadas, duplicadasBorradas } = await soloElTildeEsCompra();
+    console.log(
+      `✔ Solo el tilde es COMPRA: ${degradadas} compra(s) sin tilde pasaron a ACTUALIZACION` +
+        (duplicadasBorradas > 0
+          ? ` (${duplicadasBorradas} actualización(es) de ese mismo producto/proveedor/fecha se borraron: quedó el importe pagado)`
+          : '') +
+        '.',
+    );
+  }
+
   if (controlado && aControlar.size > 0) {
     const marcados = await marcarControlados([...aControlar.values()], idPorNumero, usuarioId);
     console.log(`✔ Precios marcados como CONTROLADOS: ${marcados} (uno por producto; le ganan a cualquier compra posterior).`);
   }
   await pool.end();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SOLO EL TILDE ES COMPRA (regla de J, 2026-09-10).
+//
+// La tabla `precios` venía cargada con las "compras" del histórico de 3c, y J dice que esas
+// NO son compras: la única compra es la que él tildó en la planilla. El caso que lo destapó:
+// BOLSA DE PAPEL SULFITO Nº6 figuraba con una compra de $41.507,80 (contra $49,98 el resto
+// del año) que **nunca existió** — es un bulto cargado como unidad. Mientras esa fila sea
+// COMPRA, se cuela en el gráfico de evolución, en la alerta de saltos y en la prelación.
+//
+// Por eso, al importar la planilla, TODA compra que no esté tildada pasa a ACTUALIZACION.
+// El dato no se pierde: queda como referencia, que es lo que es.
+//
+// Alcance: todos los productos, no solo los del archivo. La planilla cubre el 100% de los
+// productos reales (los 47 que quedaban afuera son SERVICIOS / PRODUCTOS ESPORADICOS /
+// AJUSTE SALDO / PRUEBA, familias que los informes ya excluyen), así que acotarlo a los del
+// archivo solo dejaba una excepción sin sentido.
+// ⚠ La contra, asumida: un producto nuevo que todavía no esté en la planilla va a figurar
+// SIN compras hasta que lo tilden. Eso es visible: el informe de precios lo marca `sin_compra`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Deja en `tmp_tilde` (temporal de sesión) las filas que el archivo tildó. */
+export async function sembrarTemporales(filas: FilaPrecio[], idPorNumero: Map<number, number>): Promise<void> {
+  await db.execute(sql`DROP TABLE IF EXISTS tmp_tilde`);
+  await db.execute(sql`CREATE TEMP TABLE tmp_tilde (producto_3c varchar(32), proveedor_id int, vigente_desde date)`);
+
+  const tildadas = filas.filter((f) => f.tipo === 'COMPRA');
+  for (let i = 0; i < tildadas.length; i += 500) {
+    const lote = tildadas.slice(i, i + 500);
+    await db.execute(
+      sql`INSERT INTO tmp_tilde VALUES ${sql.join(
+        lote.map((f) => sql`(${f.producto3c}, ${idPorNumero.get(f.proveedorNum) ?? null}, ${f.vigenteDesde})`),
+        sql`, `,
+      )}`,
+    );
+  }
+}
+
+/** Toda COMPRA que el archivo NO tildó. */
+const comprasSinTilde = sql`
+  SELECT c.id, c.producto_3c, c.proveedor_id, c.vigente_desde
+  FROM precios c
+  WHERE c.tipo = 'COMPRA'
+    AND NOT EXISTS (
+      SELECT 1 FROM tmp_tilde t
+      WHERE t.producto_3c = c.producto_3c
+        AND t.proveedor_id IS NOT DISTINCT FROM c.proveedor_id
+        AND t.vigente_desde = c.vigente_desde
+    )`;
+
+async function contarComprasSinTilde(): Promise<number> {
+  const res = await db.execute<{ n: number }>(sql`SELECT count(*)::int AS n FROM (${comprasSinTilde}) x`);
+  return res.rows[0]?.n ?? 0;
+}
+
+/**
+ * Degrada a ACTUALIZACION toda COMPRA sin tilde de los productos del archivo.
+ *
+ * El índice `uq_precio_prod_prov_fecha_tipo` no deja tener dos filas del mismo
+ * (producto, proveedor, fecha, tipo), así que cuando ya existe una ACTUALIZACION de esa
+ * misma clave hay que sacarla del medio primero. Se borra la actualización y se conserva la
+ * compra degradada: **el importe que se pagó es mejor referencia que el precio de lista**.
+ */
+export async function soloElTildeEsCompra(): Promise<{ degradadas: number; duplicadasBorradas: number }> {
+  return db.transaction(async (tx) => {
+    const borradas = await tx.execute(sql`
+      DELETE FROM precios a
+      WHERE a.tipo = 'ACTUALIZACION'
+        AND EXISTS (
+          SELECT 1 FROM (${comprasSinTilde}) c
+          WHERE c.producto_3c = a.producto_3c
+            AND c.proveedor_id IS NOT DISTINCT FROM a.proveedor_id
+            AND c.vigente_desde = a.vigente_desde
+        )`);
+    const degradadas = await tx.execute(sql`
+      UPDATE precios SET tipo = 'ACTUALIZACION'
+      WHERE id IN (SELECT id FROM (${comprasSinTilde}) c)`);
+    return { degradadas: degradadas.rowCount ?? 0, duplicadasBorradas: borradas.rowCount ?? 0 };
+  });
 }
 
 // Marca las filas dadas como EL precio controlado de su producto, en UNA transacción:

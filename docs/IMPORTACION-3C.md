@@ -175,6 +175,20 @@ qué precio se usa de cada producto. No tiene columna `TIPO`: tiene el tilde **`
 - Con `--controlado` **solo se marca lo tildado**: un producto sin ningún tilde en todo el
   archivo se deja como está. Marcarle la última cotización suelta sería inventarle una decisión
   que nadie tomó, y esa marca le gana a toda compra futura.
+- ⭐ **SOLO EL TILDE ES COMPRA.** Al importar la planilla, **toda** `COMPRA` que no esté tildada
+  pasa a `ACTUALIZACION` — incluidas las que venían del histórico de 3c. No se borra nada: el
+  dato queda como referencia. Lo destapó BOLSA DE PAPEL SULFITO Nº6, que figuraba con una
+  compra de **$41.507,80** (contra $49,98 el resto del año) que nunca existió: un bulto cargado
+  como unidad. Mientras esa fila fuera COMPRA se colaba en el gráfico de evolución, en la
+  alerta de saltos y en la prelación del precio vigente.
+  - Alcance **global**, no solo los productos del archivo: la planilla cubre el 100% de los
+    productos reales (los que quedaban afuera son SERVICIOS / PRODUCTOS ESPORADICOS / AJUSTE
+    DE SALDO / PRUEBA, familias que los informes ya excluyen).
+  - ⚠ La contra, asumida: un producto nuevo que todavía no esté en la planilla figura **sin
+    compras** hasta que lo tilden. Es visible: el informe de precios lo marca `sin_compra`.
+  - Si al degradar ya existe una `ACTUALIZACION` del mismo producto/proveedor/fecha (el índice
+    único no deja dos), se borra esa y queda la compra degradada: **el importe que se pagó es
+    mejor referencia que el precio de lista**.
 
 
 ### `--controlado` — marcar de una lo que compras controló en el mes
@@ -282,6 +296,7 @@ y `count(*) WHERE cantidad < 0` = 0. **Hacer `pg_dump` antes.**
 
 | Fecha | Cambio | Commit |
 |---|---|---|
+| 2026-09-10 | Precios: **solo el tilde es COMPRA** — al importar la planilla, toda compra sin tilde (incluido el histórico de 3c) pasa a ACTUALIZACION. Decisión de J: *"solo tomamos los true como que es compra, el resto son actualizaciones; todo informe o gráfico se debe mostrar solo con los true"*. Lo destapó una compra de $41.507,80 en BOLSA SULFITO Nº6 que nunca existió. 3.940+6.661 filas degradadas; COMPRA quedó en 1.636 filas de 574 productos = exactamente lo tildado | (este commit) |
 | 2026-09-10 | Precios: `import:precios` lee `.xlsx` (valores crudos) y acepta el tilde `Usar` de la planilla de compras en vez de `TIPO` (tildado=COMPRA, resto=ACTUALIZACION, decisión de J). Con el tilde, las filas del mismo `(producto, proveedor, fecha)` se colapsan —es una foto por mes— y basta un mes tildado para que sea COMPRA. `--controlado` marca la COMPRA más nueva (antes: la fila más nueva, que podía ser una cotización sin tildar) y **solo lo tildado**. Precio `0` pasa a saltearse en vez de guardarse | (este commit) |
 | 2026-07-31 | Compras: clave `(numero, producto_3c, renglon)` (mig. 0016). Un remito puede repetir el mismo producto en varias líneas y la clave vieja las pisaba: 65 renglones / $60,7M perdidos. Con esto el gasto de junio cierra con el informe de J (Lautaro $530.798.232, Fausto $74.153.348, ambos con IVA) | (este commit) |
 | 2026-07-01 | Recuento de stock = tipo `INVENTARIO` (mig. 0015), separado del AJUSTE operativo; lo usan `import:inventario` y el módulo Inventarios. `import:inventario` acepta alias `ARTICULO` para el código | (este commit) |
