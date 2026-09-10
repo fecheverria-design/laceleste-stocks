@@ -13,8 +13,9 @@ import { apiDelete, apiGet, apiPost, apiPut, descargarArchivo } from '../../shar
 import { BarraFiltros, type ChipFiltro } from '../../shared/components/filtros';
 import { IconoDescarga, IconoLupa } from '../../shared/components/iconos';
 import { CLS_BOTON, CLS_INPUT, ThOrden } from '../../shared/components/tabla';
+import { FichaPlegable } from '../../shared/components/ficha';
 import { EncabezadoPagina, EtiquetaFamilia, Panel, Tarjeta, Vacio } from '../../shared/components/ui';
-import type { PrecioHistorial, PrecioVigente, TipoPrecio } from '../../shared/api/types';
+import type { Ficha, PrecioHistorial, PrecioVigente, TipoPrecio } from '../../shared/api/types';
 
 // Columnas ordenables. Client-side: la hoja trae el precio vigente de todos los productos
 // de una sola vez (~1.200 filas), así que ordenar acá es instantáneo.
@@ -83,9 +84,19 @@ function HistorialPrecios({ producto3c, unidad }: { producto3c: string; unidad: 
     queryFn: () => apiGet<PrecioHistorial[]>(`/api/productos/${encodeURIComponent(producto3c)}/precios`),
   });
 
+  // Por qué la app usa ESTE precio y no otro de la lista de abajo. La arma el backend con la
+  // misma prelación que resuelve el vigente, así que no puede desfasarse de la regla real.
+  // Se pide recién cuando la fila se abre (este componente solo se monta ahí).
+  const ficha = useQuery({
+    queryKey: ['precios-ficha', producto3c],
+    queryFn: () => apiGet<Ficha>(`/api/productos/${encodeURIComponent(producto3c)}/precios/ficha`),
+  });
+
+  // Tocar un precio puede cambiar cuál manda → la ficha también se rehace.
   const invalidar = () =>
     Promise.all([
       queryClient.invalidateQueries({ queryKey: ['precios-historial', producto3c] }),
+      queryClient.invalidateQueries({ queryKey: ['precios-ficha', producto3c] }),
       queryClient.invalidateQueries({ queryKey: ['precios'] }),
     ]);
 
@@ -139,6 +150,12 @@ function HistorialPrecios({ producto3c, unidad }: { producto3c: string; unidad: 
 
   return (
     <div className="space-y-4 p-4">
+      <FichaPlegable
+        ficha={ficha.data}
+        cargando={ficha.isLoading}
+        resumen="¿De dónde sale este precio?"
+      />
+
       {serie.length >= 2 && (
         <div className="rounded-lg border border-slate-200 bg-white p-3">
           <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">

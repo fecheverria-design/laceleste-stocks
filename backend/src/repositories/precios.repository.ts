@@ -26,7 +26,12 @@ export type FilaPrecioVigente = {
 // Precio vigente por producto (incluye productos sin precio: precio = null).
 // El LATERAL aplica la prelación de `ordenPrecio()`: controlado > última compra >
 // última actualización. precio > 0 (un 0 = sin precio real).
-export async function listarPreciosVigentes(): Promise<FilaPrecioVigente[]> {
+//
+// `soloProducto` la reusa la ficha ("de dónde sale este precio") para un producto puntual.
+// Ahí NO se filtra por activo: si el producto existe hay que poder explicar su precio, y
+// filtrarlo devolvería fila vacía → la ficha diría "no tiene precio", que es mentira.
+async function preciosVigentes(soloProducto?: string): Promise<FilaPrecioVigente[]> {
+  const filtro = soloProducto === undefined ? sql`p.activo = true` : sql`p.codigo_3c = ${soloProducto}`;
   const res = await db.execute<FilaPrecioVigente>(
     sql`SELECT
           p.codigo_3c AS producto_3c,
@@ -49,10 +54,18 @@ export async function listarPreciosVigentes(): Promise<FilaPrecioVigente[]> {
           LIMIT 1
         ) v ON TRUE
         LEFT JOIN proveedores prov ON prov.id = v.proveedor_id
-        WHERE p.activo = true
+        WHERE ${filtro}
         ORDER BY p.nombre`,
   );
   return res.rows;
+}
+
+export const listarPreciosVigentes = (): Promise<FilaPrecioVigente[]> => preciosVigentes();
+
+/** El precio que manda para UN producto, resuelto con la misma prelación que la hoja. */
+export async function precioVigenteDe(producto3c: string): Promise<FilaPrecioVigente | undefined> {
+  const [fila] = await preciosVigentes(producto3c);
+  return fila;
 }
 
 export interface FilaPrecioHistorial {

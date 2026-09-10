@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiGet } from '../../shared/api/client';
+import { PasosFicha } from '../../shared/components/ficha';
 import type { GrupoFichas } from '../../shared/api/types';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -40,23 +41,9 @@ export default function FichasPage() {
               {grupo.fichas.map((ficha) => (
                 <article key={ficha.titulo} className="rounded-lg border border-slate-200 bg-white p-4">
                   <h3 className="text-sm font-semibold text-slate-800">{ficha.titulo}</h3>
-                  <dl className="mt-2 space-y-3">
-                    {ficha.pasos.map((paso) => (
-                      <div key={paso.titulo}>
-                        <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                          {paso.titulo}
-                        </dt>
-                        <dd className="mt-0.5 text-sm leading-relaxed text-slate-700">{paso.detalle}</dd>
-                        {paso.items && paso.items.length > 0 && (
-                          <ul className="mt-1.5 list-disc space-y-0.5 pl-5 text-sm text-slate-600">
-                            {paso.items.map((item) => (
-                              <li key={item}>{item}</li>
-                            ))}
-                          </ul>
-                        )}
-                      </div>
-                    ))}
-                  </dl>
+                  <div className="mt-2">
+                    <PasosFicha ficha={ficha} />
+                  </div>
                 </article>
               ))}
             </div>

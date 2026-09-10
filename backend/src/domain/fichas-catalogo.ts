@@ -412,7 +412,9 @@ export function catalogoFichas(ctx: ContextoFichas): GrupoFichas[] {
     { hoja: 'Proveedores', resumen: 'A quién le compramos y cuánto.', fichas: [fichaProveedores] },
     {
       hoja: 'Precios y Control de precios',
-      resumen: 'Qué precio manda para cada producto, y cuáles hay que ir a revisar.',
+      resumen:
+        'Qué precio manda para cada producto, y cuáles hay que ir a revisar. Abriendo una fila en ' +
+        'esas hojas, la misma ficha sale resuelta para ese producto: cuál de sus precios ganó y por qué.',
       fichas: [fichaPrecio({ controlado: false, tipo: 'COMPRA', fecha: null, proveedor: null }), fichaControl],
     },
     {
