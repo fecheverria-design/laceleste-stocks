@@ -4,6 +4,7 @@ import { sql } from 'drizzle-orm';
 import { db, pool } from './client.js';
 import { precios, productos, proveedores } from './schema.js';
 import { parseDelimited } from './csv.js';
+import { leerXls } from './xls.js';
 import { resolverUsuarioIntegracion } from '../repositories/movimientos.repository.js';
 
 // Importa el HISTÓRICO de precios de 3c. Una fila = un precio de un proveedor en una
@@ -15,6 +16,17 @@ import { resolverUsuarioIntegracion } from '../repositories/movimientos.reposito
 //   ID (producto_3c), DENOMINACION, PRECIO_UNITARIO, PERSONAS_ID (= numero de proveedor),
 //   PROVEEDORES (nombre), FECHA (dd/mm/yyyy), TIPO (COMPRA|ACTUALIZACION).
 //   FAMILIA / AÑO / MES / RESPONSABLE se ignoran.
+//
+// Acepta CSV/TSV y también el .xlsx directo (la planilla de compras). Del Excel se leen los
+// valores CRUDOS, no los formateados: una celda con formato moneda se ve "$5,832" y ahí ya
+// se perdieron los centavos.
+//
+// EN LUGAR DE `TIPO` acepta la columna `USAR` de la planilla de compras (el tilde de "este
+// es el precio que usamos"): marcada = COMPRA, sin marcar = ACTUALIZACION. Regla de J.
+// Cuando el tipo sale de ahí, el archivo es una FOTO POR MES del mismo hecho, así que las
+// filas del mismo producto+proveedor+fecha se colapsan en una sola y **basta con que esté
+// marcada en un mes para que sea COMPRA**: el tilde gana. Sin ese colapso, un precio marcado
+// en enero y no en marzo entraría dos veces, como compra y como actualización del mismo día.
 //
 // Idempotente: upsert por (producto_3c, proveedor_id, vigente_desde, tipo). Auto-crea
 // productos y proveedores faltantes.
@@ -48,6 +60,15 @@ function normalizarTipo(s: string): 'COMPRA' | 'ACTUALIZACION' {
   return t.startsWith('ACTUALIZ') ? 'ACTUALIZACION' : 'COMPRA';
 }
 
+// El tilde de la planilla de compras. Excel lo escribe true/false, VERDADERO/FALSO o 1/0
+// según el idioma y cómo se exporte; cualquier otra cosa (celda vacía) es "sin tildar".
+function tipoSegunUsar(s: string): 'COMPRA' | 'ACTUALIZACION' {
+  const t = s.trim().toUpperCase();
+  return t === 'TRUE' || t === 'VERDADERO' || t === 'V' || t === 'SI' || t === 'X' || t === '1'
+    ? 'COMPRA'
+    : 'ACTUALIZACION';
+}
+
 export interface FilaPrecio {
   producto3c: string;
   nombre: string;
@@ -59,30 +80,67 @@ export interface FilaPrecio {
 }
 
 // De todas las filas del archivo, cuál se marca como controlada por producto: solo puede
-// haber UNA (índice parcial `uq_precio_controlado_producto`). Gana la de fecha más nueva;
-// a igualdad de fecha, la última del archivo. Aparte para poder testearla sin DB.
+// haber UNA (índice parcial `uq_precio_controlado_producto`). Gana la COMPRA más nueva; si
+// no hay ninguna compra, la última actualización. A igualdad, la última fila del archivo.
+//
+// El orden COMPRA-antes-que-ACTUALIZACION es el mismo de `repositories/precio-vigente.ts`, y
+// no es un detalle: en la planilla de compras el tilde se traduce a COMPRA, así que sin esta
+// preferencia quedaría controlada la última cotización cargada aunque NO esté tildada —
+// justo lo contrario de lo que significa la marca. Aparte para poder testearla sin DB.
 export function unoPorProducto(registros: FilaPrecio[]): Map<string, FilaPrecio> {
   const elegidos = new Map<string, FilaPrecio>();
+  const gana = (r: FilaPrecio, previa: FilaPrecio): boolean => {
+    const esCompra = r.tipo === 'COMPRA';
+    if (esCompra !== (previa.tipo === 'COMPRA')) return esCompra;
+    return r.vigenteDesde >= previa.vigenteDesde;
+  };
   for (const r of registros) {
     const previa = elegidos.get(r.producto3c);
-    if (previa === undefined || r.vigenteDesde >= previa.vigenteDesde) elegidos.set(r.producto3c, r);
+    if (previa === undefined || gana(r, previa)) elegidos.set(r.producto3c, r);
   }
   return elegidos;
 }
 
-async function main(archivo: string, dry: boolean, controlado: boolean): Promise<void> {
-  const filas = parseDelimited(readFileSync(archivo, 'utf8'));
+/** Lo que el archivo dijo, ya interpretado y deduplicado. */
+export interface PlanillaPrecios {
+  registros: FilaPrecio[];
+  saltados: number;
+  /** El tipo salió del tilde `USAR` (planilla de compras) y no de una columna `TIPO`. */
+  desdeUsar: boolean;
+}
+
+/**
+ * Traduce las filas del archivo (venga de CSV o de Excel) a precios, deduplicando.
+ *
+ * Pura a propósito: es donde vive la interpretación del tilde y del colapso por mes, o sea
+ * lo que hay que poder testear sin DB ni archivo.
+ */
+export function interpretarPlanillaPrecios(filas: string[][]): PlanillaPrecios {
   if (filas.length < 2) throw new Error('El archivo no tiene filas de datos (¿solo encabezado?).');
 
   const h = filas[0]!;
   const norm = h.map((x) => x.trim().toUpperCase());
-  const idx = (aliases: string[]): number => {
+  const buscar = (aliases: string[]): number => {
     for (const a of aliases) {
       const i = norm.indexOf(a.toUpperCase());
       if (i !== -1) return i;
     }
-    throw new Error(`Falta la columna (${aliases.join(' / ')}). Encabezados: ${h.join(' | ')}`);
+    return -1;
   };
+  const idx = (aliases: string[]): number => {
+    const i = buscar(aliases);
+    if (i === -1) throw new Error(`Falta la columna (${aliases.join(' / ')}). Encabezados: ${h.join(' | ')}`);
+    return i;
+  };
+
+  // El tipo sale de `TIPO` o, si no está, del tilde `USAR` de la planilla de compras.
+  const iTipo = buscar(['TIPO']);
+  const iUsar = buscar(['USAR', 'USA', 'USAR?']);
+  if (iTipo === -1 && iUsar === -1) {
+    throw new Error(`Falta la columna TIPO (o USAR, el tilde de la planilla). Encabezados: ${h.join(' | ')}`);
+  }
+  const desdeUsar = iTipo === -1;
+
   const col = {
     ID: idx(['ID', 'CODIGO', 'ARTICU_ID']),
     DENOMINACION: idx(['DENOMINACION', 'ARTICULO']),
@@ -90,11 +148,13 @@ async function main(archivo: string, dry: boolean, controlado: boolean): Promise
     PERSONAS_ID: idx(['PERSONAS_ID', 'COD. PROVEEDOR', 'ID PROVEEDOR']),
     PROVEEDOR: idx(['PROVEEDORES', 'PROVEEDOR', 'NOMBRE']),
     FECHA: idx(['FECHA', 'ULTIMA_ACT_PRECIO']),
-    TIPO: idx(['TIPO']),
   };
   const c = (f: string[], k: keyof typeof col) => (f[col[k]] ?? '').trim();
 
-  // Dedup intra-archivo por (producto, proveedor, fecha, tipo): la última fila gana.
+  // Dedup intra-archivo: la última fila gana. Con `TIPO` la clave lo incluye (una compra y
+  // una actualización del mismo día son dos hechos distintos). Con el tilde NO: ahí el
+  // archivo repite el mismo hecho una vez por mes, así que se colapsan y basta un mes
+  // tildado para que la clave entera sea COMPRA.
   const porClave = new Map<string, FilaPrecio>();
   let saltados = 0;
   for (let i = 1; i < filas.length; i++) {
@@ -103,23 +163,42 @@ async function main(archivo: string, dry: boolean, controlado: boolean): Promise
     const proveedorNum = Number(c(f, 'PERSONAS_ID'));
     const precio = parsePrecio(c(f, 'PRECIO'));
     const vigenteDesde = parseFecha(c(f, 'FECHA'));
-    const tipo = normalizarTipo(c(f, 'TIPO'));
-    if (!producto3c || !Number.isInteger(proveedorNum) || proveedorNum <= 0 || !Number.isFinite(precio) || precio < 0 || !vigenteDesde) {
+    const tipo = desdeUsar ? tipoSegunUsar(f[iUsar] ?? '') : normalizarTipo(f[iTipo] ?? '');
+    // Un precio 0 no es un precio: la app ya lo ignora al resolver el vigente, guardarlo solo
+    // ensucia el historial y el gráfico.
+    if (!producto3c || !Number.isInteger(proveedorNum) || proveedorNum <= 0 || !Number.isFinite(precio) || precio <= 0 || !vigenteDesde) {
       saltados++;
       continue;
     }
-    porClave.set(`${producto3c}|${proveedorNum}|${vigenteDesde}|${tipo}`, {
+    const clave = desdeUsar
+      ? `${producto3c}|${proveedorNum}|${vigenteDesde}`
+      : `${producto3c}|${proveedorNum}|${vigenteDesde}|${tipo}`;
+    const previa = porClave.get(clave);
+    porClave.set(clave, {
       producto3c,
       nombre: c(f, 'DENOMINACION').slice(0, 200) || `Producto ${producto3c}`,
       proveedorNum,
       proveedorNombre: c(f, 'PROVEEDOR').slice(0, 150) || `Proveedor ${proveedorNum}`,
       precio,
-      tipo,
+      // El tilde gana: si en algún mes estaba marcada, la fila es COMPRA.
+      tipo: desdeUsar && previa?.tipo === 'COMPRA' ? 'COMPRA' : tipo,
       vigenteDesde,
     });
   }
-  const registros = [...porClave.values()];
+
+  return { registros: [...porClave.values()], saltados, desdeUsar };
+}
+
+async function main(archivo: string, dry: boolean, controlado: boolean): Promise<void> {
+  const esExcel = /\.xlsx?$/i.test(archivo);
+  const filas = esExcel
+    ? leerXls(archivo, undefined, { crudo: true })
+    : parseDelimited(readFileSync(archivo, 'utf8'));
+  const { registros, saltados, desdeUsar } = interpretarPlanillaPrecios(filas);
   const compras = registros.filter((r) => r.tipo === 'COMPRA').length;
+  if (desdeUsar) {
+    console.log('Tipo tomado del tilde USAR: marcada = COMPRA, sin marcar = ACTUALIZACION.');
+  }
 
   const prods = new Map<string, { codigo3c: string; nombre: string; unidadBase: string }>();
   const provs = new Map<number, { numero3c: number; nombre: string }>();
@@ -131,11 +210,21 @@ async function main(archivo: string, dry: boolean, controlado: boolean): Promise
   console.log(
     `Filas: ${filas.length - 1} · válidas: ${registros.length} (compras: ${compras}, actualizaciones: ${registros.length - compras}) · saltadas: ${saltados} · productos: ${prods.size} · proveedores: ${provs.size}`,
   );
-  const aControlar = controlado ? unoPorProducto(registros) : new Map<string, FilaPrecio>();
+  // Con el tilde, SOLO se marca lo tildado: un producto sin ningún tilde en todo el archivo
+  // no tiene nada verificado por compras, y marcarle la última cotización suelta sería
+  // inventarle una decisión que nadie tomó (le ganaría a toda compra futura).
+  const candidatos = desdeUsar ? registros.filter((r) => r.tipo === 'COMPRA') : registros;
+  const aControlar = controlado ? unoPorProducto(candidatos) : new Map<string, FilaPrecio>();
   if (controlado) {
+    const productos = new Set(registros.map((r) => r.producto3c)).size;
     console.log(
       `  --controlado: se marcarán ${aControlar.size} precio(s), uno por producto` +
-        (registros.length > aControlar.size ? ` (${registros.length - aControlar.size} fila(s) del archivo comparten producto y NO se marcan)` : ''),
+        (desdeUsar && productos > aControlar.size
+          ? ` (${productos - aControlar.size} producto(s) sin ningún tilde en el archivo quedan como están)`
+          : '') +
+        (candidatos.length > aControlar.size
+          ? ` · ${candidatos.length - aControlar.size} fila(s) comparten producto y NO se marcan`
+          : ''),
     );
   }
 

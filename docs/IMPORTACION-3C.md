@@ -152,8 +152,29 @@ PROVEEDORES (nombre), FECHA, TIPO (COMPRA|ACTUALIZACION)`.
 - **Precio vigente = la última `COMPRA`** (lo que efectivamente se pagó). Si un producto
   nunca tuvo compra, cae a la última `ACTUALIZACION` como referencia.
 - **El gráfico de evolución usa solo las `COMPRA`.**
-- **`$0` = "sin precio"** (placeholder de 3c; se ignora para el vigente y la valorización).
+- **`$0` = "sin precio"** (placeholder de 3c): se saltea, no se guarda.
 - Idempotente por `(producto, proveedor, fecha, tipo)`.
+- Acepta **CSV/TSV y `.xlsx` directo**. Del Excel lee los valores **crudos**, no los que
+  muestra la celda: con formato moneda, `5831,83` se ve `$5.832` y ahí ya se perdieron los
+  centavos.
+
+
+### La planilla de compras (columna `Usar` en vez de `TIPO`)
+
+`precios.xlsx` (hoja **PRECIOS DEFINITIVOS**) es la planilla donde compras tilda, mes a mes,
+qué precio se usa de cada producto. No tiene columna `TIPO`: tiene el tilde **`Usar`**.
+
+- **Tildado = `COMPRA`, sin tildar = `ACTUALIZACION`** (regla de J).
+- Es una **foto por mes**: el mismo precio se repite una fila por mes. Cuando el tipo sale del
+  tilde, las filas de un mismo `(producto, proveedor, fecha)` **se colapsan en una sola** y
+  **basta que esté tildada en un mes** para que sea COMPRA. Sin ese colapso, un precio tildado
+  en enero y no en marzo entraría dos veces —como compra y como actualización del mismo día—
+  e inflaría el conteo de cotizaciones del Control de precios.
+- Si el precio de esa misma fecha cambió entre meses (alguien corrigió la planilla), **gana el
+  del mes más nuevo**: el archivo viene ordenado por mes ascendente y la última fila manda.
+- Con `--controlado` **solo se marca lo tildado**: un producto sin ningún tilde en todo el
+  archivo se deja como está. Marcarle la última cotización suelta sería inventarle una decisión
+  que nadie tomó, y esa marca le gana a toda compra futura.
 
 
 ### `--controlado` — marcar de una lo que compras controló en el mes
@@ -164,9 +185,13 @@ le gana a todo en la prelación (controlado > última COMPRA > última ACTUALIZA
 de marcarlo a mano de a uno en la hoja de Control de precios.
 
 - Solo puede haber **UN controlado por producto** (índice parcial `uq_precio_controlado_producto`).
-  Si el archivo trae varias filas del mismo producto, **gana la de fecha más nueva** (a igualdad,
-  la última del archivo) y se avisa cuántas quedaron sin marcar. Las demás se importan igual,
-  solo que sin la marca.
+  Si el archivo trae varias filas del mismo producto, **gana la `COMPRA` más nueva** —y solo si
+  no hay ninguna compra, la última actualización—, que es el mismo orden con el que la app
+  resuelve el precio vigente. A igualdad, la última fila del archivo. Se avisa cuántas quedaron
+  sin marcar; las demás se importan igual, solo que sin la marca.
+- ⚠ **La marca congela el precio**: le gana a cualquier compra posterior de 3c. Después de una
+  carga masiva conviene revisar los casos donde el controlado quedó viejo y hay una compra más
+  nueva muy distinta (query en la bitácora, entrada del 2026-09-10).
 - Desmarca el controlado anterior de esos productos, misma semántica que el botón de la hoja.
 - Todo en una transacción.
 - Probalo con `--dry` primero: dice cuántos se van a marcar antes de tocar nada.
@@ -257,6 +282,7 @@ y `count(*) WHERE cantidad < 0` = 0. **Hacer `pg_dump` antes.**
 
 | Fecha | Cambio | Commit |
 |---|---|---|
+| 2026-09-10 | Precios: `import:precios` lee `.xlsx` (valores crudos) y acepta el tilde `Usar` de la planilla de compras en vez de `TIPO` (tildado=COMPRA, resto=ACTUALIZACION, decisión de J). Con el tilde, las filas del mismo `(producto, proveedor, fecha)` se colapsan —es una foto por mes— y basta un mes tildado para que sea COMPRA. `--controlado` marca la COMPRA más nueva (antes: la fila más nueva, que podía ser una cotización sin tildar) y **solo lo tildado**. Precio `0` pasa a saltearse en vez de guardarse | (este commit) |
 | 2026-07-31 | Compras: clave `(numero, producto_3c, renglon)` (mig. 0016). Un remito puede repetir el mismo producto en varias líneas y la clave vieja las pisaba: 65 renglones / $60,7M perdidos. Con esto el gasto de junio cierra con el informe de J (Lautaro $530.798.232, Fausto $74.153.348, ambos con IVA) | (este commit) |
 | 2026-07-01 | Recuento de stock = tipo `INVENTARIO` (mig. 0015), separado del AJUSTE operativo; lo usan `import:inventario` y el módulo Inventarios. `import:inventario` acepta alias `ARTICULO` para el código | (este commit) |
 | 2026-07-01 | Compras: excluir familias que no son compras reales (SERVICIOS, TRANSPORTE TERCERIZADO, AJUSTE DE SALDO, GASTOS SOCIOS, IMPUESTOS, GASTOS BANCARIOS) del gasto | (este commit) |
