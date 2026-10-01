@@ -24,7 +24,12 @@
 > **Vigía:** `scripts/health-check.sh` corre por cron en el LXC a las 09:30 y manda mail SOLO
 > si hay algo (sync frenado, cron/contenedores caídos, backup local o off-site viejo, área que
 > no cerró la sesión, productos caídos, renglones salteados por productos sin alta en el
-> maestro). Probarlo sin enviar: `pct exec 105 -- /opt/laceleste/scripts/health-check.sh --dry`.
+> maestro, **el proxy SQL de 3c caído y la foto de stock que dejó de entrar**).
+> Probarlo sin enviar: `pct exec 105 -- /opt/laceleste/scripts/health-check.sh --dry`.
+>
+> El chequeo del proxy nació del 01/10/2026: el proxy se cayó el 22/09 y estuvo 9 días muerto
+> sin que nadie se enterara — el stock quedó congelado. Umbral de la foto: `FOTO_STALE_DIAS`
+> (default 2 días; va en días porque la foto no crea movimiento si no hay diferencias).
 >
 > *Pendiente: reescribir el resto de la guía en clave server.*
 
