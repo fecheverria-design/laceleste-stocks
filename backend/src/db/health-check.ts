@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { db, pool } from './client.js';
+import { consultarProxy } from './tresc-proxy.js';
 
 // Vigía de DATOS: corre los chequeos que necesitan la DB y la API del compañero, e imprime
 // los problemas encontrados. NO manda mail: eso lo hace scripts/health-check.sh, que corre
@@ -130,77 +131,142 @@ async function main(): Promise<void> {
     );
   }
 
-  // ── 3) ORIGEN: lo que pasa en la app del compañero ────────────────────────────────
-  const baseUrl = requireEnv('COMPANERO_API_URL').replace(/\/+$/, '');
-  const token = await login(baseUrl, requireEnv('COMPANERO_API_USER'), requireEnv('COMPANERO_API_PASS'));
-  const filas = await fetchTablaIntegral(baseUrl, token, ayer);
-
-  // 3a) Área que cargó sugeridos pero NINGÚN real → no cerró la sesión y ese día no entró
-  //     nada de esa área al stock (regla #2: descontamos por real).
-  const porArea = new Map<string, { sug: number; real: number }>();
-  for (const f of filas) {
-    const a = (f.area ?? '?').trim();
-    const acc = porArea.get(a) ?? { sug: 0, real: 0 };
-    if (aNumero(f.cantidad_abastecer) > 0) acc.sug++;
-    if (aNumero(f.cantidad_abastecer_real) > 0) acc.real++;
-    porArea.set(a, acc);
-  }
-  const sinCerrar = [...porArea.entries()]
-    .filter(([, v]) => v.sug > 0 && v.real === 0)
-    .map(([a, v]) => `${a} (${v.sug} sugerido/s, 0 reales)`);
-  if (sinCerrar.length > 0) {
+  // ── 3) EL PROXY DE 3c: ¿contesta? ¿la foto está entrando? ─────────────────────────
+  // Nace del incidente 2026-10-01: el proxy SQL de 3c se cayó el 22/09 y estuvo NUEVE días
+  // muerto sin que nadie se enterara. El stock quedó congelado (la foto horaria moría en cada
+  // corrida) y lo notó J a ojo, no el vigía. Son DOS chequeos porque fallan distinto: el proxy
+  // puede contestar perfecto y la foto no entrar igual (query rota, depósitos sin lleva_stock,
+  // el script abortando antes de aplicar).
+  const proxyUrl = process.env.TRESC_PROXY_URL?.trim();
+  if (!proxyUrl) {
     problemas.push(
-      `Áreas que NO cargaron NINGÚN real el ${ayer} (no cerraron la sesión → nada de esas áreas entró al stock): ` +
-        `${sinCerrar.join('; ')}.\n  Que guarden la sesión de ese día, o cargá el día del export de 3c (import:movimientos).`,
+      'Falta TRESC_PROXY_URL en el .env: sin eso NO corre nada de 3c (productos, proveedores, ' +
+        'compras ni la foto de stock). Ver .env.example.',
     );
-  }
-
-  // 3b) Producto "caído": venía moviéndose seguido y hace >= DIAS_CAIDO días que no tiene
-  //     real, aunque el compañero LO SIGUE SUGIRIENDO (caso "base de torta" 19-23/07).
-  //     Se saltea si el sync está stale: un bajón global marcaría a todos como caídos.
-  if (!syncStale) {
-    const sugeridos = new Set(
-      filas.filter((f) => aNumero(f.cantidad_abastecer) > 0).map((f) => String(f.codigo_3c ?? '').trim()),
-    );
-    // El corte NO es en días calendario sino en DÍAS CON ACTIVIDAD (fechas en que entró
-    // algún RINT del sync). Contando calendario, un producto que se movió el sábado
-    // figuraba "caído" el martes y la alerta se llenaba de falsos positivos: los fines de
-    // semana y feriados no mueven nada y no significan que el producto se haya caído.
-    const caidosRes = await db.execute<{ producto_3c: string; nombre: string; ultimo: string; dias: number; sin_real: number }>(
-      sql`WITH rint AS (
-            SELECT m.fecha, d.producto_3c
-            FROM movimientos_detalle d
-            JOIN movimientos m ON m.id = d.movimiento_id
-            JOIN tipos_movimiento tm ON tm.id = m.tipo_id
-            WHERE tm.codigo = 'RINT' AND m.estado = 'CONFIRMADO' AND m.observaciones LIKE 'Sync %'
-              AND m.fecha >= CURRENT_DATE - INTERVAL '21 days'
-          ),
-          dias_activos AS (SELECT DISTINCT fecha FROM rint),
-          por_producto AS (
-            SELECT producto_3c, max(fecha) AS ultimo, count(DISTINCT fecha)::int AS dias
-            FROM rint GROUP BY producto_3c HAVING count(DISTINCT fecha) >= 5
-          )
-          SELECT pp.producto_3c, p.nombre, to_char(pp.ultimo, 'YYYY-MM-DD') AS ultimo, pp.dias,
-                 (SELECT count(*)::int FROM dias_activos da WHERE da.fecha > pp.ultimo) AS sin_real
-          FROM por_producto pp
-          JOIN productos p ON p.codigo_3c = pp.producto_3c
-          WHERE (SELECT count(*) FROM dias_activos da WHERE da.fecha > pp.ultimo) >= ${diasCaido}
-          ORDER BY sin_real DESC, p.nombre`,
-    );
-    const relevantes = caidosRes.rows.filter((c) => sugeridos.has(c.producto_3c));
-    if (relevantes.length > 0) {
-      const detalle = relevantes
-        .map(
-          (c) =>
-            `  - ${c.nombre} (${c.producto_3c}): último RINT ${c.ultimo} — ${c.sin_real} día(s) con movimiento desde entonces, y en ninguno entró; movía ${c.dias} de los últimos 21`,
-        )
-        .join('\n');
+  } else {
+    try {
+      // La consulta más barata que existe contra Oracle: si esto vuelve, el camino entero
+      // (DNS, TLS, el servicio del proxy y la conexión a la base de 3c) está sano.
+      await consultarProxy('SELECT 1 FROM DUAL');
+    } catch (e) {
       problemas.push(
-        `Productos que SE CAYERON (venían moviéndose seguido y pasaron >= ${diasCaido} días CON ACTIVIDAD sin real, ` +
-          `pero el compañero los sigue sugiriendo):\n${detalle}\n` +
-          `  Revisá si el área los dejó de cargar (que guarde la sesión) o si realmente dejaron de moverse.`,
+        `El proxy SQL de 3c NO responde (${proxyUrl}): ${e instanceof Error ? e.message : e}\n` +
+          `  Mientras esté caído el stock queda CONGELADO (la foto no entra) y las compras no se actualizan.\n` +
+          `  No se arregla desde acá: el servicio lo levanta quien mantiene el proxy. Si cambió de URL,\n` +
+          `  actualizá TRESC_PROXY_URL en /opt/laceleste/.env y RECREÁ el contenedor (el .env entra por\n` +
+          `  env_file al crearlo, editarlo no alcanza): docker compose -f docker-compose.prod.yml up -d --force-recreate backend\n` +
+          `  ⚠ Las compras entran por una ventana rodante de 14 días: si la caída dura más, el catch-up es\n` +
+          `  sync:3c -- --fuente=compras --dias=<días desde la última compra>.`,
       );
     }
+  }
+
+  // Frescura de la foto. El umbral va en DÍAS y no en horas a propósito: la foto NO crea
+  // movimiento cuando no hay ninguna diferencia contra 3c, así que un rato quieto es normal.
+  // Dos días sin una sola diferencia no lo es.
+  const fotoStaleDias = numEnv('FOTO_STALE_DIAS', 2);
+  const fotoRes = await db.execute<{ ultima: string | null }>(
+    sql`SELECT to_char(max(fecha), 'YYYY-MM-DD') AS ultima FROM movimientos WHERE observaciones LIKE 'Foto 3c%'`,
+  );
+  const ultimaFoto = fotoRes.rows[0]?.ultima ?? null;
+  if (!ultimaFoto) {
+    problemas.push(
+      'No hay NINGUNA foto de stock de 3c en la DB. El stock no lo está manteniendo 3c. ' +
+        'Revisá el cron del LXC (debería tener sync:3c -- --fuente=stock cada hora).',
+    );
+  } else {
+    const edadFoto = diasEntre(ultimaFoto, hoy);
+    if (edadFoto > fotoStaleDias) {
+      problemas.push(
+        `La foto de stock de 3c no está entrando: la última es del ${ultimaFoto} (${edadFoto} día/s atrás, ` +
+          `umbral ${fotoStaleDias}). El stock de la app está congelado en esa fecha.\n` +
+          `  Mirá /var/log/laceleste-sync.log y corré a mano: sync:3c -- --fuente=stock --dry`,
+      );
+    }
+  }
+
+  // SU app se cayó el 04/09 y se llevó puesto al vigía entero: el login tiraba, el script moría
+  // con exit 1 y se perdían los problemas ya detectados arriba (entre ellos, ahora, el del proxy).
+  // Que su caída sea UN problema más de la lista, no el final del chequeo.
+  try {
+    // ── 4) ORIGEN: lo que pasa en la app del compañero ────────────────────────────────
+    const baseUrl = requireEnv('COMPANERO_API_URL').replace(/\/+$/, '');
+    const token = await login(baseUrl, requireEnv('COMPANERO_API_USER'), requireEnv('COMPANERO_API_PASS'));
+    const filas = await fetchTablaIntegral(baseUrl, token, ayer);
+
+    // 4a) Área que cargó sugeridos pero NINGÚN real → no cerró la sesión y ese día no entró
+    //     nada de esa área al stock (regla #2: descontamos por real).
+    const porArea = new Map<string, { sug: number; real: number }>();
+    for (const f of filas) {
+      const a = (f.area ?? '?').trim();
+      const acc = porArea.get(a) ?? { sug: 0, real: 0 };
+      if (aNumero(f.cantidad_abastecer) > 0) acc.sug++;
+      if (aNumero(f.cantidad_abastecer_real) > 0) acc.real++;
+      porArea.set(a, acc);
+    }
+    const sinCerrar = [...porArea.entries()]
+      .filter(([, v]) => v.sug > 0 && v.real === 0)
+      .map(([a, v]) => `${a} (${v.sug} sugerido/s, 0 reales)`);
+    if (sinCerrar.length > 0) {
+      problemas.push(
+        `Áreas que NO cargaron NINGÚN real el ${ayer} (no cerraron la sesión → nada de esas áreas entró al stock): ` +
+          `${sinCerrar.join('; ')}.\n  Que guarden la sesión de ese día, o cargá el día del export de 3c (import:movimientos).`,
+      );
+    }
+
+    // 4b) Producto "caído": venía moviéndose seguido y hace >= DIAS_CAIDO días que no tiene
+    //     real, aunque el compañero LO SIGUE SUGIRIENDO (caso "base de torta" 19-23/07).
+    //     Se saltea si el sync está stale: un bajón global marcaría a todos como caídos.
+    if (!syncStale) {
+      const sugeridos = new Set(
+        filas.filter((f) => aNumero(f.cantidad_abastecer) > 0).map((f) => String(f.codigo_3c ?? '').trim()),
+      );
+      // El corte NO es en días calendario sino en DÍAS CON ACTIVIDAD (fechas en que entró
+      // algún RINT del sync). Contando calendario, un producto que se movió el sábado
+      // figuraba "caído" el martes y la alerta se llenaba de falsos positivos: los fines de
+      // semana y feriados no mueven nada y no significan que el producto se haya caído.
+      const caidosRes = await db.execute<{ producto_3c: string; nombre: string; ultimo: string; dias: number; sin_real: number }>(
+        sql`WITH rint AS (
+              SELECT m.fecha, d.producto_3c
+              FROM movimientos_detalle d
+              JOIN movimientos m ON m.id = d.movimiento_id
+              JOIN tipos_movimiento tm ON tm.id = m.tipo_id
+              WHERE tm.codigo = 'RINT' AND m.estado = 'CONFIRMADO' AND m.observaciones LIKE 'Sync %'
+                AND m.fecha >= CURRENT_DATE - INTERVAL '21 days'
+            ),
+            dias_activos AS (SELECT DISTINCT fecha FROM rint),
+            por_producto AS (
+              SELECT producto_3c, max(fecha) AS ultimo, count(DISTINCT fecha)::int AS dias
+              FROM rint GROUP BY producto_3c HAVING count(DISTINCT fecha) >= 5
+            )
+            SELECT pp.producto_3c, p.nombre, to_char(pp.ultimo, 'YYYY-MM-DD') AS ultimo, pp.dias,
+                   (SELECT count(*)::int FROM dias_activos da WHERE da.fecha > pp.ultimo) AS sin_real
+            FROM por_producto pp
+            JOIN productos p ON p.codigo_3c = pp.producto_3c
+            WHERE (SELECT count(*) FROM dias_activos da WHERE da.fecha > pp.ultimo) >= ${diasCaido}
+            ORDER BY sin_real DESC, p.nombre`,
+      );
+      const relevantes = caidosRes.rows.filter((c) => sugeridos.has(c.producto_3c));
+      if (relevantes.length > 0) {
+        const detalle = relevantes
+          .map(
+            (c) =>
+              `  - ${c.nombre} (${c.producto_3c}): último RINT ${c.ultimo} — ${c.sin_real} día(s) con movimiento desde entonces, y en ninguno entró; movía ${c.dias} de los últimos 21`,
+          )
+          .join('\n');
+        problemas.push(
+          `Productos que SE CAYERON (venían moviéndose seguido y pasaron >= ${diasCaido} días CON ACTIVIDAD sin real, ` +
+            `pero el compañero los sigue sugiriendo):\n${detalle}\n` +
+            `  Revisá si el área los dejó de cargar (que guarde la sesión) o si realmente dejaron de moverse.`,
+        );
+      }
+    }
+  } catch (e) {
+    problemas.push(
+      `No se pudo chequear la app del compañero: ${e instanceof Error ? e.message : e}\n` +
+        `  Queda sin saberse si algún área no cerró la sesión y si hay productos caídos.\n` +
+        `  Si su app cambió de URL, actualizá COMPANERO_API_URL en el .env y recreá el contenedor.`,
+    );
   }
 
   if (problemas.length === 0) {
