@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   deletePrecio,
   getControlPrecios,
+  getFichaPrecioProducto,
   getHistorialPrecios,
   getPrecios,
   getPreciosCsv,
@@ -21,6 +22,8 @@ preciosRouter.get('/precios/control', requireAuth, getControlPrecios);
 preciosRouter.get('/precios/export.csv', requireAuth, getPreciosCsv);
 preciosRouter.get('/valorizacion', requireAuth, getValorizacion);
 preciosRouter.get('/productos/:codigo/precios', requireAuth, getHistorialPrecios);
+// La ficha de ESE precio: la misma regla del catálogo, resuelta contra la fila del producto.
+preciosRouter.get('/productos/:codigo/precios/ficha', requireAuth, getFichaPrecioProducto);
 preciosRouter.post('/precios', requireAuth, postPrecio);
 preciosRouter.put('/precios/:id', requireAuth, putPrecio);
 // Marcar/desmarcar EL precio del producto (independiente del tipo de la fila).

@@ -13,6 +13,7 @@ import {
   crearPrecio,
   editarPrecio,
   eliminarPrecio,
+  obtenerFichaPrecio,
   obtenerHistorialPrecios,
   obtenerPreciosVigentes,
   obtenerValorizacionStock,
@@ -94,6 +95,15 @@ export async function getHistorialPrecios(req: Request, res: Response): Promise<
     throw badRequest('VALIDACION', z.prettifyError(parsed.error));
   }
   res.status(200).json(await obtenerHistorialPrecios(parsed.data.codigo));
+}
+
+// GET /api/productos/:codigo/precios/ficha — de dónde sale EL precio de ese producto.
+export async function getFichaPrecioProducto(req: Request, res: Response): Promise<void> {
+  const parsed = ProductoParamSchema.safeParse(req.params);
+  if (!parsed.success) {
+    throw badRequest('VALIDACION', z.prettifyError(parsed.error));
+  }
+  res.status(200).json(await obtenerFichaPrecio(parsed.data.codigo));
 }
 
 // POST /api/precios — cargar un precio nuevo (con fecha). Cualquier usuario logueado.

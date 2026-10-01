@@ -124,9 +124,23 @@ export function fichaGasto(opts: {
  * Ficha del PRECIO que la app usa para un producto. Explica la prelación de
  * `repositories/precio-vigente.ts`, que es la regla que más se olvida y la que más discute
  * compras cuando un número no le cierra.
+ *
+ * Sirve en dos modos, con el mismo texto de la regla:
+ * - **genérico** (catálogo "Cómo se calcula"): sin producto, explica la prelación a secas;
+ * - **concreto** (una fila de la hoja de Precios): con `producto` y `descartados`, dice cuál
+ *   de todos los precios cargados ganó y cuántos quedaron abajo.
  */
-export function fichaPrecio(opts: { controlado: boolean; tipo: string | null; fecha: string | null; proveedor: string | null }): Ficha {
-  const { controlado, tipo, fecha, proveedor } = opts;
+export function fichaPrecio(opts: {
+  controlado: boolean;
+  tipo: string | null;
+  fecha: string | null;
+  proveedor: string | null;
+  /** Nombre del producto, cuando la ficha explica una fila concreta y no la regla en general. */
+  producto?: string;
+  /** Cuántos precios más tiene cargados el producto (los que perdieron la prelación). */
+  descartados?: number;
+}): Ficha {
+  const { controlado, tipo, fecha, proveedor, producto, descartados } = opts;
   const cual = controlado
     ? 'el precio CONTROLADO, marcado a mano por compras'
     : tipo === 'COMPRA'
@@ -136,7 +150,7 @@ export function fichaPrecio(opts: { controlado: boolean; tipo: string | null; fe
         : 'ninguno: el producto no tiene precio cargado';
 
   return {
-    titulo: 'De dónde sale este precio',
+    titulo: producto ? `De dónde sale el precio de ${producto}` : 'De dónde sale este precio',
     pasos: [
       {
         titulo: 'Cuál se está usando',
@@ -144,7 +158,11 @@ export function fichaPrecio(opts: { controlado: boolean; tipo: string | null; fe
           `Se está usando ${cual}` +
           (fecha ? `, del ${fecha}` : '') +
           (proveedor ? `, de ${proveedor}` : '') +
-          '.',
+          '.' +
+          (descartados !== undefined && descartados > 0
+            ? ` El producto tiene ${descartados + 1} precio(s) cargado(s) en total: los otros ` +
+              `${descartados} quedan como historial y no se usan para valorizar.`
+            : ''),
       },
       {
         titulo: 'La prelación, siempre en este orden',

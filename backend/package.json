@@ -19,6 +19,7 @@
     "db:reset": "tsx src/db/reset.ts",
     "db:stock-en": "tsx src/db/stock-en.ts",
     "usuarios": "tsx src/db/usuarios.ts",
+    "ubicaciones": "tsx src/db/ubicaciones.ts",
     "import:productos": "tsx src/db/import-productos.ts",
     "import:proveedores": "tsx src/db/import-proveedores.ts",
     "import:ubicaciones": "tsx src/db/import-ubicaciones.ts",
