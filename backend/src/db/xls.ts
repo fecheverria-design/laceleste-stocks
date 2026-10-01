@@ -21,6 +21,13 @@ const MAXIMO_PREAMBULO = 25;
 
 function limpiar(v: unknown): string {
   if (v === null || v === undefined) return '';
+  // En modo crudo las fechas llegan como Date: se emiten dd/mm/yyyy, que es lo que
+  // esperan los importadores (igual que las formateadas de Excel).
+  if (v instanceof Date) {
+    const dd = String(v.getDate()).padStart(2, '0');
+    const mm = String(v.getMonth() + 1).padStart(2, '0');
+    return `${dd}/${mm}/${v.getFullYear()}`;
+  }
   return String(v).trim();
 }
 
@@ -31,17 +38,23 @@ function limpiar(v: unknown): string {
  * @param columnaClave nombre de una columna que TIENE que estar en el encabezado. Sirve de
  *   ancla para no confundir una fila del preámbulo con los encabezados. Si no se pasa, se
  *   toma la primera fila con al menos `MINIMO_COLUMNAS_ENCABEZADO` celdas con texto.
+ * @param opts.crudo lee los valores como los guardó Excel en vez de como los MUESTRA. Hace
+ *   falta cuando el archivo trae plata: una celda con formato moneda se muestra "$5,832" y
+ *   ahí ya se perdieron los centavos (el valor real es 5831.83). Las fechas siguen saliendo
+ *   dd/mm/yyyy y los booleanos TRUE/FALSE.
  */
-export function leerXls(archivo: string, columnaClave?: string): string[][] {
-  const wb = readFile(archivo, { cellDates: false });
+export function leerXls(archivo: string, columnaClave?: string, opts: { crudo?: boolean } = {}): string[][] {
+  const crudo = opts.crudo === true;
+  const wb = readFile(archivo, { cellDates: crudo });
   const nombreHoja = wb.SheetNames[0];
   if (nombreHoja === undefined) throw new Error(`El archivo ${archivo} no tiene ninguna hoja.`);
   const hoja = wb.Sheets[nombreHoja];
   if (hoja === undefined) throw new Error(`No se pudo leer la hoja "${nombreHoja}" de ${archivo}.`);
 
   // raw:false → los valores vienen ya formateados como los muestra Excel (las fechas salen
-  // dd/mm/yyyy, que es lo que esperan los importadores).
-  const crudas = utils.sheet_to_json<unknown[]>(hoja, { header: 1, raw: false, defval: null });
+  // dd/mm/yyyy, que es lo que esperan los importadores). Con `crudo` se lee el valor real:
+  // ver el porqué en el doc de arriba.
+  const crudas = utils.sheet_to_json<unknown[]>(hoja, { header: 1, raw: crudo, defval: null });
 
   let iEncabezado = -1;
   for (let i = 0; i < Math.min(crudas.length, MAXIMO_PREAMBULO); i++) {

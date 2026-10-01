@@ -1,4 +1,5 @@
 import { conflict, notFound } from '../domain/errors.js';
+import { fichaPrecio, type Ficha } from '../domain/procedencia.js';
 import { obtenerValorizacion, type Valorizacion } from '../repositories/valorizacion.repository.js';
 import type { ControlarPrecioInput, CrearPrecioInput, EditarPrecioInput } from '../domain/precios.schema.js';
 import {
@@ -12,6 +13,7 @@ import {
   listarPreciosVigentes,
   marcarControlado,
   obtenerPrecioPorId,
+  precioVigenteDe,
   type FilaPrecioHistorial,
   type FilaPrecioVigente,
   type PrecioRow,
@@ -26,6 +28,9 @@ function hoyYmd(): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+// "2026-09-01" → "01/09/2026" (la ficha la lee gente, no una máquina).
+const fechaAr = (ymd: string): string => `${ymd.slice(8, 10)}/${ymd.slice(5, 7)}/${ymd.slice(0, 4)}`;
+
 // GET — precio vigente por producto (incluye productos sin precio cargado).
 export const obtenerPreciosVigentes = (): Promise<FilaPrecioVigente[]> => listarPreciosVigentes();
 
@@ -35,6 +40,30 @@ export async function obtenerHistorialPrecios(producto3c: string): Promise<FilaP
     throw notFound('PRODUCTO_NO_ENCONTRADO', `No existe el producto ${producto3c}`);
   }
   return listarHistorialPrecios(producto3c);
+}
+
+// GET — la ficha "de dónde sale este precio", pero del producto concreto que se está mirando.
+//
+// La misma ficha que el catálogo muestra en general, resuelta contra la fila real: cuál de
+// todos sus precios ganó la prelación, de qué fecha y de qué proveedor. El texto lo arma el
+// dominio; acá solo se juntan los datos (regla de oro de procedencia.ts: nada escrito a mano).
+export async function obtenerFichaPrecio(producto3c: string): Promise<Ficha> {
+  if (!(await existeProducto(producto3c))) {
+    throw notFound('PRODUCTO_NO_ENCONTRADO', `No existe el producto ${producto3c}`);
+  }
+  const [vigente, historial] = await Promise.all([
+    precioVigenteDe(producto3c),
+    listarHistorialPrecios(producto3c),
+  ]);
+  return fichaPrecio({
+    controlado: vigente?.controlado === true,
+    tipo: vigente?.tipo ?? null,
+    fecha: vigente?.vigente_desde ? fechaAr(vigente.vigente_desde) : null,
+    proveedor: vigente?.proveedor_nombre ?? null,
+    producto: vigente?.producto_nombre,
+    // Solo tiene sentido contar los que perdieron si hubo uno que ganó.
+    descartados: vigente?.precio_id === null || vigente === undefined ? undefined : historial.length - 1,
+  });
 }
 
 // POST — cargar un precio nuevo (con fecha de vigencia). Audita al usuario.

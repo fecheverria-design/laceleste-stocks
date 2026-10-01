@@ -2,8 +2,9 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost, apiPut } from '../../shared/api/client';
 import { CLS_BOTON, CLS_INPUT } from '../../shared/components/tabla';
+import { FichaPlegable } from '../../shared/components/ficha';
 import { EncabezadoPagina, EtiquetaFamilia, Panel, Tarjeta, Vacio } from '../../shared/components/ui';
-import type { AlertaPrecio, ControlPrecios, FilaControlPrecio, TipoPrecio } from '../../shared/api/types';
+import type { AlertaPrecio, ControlPrecios, Ficha, FilaControlPrecio, TipoPrecio } from '../../shared/api/types';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Control de precios — la hoja de trabajo del área de compras.
@@ -299,6 +300,7 @@ function DetalleProducto({ item }: { item: FilaControlPrecio }) {
   const invalidar = () =>
     Promise.all([
       queryClient.invalidateQueries({ queryKey: ['control-precios'] }),
+      queryClient.invalidateQueries({ queryKey: ['precios-ficha', item.producto_3c] }),
       queryClient.invalidateQueries({ queryKey: ['precios'] }),
       queryClient.invalidateQueries({ queryKey: ['informe-precios'] }),
     ]);
@@ -306,6 +308,13 @@ function DetalleProducto({ item }: { item: FilaControlPrecio }) {
   const proveedores = useQuery({
     queryKey: ['proveedores-lista'],
     queryFn: () => apiGet<Array<{ id: number; nombre: string }>>('/api/proveedores'),
+  });
+
+  // La misma ficha que la hoja de Precios: por qué de todas estas cotizaciones manda una.
+  // Es la discusión de todos los días acá adentro, así que va a mano.
+  const ficha = useQuery({
+    queryKey: ['precios-ficha', item.producto_3c],
+    queryFn: () => apiGet<Ficha>(`/api/productos/${encodeURIComponent(item.producto_3c)}/precios/ficha`),
   });
 
   const [precio, setPrecio] = useState('');
@@ -358,6 +367,8 @@ function DetalleProducto({ item }: { item: FilaControlPrecio }) {
 
   return (
     <div className="space-y-4">
+      <FichaPlegable ficha={ficha.data} cargando={ficha.isLoading} resumen="¿De dónde sale este precio?" />
+
       {item.salto && (
         <p className="rounded-lg bg-fuchsia-50 px-3 py-2 text-xs text-fuchsia-800 ring-1 ring-inset ring-fuchsia-200">
           En {mesLargo(item.salto.mes)} el precio pasó de {ars.format(item.salto.de)} a {ars.format(item.salto.a)} (
