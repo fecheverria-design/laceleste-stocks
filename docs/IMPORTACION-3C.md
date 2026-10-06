@@ -131,8 +131,8 @@ verdad del stock (Opción A, decisión de J 2026-09-04) y esa vista **se refresc
 - Es **autoritativa**: lo que la app tiene y la foto no lista queda en 0. Por eso aborta si la
   foto trae menos de 500 filas o si no queda ninguna fila aplicable — una lectura cortada
   borraría stock.
-- **No está en las fuentes por defecto**: `npm run sync:3c` trae productos, proveedores y
-  compras. La foto se pide explícita (`--fuente=stock`) — y así corre en el cron horario.
+- **No está en las fuentes por defecto**: `npm run sync:3c` trae productos, proveedores,
+  compras y precios. La foto se pide explícita (`--fuente=stock`) — y así corre en el cron horario.
 - Los movimientos que genera llevan **`Foto 3c <fecha>`** en observaciones (el conteo físico a
   mano dice `Inventario <fecha>`), para distinguir en la hoja de Movimientos lo que vino de 3c
   de lo que vino de la app del compañero. Decisión de J 2026-09-08: prefiere verlos marcados
@@ -141,6 +141,25 @@ verdad del stock (Opción A, decisión de J 2026-09-04) y esa vista **se refresc
 ⚠ Sigue valiendo el modo de falla de toda foto: si la app tiene una recepción que 3c todavía no
 cargó, la foto la borra. Bajo Opción A eso es *la decisión* (3c manda), pero si el número
 aparece raro, ese es el primer sospechoso.
+
+## `sync:3c -- --fuente=precios [--dry]` — el precio de lista de 3c, 1×día
+
+Lee `V_PRECIOS_LA_CELESTE`: una fila por (producto, proveedor) con el precio de lista y su
+`ULTIMA_ACTUALIZACION`. 3c pisa esa foto y **no guarda histórico**, así que traerla entera todos
+los días (va en las fuentes por defecto → cron diario de las 7:45 ART) arma la serie sola: cada
+fecha nueva es una fila más. Código en `backend/src/db/precios-3c.ts`.
+
+- **Todo entra como `ACTUALIZACION`**, nunca `COMPRA` (solo el tilde de J es compra). En la
+  prelación solo manda para productos sin compra ni controlado: al 06/10 eran ~560, casi todos
+  repuestos y herramientas que antes no tenían ningún precio.
+- **No pisa una fila controlada**, ni siquiera si compras la marca mientras corre el sync.
+- **Misma fecha, otro importe**: si la fecha es de los últimos 7 días gana la foto (3c corrigió
+  el precio); si es más vieja, se deja como está y se cuenta como "historial, no se toca". Esa
+  fila vino de la planilla o es una compra degradada por el tilde, y lo que se pagó es mejor dato
+  que la lista. Al 06/10 eran 48, casi todos el mismo importe redondeado.
+- Precio `0` se saltea (~300 filas de la vista). No da de alta productos ni proveedores: eso es
+  de las fuentes que corren antes; lo que no matchea se avisa.
+- Aborta si la vista trae menos de 1.000 filas (hoy trae 4.258).
 
 ---
 
@@ -296,6 +315,7 @@ y `count(*) WHERE cantidad < 0` = 0. **Hacer `pg_dump` antes.**
 
 | Fecha | Cambio | Commit |
 |---|---|---|
+| 2026-10-06 | Precios: nueva fuente `precios` de `sync:3c` desde `V_PRECIOS_LA_CELESTE`, en las fuentes por defecto (1×día). Entra como ACTUALIZACION, no pisa controlados ni historial de más de 7 días. Primera corrida local: 3.283 nuevas, 587 ya estaban | (este commit) |
 | 2026-09-10 | Precios: **solo el tilde es COMPRA** — al importar la planilla, toda compra sin tilde (incluido el histórico de 3c) pasa a ACTUALIZACION. Decisión de J: *"solo tomamos los true como que es compra, el resto son actualizaciones; todo informe o gráfico se debe mostrar solo con los true"*. Lo destapó una compra de $41.507,80 en BOLSA SULFITO Nº6 que nunca existió. 3.940+6.661 filas degradadas; COMPRA quedó en 1.636 filas de 574 productos = exactamente lo tildado | (este commit) |
 | 2026-09-10 | Precios: `import:precios` lee `.xlsx` (valores crudos) y acepta el tilde `Usar` de la planilla de compras en vez de `TIPO` (tildado=COMPRA, resto=ACTUALIZACION, decisión de J). Con el tilde, las filas del mismo `(producto, proveedor, fecha)` se colapsan —es una foto por mes— y basta un mes tildado para que sea COMPRA. `--controlado` marca la COMPRA más nueva (antes: la fila más nueva, que podía ser una cotización sin tildar) y **solo lo tildado**. Precio `0` pasa a saltearse en vez de guardarse | (este commit) |
 | 2026-07-31 | Compras: clave `(numero, producto_3c, renglon)` (mig. 0016). Un remito puede repetir el mismo producto en varias líneas y la clave vieja las pisaba: 65 renglones / $60,7M perdidos. Con esto el gasto de junio cierra con el informe de J (Lautaro $530.798.232, Fausto $74.153.348, ambos con IVA) | (este commit) |

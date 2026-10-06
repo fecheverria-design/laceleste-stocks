@@ -7,6 +7,8 @@ import { persistirCompras } from './import-compras.js';
 import { aplicarInventario } from './import-inventario.js';
 import { importarProductos } from './import-productos.js';
 import { importarProveedores } from './import-proveedores.js';
+import { persistirPrecios, planDesdeFoto, queryPrecios } from './precios-3c.js';
+import { resolverUsuarioIntegracion } from '../repositories/movimientos.repository.js';
 
 // Sincroniza datos desde 3c EN VIVO, reemplazando los exports CSV que se bajaban a mano de
 // Firefox. 3c corre sobre Oracle y NO tiene API REST; se lee por el proxy SQL de solo lectura
@@ -20,7 +22,8 @@ import { importarProveedores } from './import-proveedores.js';
 //   proveedores → proxy, vista LC_V_PROVEEDORES (el maestro de proveedores) → import:proveedores
 //   compras     → proxy, vista V_COMP_PRECIOS_CPRA (ventana rodante de N días) → import:compras
 //   stock       → proxy, vista V_LACELESTE_STOCK (la FOTO del stock de 3c) → import:inventario
-//   [pendiente] precios → servlet SqlToExcel (.xls); falta el lector de .xls.
+//   precios     → proxy, vista V_PRECIOS_LA_CELESTE (foto del precio de lista, 1×día arma la
+//                 serie que 3c no guarda; entra como ACTUALIZACION) → ver precios-3c.ts
 //   movimientos → NO se automatiza: J los importa a mano 1× por semana (decisión 2026-09-08).
 //
 // Idempotente: correr cada hora re-trae la ventana solapada y NO duplica (compras upsertea por
@@ -39,9 +42,9 @@ import { importarProveedores } from './import-proveedores.js';
 
 // El orden importa: productos primero, porque compras y la foto de stock necesitan que el
 // maestro tenga el código (ninguna de las dos inventa productos).
-const FUENTES_DISPONIBLES = ['productos', 'proveedores', 'compras', 'stock'] as const;
+const FUENTES_DISPONIBLES = ['productos', 'proveedores', 'compras', 'precios', 'stock'] as const;
 type Fuente = (typeof FUENTES_DISPONIBLES)[number];
-const FUENTES_POR_DEFECTO: Fuente[] = ['productos', 'proveedores', 'compras'];
+const FUENTES_POR_DEFECTO: Fuente[] = ['productos', 'proveedores', 'compras', 'precios'];
 
 interface Args {
   dry: boolean;
@@ -212,6 +215,43 @@ async function syncCompras(dias: number, dry: boolean): Promise<void> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// PRECIOS — la foto del precio de lista (V_PRECIOS_LA_CELESTE). Toda la lógica está en
+// precios-3c.ts; acá solo se trae y se informa. Al 2026-10-06 la vista trae 4.258 filas.
+const MINIMO_FILAS_PRECIOS = 1000;
+
+async function syncPrecios(dry: boolean): Promise<void> {
+  console.log(`▶ Precios 3c ${dry ? '(DRY-RUN) ' : ''}— foto V_PRECIOS_LA_CELESTE (como ACTUALIZACION)`);
+  const filas = await consultarProxy(queryPrecios());
+  if (filas.length - 1 < MINIMO_FILAS_PRECIOS) {
+    throw new Error(
+      `La foto de precios trajo solo ${filas.length - 1} fila(s) (mínimo esperado ${MINIMO_FILAS_PRECIOS}): se aborta.`,
+    );
+  }
+  const plan = await planDesdeFoto(filas);
+  console.log(
+    `  Foto: ${plan.filas} fila(s) · sin precio: ${plan.saltadas} · nuevas: ${plan.nuevas} · cambian: ${plan.cambian} ` +
+      `· ya estaban: ${plan.iguales} · controladas (no se tocan): ${plan.controladas} ` +
+      `· otro importe en fecha vieja (historial, no se toca): ${plan.difierenHistorial}`,
+  );
+  if (plan.sinProducto.size > 0) {
+    console.log(`  ⚠ ${plan.sinProducto.size} producto(s) sin alta en el maestro: ${[...plan.sinProducto].slice(0, 20).join(', ')}`);
+  }
+  if (plan.sinProveedor.size > 0) {
+    console.log(`  ⚠ ${plan.sinProveedor.size} proveedor(es) sin alta: ${[...plan.sinProveedor].slice(0, 20).join(', ')}`);
+  }
+  if (dry) {
+    for (const f of plan.aEscribir.slice(0, 5)) {
+      console.log(`    [dry] ${f.vigenteDesde} · ${f.producto3c} · prov ${f.proveedorId} · $${f.precio}`);
+    }
+    return;
+  }
+  const usuarioId = await resolverUsuarioIntegracion();
+  if (usuarioId === undefined) throw new Error('No existe el usuario de integración (corré: npm run db:seed).');
+  const escritas = await persistirPrecios(plan, usuarioId);
+  console.log(`  ✔ ${escritas} precio(s) de lista escritos.`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // STOCK — la FOTO de 3c (V_LACELESTE_STOCK). 3c es la fuente de verdad del stock
 // (Opción A, decisión de J 2026-09-04): la foto se aplica como RECUENTO y deja el stock
 // parado exacto en lo que dice 3c. Se reusa aplicarInventario() → mismo camino que el
@@ -300,6 +340,7 @@ async function main(): Promise<void> {
     if (f === 'productos') await syncProductos(dry);
     if (f === 'proveedores') await syncProveedores(dry);
     if (f === 'compras') await syncCompras(dias, dry);
+    if (f === 'precios') await syncPrecios(dry);
     if (f === 'stock') await syncStock(dry);
   }
   console.log(`\n${dry ? 'DRY-RUN — nada se escribió.' : '✔ Sync 3c completo.'}`);
